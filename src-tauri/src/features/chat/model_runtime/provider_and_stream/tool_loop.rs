@@ -411,6 +411,7 @@ async fn run_genai_tool_loop(
         adapter_kind,
         true,
         true,
+        Some(chat_session_key),
     );
 
     let genai_tools = runtime_tool_definitions_for_genai(&tool_assembly.tool_definitions, adapter_kind).await?;
@@ -1076,6 +1077,7 @@ async fn run_genai_tool_loop_non_stream(
         adapter_kind,
         true,
         true,
+        Some(chat_session_key),
     );
 
     let genai_tools = runtime_tool_definitions_for_genai(&tool_assembly.tool_definitions, adapter_kind).await?;
