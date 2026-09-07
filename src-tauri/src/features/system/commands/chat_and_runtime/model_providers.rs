@@ -234,6 +234,7 @@ enum ModelRefreshStrategy {
 
 fn codex_builtin_models() -> Vec<String> {
     vec![
+        "gpt-6-astra".to_string(),
         "gpt-5.6-sol".to_string(),
         "gpt-5.6-terra".to_string(),
         "gpt-5.6-luna".to_string(),
@@ -351,7 +352,8 @@ async fn fetch_models_genai(
     }
     let client = genai::Client::builder()
         .with_adapter_kind(adapter_kind)
-        .build();
+        .build()
+        .map_err(|err| format!("构建 genai 客户端失败: {err}"))?;
     let mut models = tokio::time::timeout(
         std::time::Duration::from_secs(20),
         client.all_model_names(adapter_kind, provider_config),
