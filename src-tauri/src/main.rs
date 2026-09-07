@@ -96,6 +96,7 @@ include!("features/skill.rs");
 include!("features/goal.rs");
 include!("features/task.rs");
 include!("features/delegate.rs");
+include!("features/monitor_events.rs");
 
 include!("features/system/commands.rs");
 
