@@ -1300,6 +1300,8 @@ fn main() {
             get_unarchived_conversation_message_by_id,
             list_delegate_conversations,
             list_conversation_delegate_statuses,
+            list_conversation_background_shell_tasks,
+            terminate_conversation_background_shell_task,
             abort_delegate_conversation,
             get_delegate_conversation_messages,
             get_delegate_conversation_block_page,
