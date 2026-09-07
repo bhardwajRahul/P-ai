@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-09-05T13:53:33.498Z",
-  "latestVersion": "v0.83.0",
+  "generatedAt": "2026-09-07T18:45:36.839Z",
+  "latestVersion": "v0.84.0",
   "releases": [
+    {
+      "version": "v0.84.0",
+      "path": "docs/changelog/releases/v0.84.0.md",
+      "summary": "后台任务监控面板：AI 启动的后台命令可以在侧边栏实时查看运行状态、持续时长和输出进展。"
+    },
     {
       "version": "v0.83.0",
       "path": "docs/changelog/releases/v0.83.0.md",
