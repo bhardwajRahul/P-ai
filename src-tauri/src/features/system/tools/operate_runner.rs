@@ -15,20 +15,49 @@ async fn run_operate_tool(
     let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
         .map_err(|err| DesktopToolError::internal_error(format!("创建 Enigo 失败：{err}")))?;
     let mut steps = Vec::<DesktopScriptStepResult>::new();
+    let mut failure: Option<OperateFailure> = None;
     let mut latest_screenshot: Option<LatestScreenshotInfo> = None;
     let mut image_mime = None;
     let mut image_base64 = None;
     let mut width = None;
     let mut height = None;
 
+    // 步骤失败即记录失败位置并停止后续步骤，已完成的步骤仍然返回（D1）
+    macro_rules! run_step {
+        ($line:expr, $call:expr) => {
+            match $call.await {
+                Ok(value) => value,
+                Err(err) => {
+                    failure = Some(OperateFailure { line: $line, message: err.message, focus_failed: None });
+                    break;
+                }
+            }
+        };
+    }
+    // 声明了 target 的前台动作，执行前按 focus 策略处理目标窗口（C1/C2/C3）
+    macro_rules! ensure_foreground {
+        ($line:expr, $target:expr, $focus:expr) => {
+            match apply_foreground_policy(&$target, $focus).await {
+                Ok(note) => note,
+                Err(block) => {
+                    failure = Some(OperateFailure { line: $line, message: block.message, focus_failed: block.focus_failed });
+                    break;
+                }
+            }
+        };
+    }
+    let note_suffix = |note: Option<String>| note.map(|text| format!("，{text}")).unwrap_or_default();
+
     for action in actions {
         match action {
-            DesktopScriptAction::MouseClick { line, button, target, repeat, delay, pre_delay, press } => {
-                execute_mouse_click(&mut enigo, button, &target, repeat, delay, pre_delay, press).await?;
+            DesktopScriptAction::MouseClick { line, button, target, monitor, repeat, delay, pre_delay, press, window_target, focus } => {
+                let focus_note = ensure_foreground!(line, window_target, focus);
+                run_step!(line, execute_mouse_click(&mut enigo, button, &target, monitor, repeat, delay, pre_delay, press));
+                let hit_note = mouse_hit_note(&target, monitor);
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Mouse,
-                    summary: format!("mouse click completed, repeat={repeat}"),
+                    summary: format!("mouse click completed, repeat={repeat}{}{hit_note}", note_suffix(focus_note)),
                     ok: true,
                     saved_path: None,
                 };
@@ -38,12 +67,29 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::MouseMove { line, target, pre_delay } => {
-                execute_mouse_move(&mut enigo, &target, pre_delay).await?;
+            DesktopScriptAction::MouseDrag { line, button, from, to, monitor, duration, pre_delay, window_target, focus } => {
+                let focus_note = ensure_foreground!(line, window_target, focus);
+                run_step!(line, execute_mouse_drag(&mut enigo, button, &from, &to, monitor, duration, pre_delay));
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Mouse,
-                    summary: "mouse move completed".to_string(),
+                    summary: format!("mouse drag completed{}", note_suffix(focus_note)),
+                    ok: true,
+                    saved_path: None,
+                };
+                runtime_log_info(format!(
+                    "[桌面脚本] 步骤完成，任务=run_operate_tool，line={}，kind=MouseDrag，summary={}",
+                    line, step.summary
+                ));
+                steps.push(step);
+            }
+            DesktopScriptAction::MouseMove { line, target, monitor, pre_delay, window_target, focus } => {
+                let focus_note = ensure_foreground!(line, window_target, focus);
+                run_step!(line, execute_mouse_move(&mut enigo, &target, monitor, pre_delay));
+                let step = DesktopScriptStepResult {
+                    line,
+                    kind: DesktopScriptStepKind::Mouse,
+                    summary: format!("mouse move completed{}", note_suffix(focus_note)),
                     ok: true,
                     saved_path: None,
                 };
@@ -53,12 +99,13 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::MouseScroll { line, direction, repeat, delay, pre_delay } => {
-                execute_mouse_scroll(&mut enigo, direction, repeat, delay, pre_delay).await?;
+            DesktopScriptAction::MouseScroll { line, direction, repeat, delay, pre_delay, window_target, focus } => {
+                let focus_note = ensure_foreground!(line, window_target, focus);
+                run_step!(line, execute_mouse_scroll(&mut enigo, direction, repeat, delay, pre_delay));
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Mouse,
-                    summary: format!("mouse scroll completed, repeat={repeat}"),
+                    summary: format!("mouse scroll completed, repeat={repeat}{}", note_suffix(focus_note)),
                     ok: true,
                     saved_path: None,
                 };
@@ -69,7 +116,7 @@ async fn run_operate_tool(
                 steps.push(step);
             }
             DesktopScriptAction::App { line, window_id, action, post_delay } => {
-                let (verb, method, extra) = execute_app_action(window_id, action, post_delay).await?;
+                let (verb, method, extra) = run_step!(line, execute_app_action(window_id, action, post_delay));
                 let extra_text = extra.map(|e| format!(", {e}")).unwrap_or_default();
                 let step = DesktopScriptStepResult {
                     line,
@@ -84,12 +131,13 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::Key { line, keys, repeat, delay, pre_delay, press } => {
-                execute_key_action(&mut enigo, &keys, line, repeat, delay, pre_delay, press).await?;
+            DesktopScriptAction::Key { line, keys, repeat, delay, pre_delay, press, window_target, focus } => {
+                let focus_note = ensure_foreground!(line, window_target, focus);
+                run_step!(line, execute_key_action(&mut enigo, &keys, line, repeat, delay, pre_delay, press));
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Key,
-                    summary: format!("key action completed, combo={}, repeat={repeat}", keys.join("+")),
+                    summary: format!("key action completed, combo={}, repeat={repeat}{}", keys.join("+"), note_suffix(focus_note)),
                     ok: true,
                     saved_path: None,
                 };
@@ -99,12 +147,13 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::Text { line, text, repeat, delay, pre_delay } => {
-                execute_text_action(&mut enigo, &text, repeat, delay, pre_delay).await?;
+            DesktopScriptAction::Text { line, text, repeat, delay, pre_delay, window_target, focus } => {
+                let focus_note = ensure_foreground!(line, window_target, focus);
+                run_step!(line, execute_text_action(&mut enigo, &text, repeat, delay, pre_delay));
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Text,
-                    summary: format!("text input completed, chars={}, repeat={repeat}", text.chars().count()),
+                    summary: format!("text input completed, chars={}, repeat={repeat}{}", text.chars().count(), note_suffix(focus_note)),
                     ok: true,
                     saved_path: None,
                 };
@@ -131,7 +180,7 @@ async fn run_operate_tool(
             }
             DesktopScriptAction::Screenshot { line, mode, save_path, quality, elements } => {
                 let (result, mode_name, ui_tree) =
-                    execute_screenshot_action(&mode, save_path, quality, screenshots_root, include_base64, elements).await?;
+                    run_step!(line, execute_screenshot_action(&mode, save_path, quality, screenshots_root, include_base64, elements));
                 let tree_summary = match &ui_tree {
                     Some(elems) if elems.is_empty() => {
                         if cfg!(target_os = "windows") {
@@ -171,9 +220,12 @@ async fn run_operate_tool(
     }
 
     let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    let ok = failure.is_none();
     runtime_log_info(format!(
-        "[桌面脚本] 完成，任务=run_operate_tool，executed_count={}，elapsed_ms={}，latest_screenshot={}，image_mime={}，has_image_base64={}，width={}，height={}",
+        "[桌面脚本] {}，任务=run_operate_tool，executed_count={}，failed_line={}，elapsed_ms={}，latest_screenshot={}，image_mime={}，has_image_base64={}，width={}，height={}",
+        if ok { "完成" } else { "中断" },
         steps.len(),
+        failure.as_ref().map(|item| item.line.to_string()).unwrap_or_else(|| "-".to_string()),
         elapsed_ms,
         latest_screenshot
             .as_ref()
@@ -196,10 +248,11 @@ async fn run_operate_tool(
     ));
 
     Ok(OperateResponse {
-        ok: true,
+        ok,
         executed_count: steps.len(),
         elapsed_ms,
         steps,
+        failure,
         latest_screenshot,
         image_mime,
         image_base64,
@@ -269,6 +322,142 @@ mod operate_tool_tests {
             }
             _ => panic!("expected mouse move"),
         }
+    }
+
+    #[test]
+    fn parse_mouse_drag_script() {
+        match parse_single("mouse left drag @0.10,0.20 @0.80,0.90") {
+            DesktopScriptAction::MouseDrag { button, from, to, duration, .. } => {
+                assert_eq!(button, OperateMouseButton::Left);
+                assert!((from.x - 0.10).abs() < f64::EPSILON);
+                assert!((from.y - 0.20).abs() < f64::EPSILON);
+                assert!((to.x - 0.80).abs() < f64::EPSILON);
+                assert!((to.y - 0.90).abs() < f64::EPSILON);
+                assert!(duration.is_none());
+            }
+            _ => panic!("expected mouse drag"),
+        }
+    }
+
+    #[test]
+    fn parse_mouse_drag_with_duration() {
+        match parse_single("mouse right drag @0.0,0.0 @1.0,1.0 duration=0.4 pre_delay=0.1") {
+            DesktopScriptAction::MouseDrag { button, duration, pre_delay, .. } => {
+                assert_eq!(button, OperateMouseButton::Right);
+                assert_eq!(duration, Some(std::time::Duration::from_secs_f64(0.4)));
+                assert_eq!(pre_delay, std::time::Duration::from_millis(100));
+            }
+            _ => panic!("expected mouse drag"),
+        }
+    }
+
+    #[test]
+    fn parse_mouse_drag_requires_two_points() {
+        let err = parse_script(&OperateRequest { script: "mouse left drag @0.1,0.1".to_string(), timeout_ms: None }).unwrap_err();
+        assert!(err.message.contains("拖拽格式"));
+    }
+
+    #[test]
+    fn parse_foreground_target_by_window_id() {
+        match parse_single("mouse left click @0.5,0.5 target=12345 focus=strict") {
+            DesktopScriptAction::MouseClick { window_target, focus, .. } => {
+                assert!(matches!(window_target, Some(ForegroundTarget::WindowId(12345))));
+                assert_eq!(focus, FocusPolicy::Strict);
+            }
+            _ => panic!("expected mouse click"),
+        }
+    }
+
+    #[test]
+    fn parse_foreground_target_by_hex_window_id() {
+        match parse_single("key Enter target=0x1A2B") {
+            DesktopScriptAction::Key { window_target, .. } => {
+                assert!(matches!(window_target, Some(ForegroundTarget::WindowId(0x1A2B))));
+            }
+            _ => panic!("expected key"),
+        }
+    }
+
+    #[test]
+    fn parse_foreground_target_by_title_defaults_to_verify() {
+        match parse_single("text \"hello\" target=\"记事本\"") {
+            DesktopScriptAction::Text { window_target, focus, .. } => {
+                match window_target {
+                    Some(ForegroundTarget::Title(title)) => assert_eq!(title, "记事本"),
+                    other => panic!("expected title target, got {other:?}"),
+                }
+                assert_eq!(focus, FocusPolicy::Verify);
+            }
+            _ => panic!("expected text"),
+        }
+    }
+
+    #[test]
+    fn parse_mouse_scroll_accepts_target_and_focus() {
+        match parse_single("mouse scroll_down repeat=3 target=\"浏览器\" focus=best_effort") {
+            DesktopScriptAction::MouseScroll { repeat, window_target, focus, .. } => {
+                assert_eq!(repeat, 3);
+                assert!(matches!(window_target, Some(ForegroundTarget::Title(_))));
+                assert_eq!(focus, FocusPolicy::BestEffort);
+            }
+            _ => panic!("expected mouse scroll"),
+        }
+    }
+
+    #[test]
+    fn parse_mouse_drag_accepts_target() {
+        match parse_single("mouse left drag @0.1,0.1 @0.9,0.9 target=42") {
+            DesktopScriptAction::MouseDrag { window_target, focus, .. } => {
+                assert!(matches!(window_target, Some(ForegroundTarget::WindowId(42))));
+                assert_eq!(focus, FocusPolicy::Verify);
+            }
+            _ => panic!("expected mouse drag"),
+        }
+    }
+
+    #[test]
+    fn parse_focus_without_target_is_rejected() {
+        let err = parse_script(&OperateRequest { script: "key Enter focus=strict".to_string(), timeout_ms: None }).unwrap_err();
+        assert!(err.message.contains("focus 必须与 target"));
+    }
+
+    #[test]
+    fn parse_focus_invalid_value_is_rejected() {
+        let err = parse_script(&OperateRequest { script: "text \"hi\" target=\"x\" focus=always".to_string(), timeout_ms: None }).unwrap_err();
+        assert!(err.message.contains("focus 非法"));
+    }
+
+    #[test]
+    fn parse_target_invalid_value_is_rejected() {
+        let err = parse_script(&OperateRequest { script: "text \"hi\" target=notepad".to_string(), timeout_ms: None }).unwrap_err();
+        assert!(err.message.contains("windowId 非法"));
+    }
+
+    #[test]
+    fn operate_failure_omits_focus_failed_when_absent() {
+        let failure = OperateFailure { line: 3, message: "boom".to_string(), focus_failed: None };
+        let value = serde_json::to_value(&failure).unwrap();
+        assert_eq!(value["line"], 3);
+        assert_eq!(value["message"], "boom");
+        assert!(value.get("focusFailed").is_none());
+    }
+
+    #[test]
+    fn focus_failure_serializes_camel_case_fields() {
+        let info = FocusFailureInfo {
+            target_window_id: 42,
+            target_title: "记事本".to_string(),
+            alive: true,
+            visible: false,
+            minimized: false,
+            foreground_before: "A".to_string(),
+            foreground_after: "B".to_string(),
+            suggested_recovery: vec!["unhide_app".to_string()],
+        };
+        let value = serde_json::to_value(&info).unwrap();
+        assert_eq!(value["targetWindowId"], 42);
+        assert_eq!(value["foregroundBefore"], "A");
+        assert_eq!(value["suggestedRecovery"][0], "unhide_app");
     }
 
     #[test]

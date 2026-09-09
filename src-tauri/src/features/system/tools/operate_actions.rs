@@ -207,6 +207,19 @@ fn primary_monitor_bounds() -> DesktopToolResult<ScreenBounds> {
     Ok(ScreenBounds { x, y, width, height })
 }
 
+/// 按显示器 id 取坐标基准；id 为 None 时用主屏。id 越界时明确报错，不静默回退到主屏。
+fn monitor_bounds_by_id(monitor_id: Option<u32>) -> DesktopToolResult<ScreenBounds> {
+    let Some(id) = monitor_id else {
+        return primary_monitor_bounds();
+    };
+    let monitors = monitor_list()?;
+    let monitor = resolve_monitor_by_id(&monitors, id)
+        .ok_or_else(|| DesktopToolError::invalid_params(format!("显示器不存在：monitor={id}")))?;
+    let width = monitor.width().map_err(|err| DesktopToolError::internal_error(format!("read monitor width failed: {err}")))?;
+    let height = monitor.height().map_err(|err| DesktopToolError::internal_error(format!("read monitor height failed: {err}")))?;
+    Ok(ScreenBounds { x: monitor.x().unwrap_or(0), y: monitor.y().unwrap_or(0), width, height })
+}
+
 fn normalized_point_to_screen(point: &NormalizedPoint, bounds: &ScreenBounds) -> (i32, i32) {
     let max_x = bounds.width.saturating_sub(1) as f64;
     let max_y = bounds.height.saturating_sub(1) as f64;
@@ -230,9 +243,201 @@ async fn sleep_duration(duration: std::time::Duration) {
     }
 }
 
-async fn execute_mouse_click(enigo: &mut enigo::Enigo, button: OperateMouseButton, target: &NormalizedPoint, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration, press: std::time::Duration) -> DesktopToolResult<()> {
+// ==================== 前台动作目标校验与焦点策略（C1/C2/C3/E3） ====================
+
+/// 前台目标处理被阻断：校验不通过，或按策略抢焦点失败。
+struct ForegroundBlock {
+    message: String,
+    focus_failed: Option<FocusFailureInfo>,
+}
+
+/// 解析前台动作声明的目标窗口：句柄精确匹配；标题按子串匹配（忽略大小写，唯一命中才算数）。
+/// 找不到或命中多个时列出候选窗口标题，让模型能改对名字。
+fn resolve_foreground_window(target: &ForegroundTarget) -> DesktopToolResult<WindowInfo> {
+    let windows = crate::platform::list_all_windows();
+    match target {
+        ForegroundTarget::WindowId(id) => windows
+            .into_iter()
+            .find(|w| w.window_id == *id as usize)
+            .ok_or_else(|| {
+                DesktopToolError::invalid_params(format!(
+                    "目标窗口不存在：windowId={id}（可能已关闭或被隐藏；可用 list windows 查看当前可见窗口）"
+                ))
+            }),
+        ForegroundTarget::Title(title) => {
+            let needle = title.to_lowercase();
+            let matched = windows
+                .iter()
+                .filter(|w| !w.title.is_empty() && w.title.to_lowercase().contains(&needle))
+                .collect::<Vec<_>>();
+            match matched.as_slice() {
+                [only] => Ok((*only).clone()),
+                [] => Err(DesktopToolError::invalid_params(format!(
+                    "目标窗口不存在：没有标题包含 `{title}` 的可见窗口；当前可见窗口：{}",
+                    window_title_candidates(&windows)
+                ))),
+                many => Err(DesktopToolError::invalid_params(format!(
+                    "目标窗口不唯一：标题包含 `{title}` 的窗口有 {} 个：{}；请改用更精确的标题或直接给 windowId",
+                    many.len(),
+                    many.iter().map(|w| format!("{}（{}）", w.title, w.window_id)).collect::<Vec<_>>().join("、")
+                ))),
+            }
+        }
+    }
+}
+
+/// 可见窗口标题候选（最多 12 条），用于报错时给模型可改的名字。
+fn window_title_candidates(windows: &[WindowInfo]) -> String {
+    let mut items = windows
+        .iter()
+        .filter(|w| !w.title.is_empty())
+        .take(12)
+        .map(|w| format!("{}（{}）", w.title, w.window_id))
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        return "（无可见窗口）".to_string();
+    }
+    if windows.len() > items.len() {
+        items.push("…".to_string());
+    }
+    items.join("、")
+}
+
+/// 当前前台窗口标题；无前台窗口时返回空串。
+fn foreground_title(windows: &[WindowInfo]) -> String {
+    windows.iter().find(|w| w.focused).map(|w| w.title.clone()).unwrap_or_default()
+}
+
+/// 抢焦点失败时的结构化现场（C3）：目标是否还在、是否可见/最小化、前后前台是谁、建议下一步。
+fn build_focus_failure(window: &WindowInfo, foreground_before: String) -> FocusFailureInfo {
+    let windows = crate::platform::list_all_windows();
+    let alive = crate::platform::window_is_alive(window.window_id);
+    let current = windows.iter().find(|w| w.window_id == window.window_id);
+    let visible = current.is_some();
+    let minimized = current.map(|w| w.minimized).unwrap_or(false);
+    let foreground_after = foreground_title(&windows);
+    let suggested_recovery = if !alive {
+        vec!["open_application".to_string()]
+    } else if !visible {
+        vec!["unhide_app".to_string(), "activate_window".to_string()]
+    } else {
+        vec!["activate_window".to_string()]
+    };
+    FocusFailureInfo {
+        target_window_id: window.window_id as u32,
+        target_title: window.title.clone(),
+        alive,
+        visible,
+        minimized,
+        foreground_before,
+        foreground_after,
+        suggested_recovery,
+    }
+}
+
+/// 按 focus 策略处理前台动作的目标窗口。
+/// verify：不激活，只校验当前前台就是目标窗口，不符即阻断（避免输入静默打到别的应用）；
+/// best_effort：尝试激活，失败不阻断，返回一句现场描述供步骤摘要使用；
+/// strict：必须激活成功，失败即阻断并附结构化现场。
+async fn apply_foreground_policy(
+    window_target: &Option<ForegroundTarget>,
+    focus: FocusPolicy,
+) -> Result<Option<String>, ForegroundBlock> {
+    let Some(target) = window_target else {
+        return Ok(None);
+    };
+    let window = resolve_foreground_window(target).map_err(|err| ForegroundBlock { message: err.message, focus_failed: None })?;
+    match focus {
+        FocusPolicy::Verify => {
+            let windows = crate::platform::list_all_windows();
+            if windows.iter().any(|w| w.focused && w.window_id == window.window_id) {
+                return Ok(None);
+            }
+            let actual = foreground_title(&windows);
+            Err(ForegroundBlock {
+                message: format!(
+                    "目标窗口不在前台：期望「{}」（{}），当前前台为「{}」；请改用 focus=best_effort/strict 自动激活，或先执行 activate window",
+                    window.title, window.window_id, actual
+                ),
+                focus_failed: None,
+            })
+        }
+        FocusPolicy::BestEffort | FocusPolicy::Strict => {
+            let windows = crate::platform::list_all_windows();
+            let before = foreground_title(&windows);
+            let window_id = window.window_id;
+            // SetForegroundWindow 会阻塞轮询最多 1.5s，放阻塞线程池
+            let (_, activated) = tokio::task::spawn_blocking(move || crate::platform::activate_window(window_id))
+                .await
+                .map_err(|err| ForegroundBlock { message: format!("激活窗口任务失败：{err}"), focus_failed: None })?;
+            if activated {
+                return Ok(None);
+            }
+            let info = build_focus_failure(&window, before);
+            let summary = format!(
+                "抢焦点失败：目标「{}」（{}），窗口存在={}，可见={}，最小化={}，前台「{}」->「{}」；建议 {:?}",
+                info.target_title, info.target_window_id, info.alive, info.visible, info.minimized,
+                info.foreground_before, info.foreground_after, info.suggested_recovery
+            );
+            if focus == FocusPolicy::Strict {
+                Err(ForegroundBlock { message: summary, focus_failed: Some(info) })
+            } else {
+                Ok(Some(summary))
+            }
+        }
+    }
+}
+
+/// 查询屏幕坐标命中的可交互元素描述（E3）：让模型确认前台点击实际点到了什么。
+/// 只扫目标窗口；坐标落在空白处、窗口未暴露 UIA 或读取失败时返回 None。
+fn hit_element_summary(window_id: usize, screen_x: i32, screen_y: i32) -> Option<String> {
+    let bounds = primary_monitor_bounds().ok()?;
+    let max_x = bounds.width.saturating_sub(1) as f64;
+    let max_y = bounds.height.saturating_sub(1) as f64;
+    if max_x <= 0.0 || max_y <= 0.0 {
+        return None;
+    }
+    let elements = crate::platform::collect_window_ui_elements(
+        window_id,
+        bounds.x as f64,
+        bounds.y as f64,
+        bounds.width as f64,
+        bounds.height as f64,
+    );
+    if elements.is_empty() {
+        return None;
+    }
+    let nx = (screen_x - bounds.x) as f64 / max_x;
+    let ny = (screen_y - bounds.y) as f64 / max_y;
+    let hit = elements
+        .iter()
+        .find(|e| nx >= e.x && nx <= e.x + e.width && ny >= e.y && ny <= e.y + e.height)?;
+    let name = if hit.name.trim().is_empty() { "(无名称)" } else { hit.name.trim() };
+    Some(format!("命中元素：{}「{}」", hit.control_type, name))
+}
+
+/// 当前前台窗口 id；无前台窗口时返回 None。
+fn foreground_window_id() -> Option<usize> {
+    crate::platform::list_all_windows().into_iter().find(|w| w.focused).map(|w| w.window_id)
+}
+
+/// 前台坐标点击后附带命中元素描述（E3）；无法定位时返回空串，不影响步骤结果。
+fn mouse_hit_note(target: &NormalizedPoint, monitor: Option<u32>) -> String {
+    let Ok(bounds) = monitor_bounds_by_id(monitor) else {
+        return String::new();
+    };
+    let Some(window_id) = foreground_window_id() else {
+        return String::new();
+    };
+    let (x, y) = normalized_point_to_screen(target, &bounds);
+    hit_element_summary(window_id, x, y)
+        .map(|text| format!("，{text}"))
+        .unwrap_or_default()
+}
+
+async fn execute_mouse_click(enigo: &mut enigo::Enigo, button: OperateMouseButton, target: &NormalizedPoint, monitor: Option<u32>, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration, press: std::time::Duration) -> DesktopToolResult<()> {
     sleep_duration(pre_delay).await;
-    let bounds = primary_monitor_bounds()?;
+    let bounds = monitor_bounds_by_id(monitor)?;
     let (x, y) = normalized_point_to_screen(target, &bounds);
     enigo.move_mouse(x, y, enigo::Coordinate::Abs).map_err(|err| map_input_err(err, "move mouse failed"))?;
     let mapped = map_mouse_button(button);
@@ -251,11 +456,49 @@ async fn execute_mouse_click(enigo: &mut enigo::Enigo, button: OperateMouseButto
     Ok(())
 }
 
-async fn execute_mouse_move(enigo: &mut enigo::Enigo, target: &NormalizedPoint, pre_delay: std::time::Duration) -> DesktopToolResult<()> {
+async fn execute_mouse_move(enigo: &mut enigo::Enigo, target: &NormalizedPoint, monitor: Option<u32>, pre_delay: std::time::Duration) -> DesktopToolResult<()> {
     sleep_duration(pre_delay).await;
-    let bounds = primary_monitor_bounds()?;
+    let bounds = monitor_bounds_by_id(monitor)?;
     let (x, y) = normalized_point_to_screen(target, &bounds);
     enigo.move_mouse(x, y, enigo::Coordinate::Abs).map_err(|err| map_input_err(err, "mouse move failed"))
+}
+
+/// 拖拽插值帧间隔：约 60fps。瞬移式移动会被多数应用识别成「点了一下」而不是拖拽，
+/// 必须逐帧推送中间位置。
+const MOUSE_DRAG_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+/// 未显式给 duration 时，按起止距离推算拖拽时长（秒），并夹在下列区间内。
+const MOUSE_DRAG_MIN_DURATION_SECS: f64 = 0.1;
+const MOUSE_DRAG_MAX_DURATION_SECS: f64 = 0.5;
+
+fn default_drag_duration(x1: i32, y1: i32, x2: i32, y2: i32) -> std::time::Duration {
+    let distance = (((x2 - x1) as f64).powi(2) + ((y2 - y1) as f64).powi(2)).sqrt();
+    let secs = (distance / 2000.0).clamp(MOUSE_DRAG_MIN_DURATION_SECS, MOUSE_DRAG_MAX_DURATION_SECS);
+    std::time::Duration::from_secs_f64(secs)
+}
+
+async fn execute_mouse_drag(enigo: &mut enigo::Enigo, button: OperateMouseButton, from: &NormalizedPoint, to: &NormalizedPoint, monitor: Option<u32>, duration: Option<std::time::Duration>, pre_delay: std::time::Duration) -> DesktopToolResult<()> {
+    sleep_duration(pre_delay).await;
+    let bounds = monitor_bounds_by_id(monitor)?;
+    let (x1, y1) = normalized_point_to_screen(from, &bounds);
+    let (x2, y2) = normalized_point_to_screen(to, &bounds);
+    let mapped = map_mouse_button(button);
+    enigo.move_mouse(x1, y1, enigo::Coordinate::Abs).map_err(|err| map_input_err(err, "move mouse failed"))?;
+    enigo.button(mapped, enigo::Direction::Press).map_err(|err| map_input_err(err, "mouse down failed"))?;
+    let total = duration.unwrap_or_else(|| default_drag_duration(x1, y1, x2, y2));
+    let steps = ((total.as_secs_f64() / MOUSE_DRAG_FRAME_INTERVAL.as_secs_f64()).round() as u32).max(1);
+    for step in 1..=steps {
+        let ratio = step as f64 / steps as f64;
+        let x = (x1 as f64 + (x2 - x1) as f64 * ratio).round() as i32;
+        let y = (y1 as f64 + (y2 - y1) as f64 * ratio).round() as i32;
+        if let Err(err) = enigo.move_mouse(x, y, enigo::Coordinate::Abs) {
+            // 中途失败必须主动松开，否则按键残留按下状态，后续操作全部异常
+            let _ = enigo.button(mapped, enigo::Direction::Release);
+            return Err(map_input_err(err, "drag move failed"));
+        }
+        sleep_duration(MOUSE_DRAG_FRAME_INTERVAL).await;
+    }
+    enigo.button(mapped, enigo::Direction::Release).map_err(|err| map_input_err(err, "mouse up failed"))?;
+    Ok(())
 }
 
 async fn execute_mouse_scroll(enigo: &mut enigo::Enigo, direction: i32, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration) -> DesktopToolResult<()> {
@@ -475,8 +718,12 @@ async fn execute_screenshot_action(
         mode: match mode {
             ScreenshotModeSpec::Desktop | ScreenshotModeSpec::FocusedWindow | ScreenshotModeSpec::WindowId(_) => ScreenshotMode::Desktop,
             ScreenshotModeSpec::Region(_) => ScreenshotMode::Region,
+            ScreenshotModeSpec::Monitor(_) => ScreenshotMode::Monitor,
         },
-        monitor_id: None,
+        monitor_id: match mode {
+            ScreenshotModeSpec::Monitor(id) => Some(*id),
+            _ => None,
+        },
         region: match mode {
             ScreenshotModeSpec::Region(region) => {
                 let bounds = primary_monitor_bounds()?;
@@ -489,7 +736,7 @@ async fn execute_screenshot_action(
         include_base64,
     };
     let result = match mode {
-        ScreenshotModeSpec::Desktop | ScreenshotModeSpec::Region(_) => run_screenshot_tool(request).await?,
+        ScreenshotModeSpec::Desktop | ScreenshotModeSpec::Region(_) | ScreenshotModeSpec::Monitor(_) => run_screenshot_tool(request).await?,
         ScreenshotModeSpec::FocusedWindow => run_capture_window_tool(request, None)?,
         ScreenshotModeSpec::WindowId(window_id) => run_capture_window_tool(request, Some(*window_id))?,
     };
@@ -498,6 +745,7 @@ async fn execute_screenshot_action(
         ScreenshotModeSpec::FocusedWindow => "focused_window",
         ScreenshotModeSpec::WindowId(_) => "window_id",
         ScreenshotModeSpec::Region(_) => "region",
+        ScreenshotModeSpec::Monitor(_) => "monitor",
     }
     .to_string();
 
@@ -558,23 +806,23 @@ fn resolve_element_ref(el: u32, window_id: u32) -> DesktopToolResult<(usize, Str
     Ok((ordinal, entry.control_type.clone(), entry.name.clone()))
 }
 
-async fn build_app_target(window_id: u32, target: AppScriptTarget) -> DesktopToolResult<AppTarget> {
+async fn build_app_target(window_id: u32, target: AppScriptTarget, monitor: Option<u32>) -> DesktopToolResult<AppTarget> {
     match target {
         AppScriptTarget::Element(el) => {
             let (ordinal, control_type, name) = resolve_element_ref(el, window_id)?;
             Ok(AppTarget::Element { el, ordinal, control_type, name })
         }
         AppScriptTarget::Point(point) => {
-            let bounds = primary_monitor_bounds()?;
+            let bounds = monitor_bounds_by_id(monitor)?;
             let (x, y) = normalized_point_to_screen(&point, &bounds);
             Ok(AppTarget::Point { screen_x: x, screen_y: y })
         }
     }
 }
 
-async fn execute_app_click(window_id: u32, target: AppScriptTarget, repeat: u32, dblclick: bool, pre_delay: std::time::Duration) -> DesktopToolResult<&'static str> {
+async fn execute_app_click(window_id: u32, target: AppScriptTarget, monitor: Option<u32>, repeat: u32, dblclick: bool, pre_delay: std::time::Duration) -> DesktopToolResult<&'static str> {
     sleep_duration(pre_delay).await;
-    let app_target = build_app_target(window_id, target).await?;
+    let app_target = build_app_target(window_id, target, monitor).await?;
     let window_id = window_id as usize;
     // UIA 重扫与 pattern 调用是同步阻塞 COM 调用，放阻塞线程池执行
     tokio::task::spawn_blocking(move || crate::platform::app_click(window_id, &app_target, repeat, dblclick))
@@ -604,9 +852,9 @@ async fn execute_app_get_value(window_id: u32, el: u32) -> DesktopToolResult<Str
         .map_err(DesktopToolError::invalid_params)
 }
 
-async fn execute_app_scroll(window_id: u32, target: AppScriptTarget, up: bool, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration) -> DesktopToolResult<&'static str> {
+async fn execute_app_scroll(window_id: u32, target: AppScriptTarget, monitor: Option<u32>, up: bool, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration) -> DesktopToolResult<&'static str> {
     sleep_duration(pre_delay).await;
-    let app_target = build_app_target(window_id, target).await?;
+    let app_target = build_app_target(window_id, target, monitor).await?;
     let window_id = window_id as usize;
     let mut method = "scrollpattern";
     for idx in 0..repeat {
@@ -647,8 +895,8 @@ async fn execute_app_key(window_id: u32, keys: &[String], repeat: u32, delay: st
 /// 让模型不重截就能确认焦点去向。post_delay 在动作完成后统一等待。
 async fn execute_app_action(window_id: u32, action: AppScriptAction, post_delay: std::time::Duration) -> DesktopToolResult<(&'static str, &'static str, Option<String>)> {
     let (verb, method) = match action {
-        AppScriptAction::Click { target, repeat, dblclick, pre_delay } => {
-            let method = execute_app_click(window_id, target, repeat, dblclick, pre_delay).await?;
+        AppScriptAction::Click { target, monitor, repeat, dblclick, pre_delay } => {
+            let method = execute_app_click(window_id, target, monitor, repeat, dblclick, pre_delay).await?;
             ("click", method)
         }
         AppScriptAction::SetValue { el, text, pre_delay } => {
@@ -659,12 +907,12 @@ async fn execute_app_action(window_id: u32, action: AppScriptAction, post_delay:
             let value = execute_app_get_value(window_id, el).await?;
             return Ok(("getvalue", "valuepattern", Some(format!("value={value:?}"))));
         }
-        AppScriptAction::ScrollUp { target, repeat, delay, pre_delay } => {
-            let method = execute_app_scroll(window_id, target, true, repeat, delay, pre_delay).await?;
+        AppScriptAction::ScrollUp { target, monitor, repeat, delay, pre_delay } => {
+            let method = execute_app_scroll(window_id, target, monitor, true, repeat, delay, pre_delay).await?;
             ("scroll_up", method)
         }
-        AppScriptAction::ScrollDown { target, repeat, delay, pre_delay } => {
-            let method = execute_app_scroll(window_id, target, false, repeat, delay, pre_delay).await?;
+        AppScriptAction::ScrollDown { target, monitor, repeat, delay, pre_delay } => {
+            let method = execute_app_scroll(window_id, target, monitor, false, repeat, delay, pre_delay).await?;
             ("scroll_down", method)
         }
         AppScriptAction::Key { keys, repeat, delay, pre_delay } => {
@@ -697,9 +945,16 @@ fn element_intersects_region(e: &UiElementInfo, rx0: f64, ry0: f64, rx1: f64, ry
 /// 按截图模式扫描可交互元素树：focused_window 只扫聚焦窗口，desktop 扫全部可见窗口，
 /// region 只返回与截图区域相交窗口的元素（元素矩形与 region 有交集才保留）。
 fn collect_ui_tree_for_mode(mode: &ScreenshotModeSpec) -> Vec<UiElementInfo> {
-    let bounds = match primary_monitor_bounds() {
-        Ok(b) => b,
-        Err(_) => return Vec::new(),
+    // Monitor 模式的坐标基准是目标显示器；其余模式沿用主屏。
+    let bounds = match mode {
+        ScreenshotModeSpec::Monitor(id) => match monitor_bounds_by_id(Some(*id)) {
+            Ok(b) => b,
+            Err(_) => return Vec::new(),
+        },
+        _ => match primary_monitor_bounds() {
+            Ok(b) => b,
+            Err(_) => return Vec::new(),
+        },
     };
     let origin_x = bounds.x as f64;
     let origin_y = bounds.y as f64;
@@ -736,6 +991,16 @@ fn collect_ui_tree_for_mode(mode: &ScreenshotModeSpec) -> Vec<UiElementInfo> {
             .collect(),
         ScreenshotModeSpec::Desktop => windows
             .iter()
+            .map(|w| (w.id().unwrap_or(0) as usize, w.title().unwrap_or_default()))
+            .collect(),
+        ScreenshotModeSpec::Monitor(_) => windows
+            .iter()
+            // 只扫与该显示器矩形相交的窗口，避免为副屏截图时扫进主屏的全部窗口
+            .filter(|w| {
+                let (wx0, wy0) = (w.x().unwrap_or(0), w.y().unwrap_or(0));
+                let (wx1, wy1) = (wx0 + w.width().unwrap_or(0) as i32, wy0 + w.height().unwrap_or(0) as i32);
+                wx0 < bounds.x + bounds.width as i32 && wx1 > bounds.x && wy0 < bounds.y + bounds.height as i32 && wy1 > bounds.y
+            })
             .map(|w| (w.id().unwrap_or(0) as usize, w.title().unwrap_or_default()))
             .collect(),
         ScreenshotModeSpec::Region(_) => windows
