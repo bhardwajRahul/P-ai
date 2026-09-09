@@ -251,7 +251,7 @@ fn encode_screenshot_response(
         || height > IMAGE_NORMALIZE_FOR_LLM_REQUEST_DEFAULT_MAX_DIMENSION
     {
         return Err(DesktopToolError::invalid_params(format!(
-            "截图分辨率过大（{}x{}），当前最多支持 {}x{}，请缩小截图区域后重试。",
+            "截图分辨率过大（{}x{}），当前最多支持 {}x{}；请缩小截取范围：只截目标区域（region）、单块显示器（monitor）或目标窗口（window_id）",
             width,
             height,
             IMAGE_NORMALIZE_FOR_LLM_REQUEST_DEFAULT_MAX_DIMENSION,

@@ -1,10 +1,34 @@
+/// 取动作所在的脚本行号（用于失败回传定位）。
+fn desktop_action_line(action: &DesktopScriptAction) -> usize {
+    match action {
+        DesktopScriptAction::MouseClick { line, .. }
+        | DesktopScriptAction::MouseDrag { line, .. }
+        | DesktopScriptAction::MouseMove { line, .. }
+        | DesktopScriptAction::MouseButtonState { line, .. }
+        | DesktopScriptAction::MouseScroll { line, .. }
+        | DesktopScriptAction::Key { line, .. }
+        | DesktopScriptAction::Text { line, .. }
+        | DesktopScriptAction::Wait { line, .. }
+        | DesktopScriptAction::WaitUntil { line, .. }
+        | DesktopScriptAction::WindowList { line }
+        | DesktopScriptAction::WindowActivate { line, .. }
+        | DesktopScriptAction::Screenshot { line, .. }
+        | DesktopScriptAction::App { line, .. } => *line,
+    }
+}
+
 async fn run_operate_tool(
     input: OperateRequest,
     screenshots_root: &std::path::Path,
     include_base64: bool,
+    blocked_apps: &[String],
 ) -> DesktopToolResult<OperateResponse> {
     let started = std::time::Instant::now();
-    ensure_dpi_awareness_once();
+    let mut warnings = Vec::<String>::new();
+    if !ensure_dpi_awareness() {
+        warnings.push("DPI 感知未生效（进程可能已被宿主设为其他感知模式）：高缩放或多显示器场景下坐标可能偏移，请用 screenshot 核对实际位置，或用 monitor= 指定显示器".to_string());
+        runtime_log_warn("[桌面脚本] DPI 感知设置失败，高缩放或多显示器场景下坐标可能偏移".to_string());
+    }
     let actions = parse_script(&input)?;
     let total_actions = actions.len();
     runtime_log_info(format!(
@@ -21,6 +45,7 @@ async fn run_operate_tool(
     let mut image_base64 = None;
     let mut width = None;
     let mut height = None;
+    let mut latest_windows: Option<Vec<WindowInfo>> = None;
 
     // 步骤失败即记录失败位置并停止后续步骤，已完成的步骤仍然返回（D1）
     macro_rules! run_step {
@@ -34,10 +59,11 @@ async fn run_operate_tool(
             }
         };
     }
-    // 声明了 target 的前台动作，执行前按 focus 策略处理目标窗口（C1/C2/C3）
+    // 声明了 target 的前台动作，执行前按 focus 策略处理目标窗口（C1/C2/C3），
+    // 同时校验敏感应用门控（J1）：命中禁止名单即阻断
     macro_rules! ensure_foreground {
         ($line:expr, $target:expr, $focus:expr) => {
-            match apply_foreground_policy(&$target, $focus).await {
+            match apply_foreground_policy(&$target, $focus, blocked_apps).await {
                 Ok(note) => note,
                 Err(block) => {
                     failure = Some(OperateFailure { line: $line, message: block.message, focus_failed: block.focus_failed });
@@ -49,6 +75,18 @@ async fn run_operate_tool(
     let note_suffix = |note: Option<String>| note.map(|text| format!("，{text}")).unwrap_or_default();
 
     for action in actions {
+        // 脚本内超时中断（D3）：工具级超时是硬中断、已执行步骤会丢，
+        // 这里在每步之间检查，超时也能回传已完成步骤与中断行号。
+        if let Some(limit_ms) = input.timeout_ms {
+            if started.elapsed().as_millis() > u128::from(limit_ms) {
+                failure = Some(OperateFailure {
+                    line: desktop_action_line(&action),
+                    message: format!("脚本执行超过 timeout_ms={limit_ms}，已中断；已完成步骤见 steps，可从失败行继续"),
+                    focus_failed: None,
+                });
+                break;
+            }
+        }
         match action {
             DesktopScriptAction::MouseClick { line, button, target, monitor, repeat, delay, pre_delay, press, window_target, focus } => {
                 let focus_note = ensure_foreground!(line, window_target, focus);
@@ -99,6 +137,22 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
+            DesktopScriptAction::MouseButtonState { line, button, pressed, pre_delay, window_target, focus } => {
+                let focus_note = ensure_foreground!(line, window_target, focus);
+                run_step!(line, execute_mouse_button_state(&mut enigo, button, pressed, pre_delay));
+                let step = DesktopScriptStepResult {
+                    line,
+                    kind: DesktopScriptStepKind::Mouse,
+                    summary: format!("mouse {} completed{}", if pressed { "down" } else { "up" }, note_suffix(focus_note)),
+                    ok: true,
+                    saved_path: None,
+                };
+                runtime_log_info(format!(
+                    "[桌面脚本] 步骤完成，任务=run_operate_tool，line={}，kind=MouseButtonState，summary={}",
+                    line, step.summary
+                ));
+                steps.push(step);
+            }
             DesktopScriptAction::MouseScroll { line, direction, repeat, delay, pre_delay, window_target, focus } => {
                 let focus_note = ensure_foreground!(line, window_target, focus);
                 run_step!(line, execute_mouse_scroll(&mut enigo, direction, repeat, delay, pre_delay));
@@ -116,6 +170,18 @@ async fn run_operate_tool(
                 steps.push(step);
             }
             DesktopScriptAction::App { line, window_id, action, post_delay } => {
+                // 后台直连同样受门控约束（J1）：按 window_id 查标题，命中即阻断；
+                // 窗口已不存在时不拦截，交由原有路径报错
+                if !blocked_apps.is_empty() {
+                    let hit = crate::platform::list_all_windows()
+                        .into_iter()
+                        .find(|w| w.window_id == window_id as usize)
+                        .and_then(|w| blocked_app_hit(blocked_apps, &w.title).map(|keyword| (w.title, keyword.to_string())));
+                    if let Some((title, keyword)) = hit {
+                        failure = Some(OperateFailure { line, message: blocked_app_message(&title, &keyword), focus_failed: None });
+                        break;
+                    }
+                }
                 let (verb, method, extra) = run_step!(line, execute_app_action(window_id, action, post_delay));
                 let extra_text = extra.map(|e| format!(", {e}")).unwrap_or_default();
                 let step = DesktopScriptStepResult {
@@ -178,9 +244,94 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::Screenshot { line, mode, save_path, quality, elements } => {
+            DesktopScriptAction::WaitUntil { line, condition, timeout } => {
+                let description = run_step!(line, wait_until(&condition, timeout));
+                let step = DesktopScriptStepResult {
+                    line,
+                    kind: DesktopScriptStepKind::Wait,
+                    summary: format!("wait until completed, {description}"),
+                    ok: true,
+                    saved_path: None,
+                };
+                runtime_log_info(format!(
+                    "[桌面脚本] 步骤完成，任务=run_operate_tool，line={}，kind=WaitUntil，summary={}",
+                    line, step.summary
+                ));
+                steps.push(step);
+            }
+            DesktopScriptAction::WindowList { line } => {
+                let windows = crate::platform::list_all_windows();
+                // 枚举为空且平台有已知限制时把原因讲清楚，避免模型反复重试（H2）
+                let summary = if windows.is_empty() {
+                    match crate::platform::platform_capability_hint() {
+                        Some(hint) => format!("window list completed, count=0（{hint}）"),
+                        None => "window list completed, count=0".to_string(),
+                    }
+                } else {
+                    format!("window list completed, count={}", windows.len())
+                };
+                let step = DesktopScriptStepResult {
+                    line,
+                    kind: DesktopScriptStepKind::Window,
+                    summary,
+                    ok: true,
+                    saved_path: None,
+                };
+                runtime_log_info(format!(
+                    "[桌面脚本] 步骤完成，任务=run_operate_tool，line={}，kind=WindowList，summary={}",
+                    line, step.summary
+                ));
+                latest_windows = Some(windows);
+                steps.push(step);
+            }
+            DesktopScriptAction::WindowActivate { line, target } => {
+                let window = match resolve_foreground_window(&target) {
+                    Ok(window) => window,
+                    Err(err) => {
+                        failure = Some(OperateFailure { line, message: err.message, focus_failed: None });
+                        break;
+                    }
+                };
+                // 激活同样受门控约束（J1）：目标命中禁止名单即阻断，不切前台
+                if let Some(keyword) = blocked_app_hit(blocked_apps, &window.title) {
+                    failure = Some(OperateFailure { line, message: blocked_app_message(&window.title, keyword), focus_failed: None });
+                    break;
+                }
+                let before = foreground_title(&crate::platform::list_all_windows());
+                let window_id = window.window_id;
+                let activated = match tokio::task::spawn_blocking(move || crate::platform::activate_window(window_id)).await {
+                    Ok((_, activated)) => activated,
+                    Err(err) => {
+                        failure = Some(OperateFailure { line, message: format!("激活窗口任务失败：{err}"), focus_failed: None });
+                        break;
+                    }
+                };
+                if !activated {
+                    let info = build_focus_failure(&window, before);
+                    let message = format!(
+                        "激活窗口失败：「{}」（{}），窗口存在={}，可见={}，最小化={}，前台「{}」->「{}」；建议 {:?}",
+                        info.target_title, info.target_window_id, info.alive, info.visible, info.minimized,
+                        info.foreground_before, info.foreground_after, info.suggested_recovery
+                    );
+                    failure = Some(OperateFailure { line, message, focus_failed: Some(info) });
+                    break;
+                }
+                let step = DesktopScriptStepResult {
+                    line,
+                    kind: DesktopScriptStepKind::Window,
+                    summary: format!("window activate completed, window_id={}, title={}", window.window_id, window.title),
+                    ok: true,
+                    saved_path: None,
+                };
+                runtime_log_info(format!(
+                    "[桌面脚本] 步骤完成，任务=run_operate_tool，line={}，kind=WindowActivate，summary={}",
+                    line, step.summary
+                ));
+                steps.push(step);
+            }
+            DesktopScriptAction::Screenshot { line, mode, save_path, quality, elements, include_text } => {
                 let (result, mode_name, ui_tree) =
-                    run_step!(line, execute_screenshot_action(&mode, save_path, quality, screenshots_root, include_base64, elements));
+                    run_step!(line, execute_screenshot_action(&mode, save_path, quality, screenshots_root, include_base64, elements, include_text));
                 let tree_summary = match &ui_tree {
                     Some(elems) if elems.is_empty() => {
                         if cfg!(target_os = "windows") {
@@ -189,6 +340,10 @@ async fn run_operate_tool(
                             "，当前平台不支持控件树".to_string()
                         }
                     }
+                    Some(elems) if elems.len() >= crate::platform::MAX_ELEMENTS => format!(
+                        "，控件树元素数={}（已达上限，可能被截断；请用 window_id 或 region 缩小范围）",
+                        elems.len()
+                    ),
                     Some(elems) => format!("，控件树元素数={}", elems.len()),
                     None => String::new(),
                 };
@@ -258,6 +413,8 @@ async fn run_operate_tool(
         image_base64,
         width,
         height,
+        windows: latest_windows,
+        warnings: if warnings.is_empty() { None } else { Some(warnings) },
     })
 }
 

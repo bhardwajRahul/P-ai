@@ -2,12 +2,29 @@ use enigo::{Keyboard, Mouse};
 
 use crate::platform::AppTarget;
 
-fn ensure_dpi_awareness_once() {
-    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    let _ = ONCE.get_or_init(|| {
-        #[cfg(target_os = "windows")]
-        let _ = enigo::set_dpi_awareness();
-    });
+/// 设置进程 DPI 感知（per-monitor v2）。成功前每次调用都会重试：
+/// 首次调用可能因为宿主窗口尚未就绪而失败，后续调用仍有机会成功；
+/// 一旦成功就不再重复调用，避免每次都走一遍系统接口。
+/// 返回 true 表示坐标映射已按物理像素对齐；false 表示感知未生效，
+/// 高缩放或多显示器场景下坐标可能有偏移（B3）。
+fn ensure_dpi_awareness() -> bool {
+    static OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if OK.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if enigo::set_dpi_awareness().is_ok() {
+            OK.store(true, std::sync::atomic::Ordering::Relaxed);
+            return true;
+        }
+        false
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        OK.store(true, std::sync::atomic::Ordering::Relaxed);
+        true
+    }
 }
 
 fn map_mouse_button(button: OperateMouseButton) -> enigo::Button {
@@ -214,7 +231,7 @@ fn monitor_bounds_by_id(monitor_id: Option<u32>) -> DesktopToolResult<ScreenBoun
     };
     let monitors = monitor_list()?;
     let monitor = resolve_monitor_by_id(&monitors, id)
-        .ok_or_else(|| DesktopToolError::invalid_params(format!("显示器不存在：monitor={id}")))?;
+        .ok_or_else(|| DesktopToolError::invalid_params(format!("显示器不存在：monitor={id}；可用 screenshot 确认显示器编号，或省略 monitor 使用主屏")))?;
     let width = monitor.width().map_err(|err| DesktopToolError::internal_error(format!("read monitor width failed: {err}")))?;
     let height = monitor.height().map_err(|err| DesktopToolError::internal_error(format!("read monitor height failed: {err}")))?;
     Ok(ScreenBounds { x: monitor.x().unwrap_or(0), y: monitor.y().unwrap_or(0), width, height })
@@ -339,14 +356,60 @@ fn build_focus_failure(window: &WindowInfo, foreground_before: String) -> FocusF
 /// verify：不激活，只校验当前前台就是目标窗口，不符即阻断（避免输入静默打到别的应用）；
 /// best_effort：尝试激活，失败不阻断，返回一句现场描述供步骤摘要使用；
 /// strict：必须激活成功，失败即阻断并附结构化现场。
+/// 敏感应用门控（J1）：窗口标题命中用户配置的黑名单子串时返回命中的关键词。
+/// 空名单直接放行，不改变现有行为；匹配忽略大小写，空条目跳过。
+fn blocked_app_hit<'a>(blocked: &'a [String], title: &str) -> Option<&'a str> {
+    if blocked.is_empty() || title.trim().is_empty() {
+        return None;
+    }
+    let title_lower = title.to_lowercase();
+    blocked.iter().find_map(|keyword| {
+        let needle = keyword.trim();
+        if needle.is_empty() {
+            return None;
+        }
+        if title_lower.contains(&needle.to_lowercase()) {
+            Some(needle)
+        } else {
+            None
+        }
+    })
+}
+
+/// 门控阻断文案：说清命中了哪个关键词、该换目标还是改配置（I2）。
+fn blocked_app_message(title: &str, keyword: &str) -> String {
+    format!(
+        "目标应用已被禁止操作：窗口「{title}」命中禁止名单「{keyword}」；请换一个目标窗口，或在设置中修改禁止名单后重试"
+    )
+}
+
 async fn apply_foreground_policy(
     window_target: &Option<ForegroundTarget>,
     focus: FocusPolicy,
+    blocked_apps: &[String],
 ) -> Result<Option<String>, ForegroundBlock> {
     let Some(target) = window_target else {
+        // 未声明目标的动作直接作用于当前前台；前台命中黑名单同样阻断（J1）
+        if !blocked_apps.is_empty() {
+            let windows = crate::platform::list_all_windows();
+            if let Some(foreground) = windows.iter().find(|w| w.focused) {
+                if let Some(keyword) = blocked_app_hit(blocked_apps, &foreground.title) {
+                    return Err(ForegroundBlock {
+                        message: blocked_app_message(&foreground.title, keyword),
+                        focus_failed: None,
+                    });
+                }
+            }
+        }
         return Ok(None);
     };
     let window = resolve_foreground_window(target).map_err(|err| ForegroundBlock { message: err.message, focus_failed: None })?;
+    if let Some(keyword) = blocked_app_hit(blocked_apps, &window.title) {
+        return Err(ForegroundBlock {
+            message: blocked_app_message(&window.title, keyword),
+            focus_failed: None,
+        });
+    }
     match focus {
         FocusPolicy::Verify => {
             let windows = crate::platform::list_all_windows();
@@ -403,6 +466,7 @@ fn hit_element_summary(window_id: usize, screen_x: i32, screen_y: i32) -> Option
         bounds.y as f64,
         bounds.width as f64,
         bounds.height as f64,
+        false,
     );
     if elements.is_empty() {
         return None;
@@ -414,6 +478,68 @@ fn hit_element_summary(window_id: usize, screen_x: i32, screen_y: i32) -> Option
         .find(|e| nx >= e.x && nx <= e.x + e.width && ny >= e.y && ny <= e.y + e.height)?;
     let name = if hit.name.trim().is_empty() { "(无名称)" } else { hit.name.trim() };
     Some(format!("命中元素：{}「{}」", hit.control_type, name))
+}
+
+/// 条件等待的轮询间隔：200ms 足够跟上常见界面响应，又不会把 CPU 打满。
+const WAIT_UNTIL_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// 轮询等待条件成立，返回成立时的现场描述；超时返回明确失败并给出下一步（D2）。
+async fn wait_until(condition: &WaitCondition, timeout: std::time::Duration) -> DesktopToolResult<String> {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(description) = wait_condition_met(condition) {
+            return Ok(description);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(DesktopToolError::invalid_params(format!(
+                "等待超时（{:.1}s）：{}；可先执行 screenshot 观察当前界面，或改用更大的 timeout",
+                timeout.as_secs_f64(),
+                wait_condition_missing(condition)
+            )));
+        }
+        sleep_duration(WAIT_UNTIL_POLL_INTERVAL).await;
+    }
+}
+
+/// 条件尚未成立时的描述，用于超时文案。
+fn wait_condition_missing(condition: &WaitCondition) -> String {
+    match condition {
+        WaitCondition::Window { title } => format!("未出现标题包含「{title}」的可见窗口"),
+        WaitCondition::Element { name, .. } => format!("未出现名称包含「{name}」的可交互元素"),
+    }
+}
+
+/// 条件是否成立；成立时返回现场描述。
+fn wait_condition_met(condition: &WaitCondition) -> Option<String> {
+    match condition {
+        WaitCondition::Window { title } => {
+            let needle = title.to_lowercase();
+            crate::platform::list_all_windows()
+                .into_iter()
+                .find(|w| !w.title.is_empty() && w.title.to_lowercase().contains(&needle))
+                .map(|w| format!("window appeared: {}（{}）", w.title, w.window_id))
+        }
+        WaitCondition::Element { name, window_target } => {
+            let needle = name.to_lowercase();
+            let window_id = match window_target {
+                Some(target) => resolve_foreground_window(target).ok()?.window_id,
+                None => foreground_window_id()?,
+            };
+            let bounds = primary_monitor_bounds().ok()?;
+            let elements = crate::platform::collect_window_ui_elements(
+                window_id,
+                bounds.x as f64,
+                bounds.y as f64,
+                bounds.width as f64,
+                bounds.height as f64,
+                false,
+            );
+            elements
+                .into_iter()
+                .find(|e| !e.name.trim().is_empty() && e.name.to_lowercase().contains(&needle))
+                .map(|e| format!("element appeared: {}「{}」", e.control_type, e.name))
+        }
+    }
 }
 
 /// 当前前台窗口 id；无前台窗口时返回 None。
@@ -501,6 +627,15 @@ async fn execute_mouse_drag(enigo: &mut enigo::Enigo, button: OperateMouseButton
     Ok(())
 }
 
+/// 按下或释放指定鼠标键（不移动光标）：用于长按菜单、画笔等需要跨步骤精确时序的操作。
+async fn execute_mouse_button_state(enigo: &mut enigo::Enigo, button: OperateMouseButton, pressed: bool, pre_delay: std::time::Duration) -> DesktopToolResult<()> {
+    sleep_duration(pre_delay).await;
+    let mapped = map_mouse_button(button);
+    let direction = if pressed { enigo::Direction::Press } else { enigo::Direction::Release };
+    let context = if pressed { "mouse down failed" } else { "mouse up failed" };
+    enigo.button(mapped, direction).map_err(|err| map_input_err(err, context))
+}
+
 async fn execute_mouse_scroll(enigo: &mut enigo::Enigo, direction: i32, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration) -> DesktopToolResult<()> {
     sleep_duration(pre_delay).await;
     for idx in 0..repeat {
@@ -557,13 +692,20 @@ async fn execute_text_action(enigo: &mut enigo::Enigo, text: &str, repeat: u32, 
     Ok(())
 }
 
-/// 单次 text 注入。Windows 上含非 ASCII 字符时改走剪贴板粘贴：
+/// 剪贴板粘贴的触发条件：含非 ASCII（绕开中文 IME）、含换行或超过 100 字符（避免 UWP/RichEdit 逐字丢字）。
+#[cfg(target_os = "windows")]
+fn should_paste_via_clipboard(text: &str) -> bool {
+    contains_non_ascii(text) || text.contains('\n') || text.chars().count() > 100
+}
+
+/// 单次 text 注入。Windows 上含非 ASCII 字符、含换行或超过 100 字符时改走剪贴板粘贴：
 /// enigo 的 KEYEVENTF_UNICODE（VK_PACKET）注入会被中文 IME 拦截进
 /// composition 缓冲，与 Enter 交替时提交顺序错乱；剪贴板粘贴完全绕开
-/// 键盘事件与 IME。纯 ASCII 保持 enigo 注入（避免无谓的剪贴板覆盖）。
+/// 键盘事件与 IME。长文本与含换行文本逐字注入在 UWP/RichEdit 控件里会丢字，
+/// 同样走剪贴板。短纯 ASCII 保持 enigo 注入（避免无谓的剪贴板覆盖）。
 #[cfg(target_os = "windows")]
 async fn execute_text_once(enigo: &mut enigo::Enigo, text: &str) -> DesktopToolResult<()> {
-    if contains_non_ascii(text) {
+    if should_paste_via_clipboard(text) {
         let previous = read_clipboard_unicode_text();
         write_clipboard_unicode_text(text)?;
         let paste_result = (|| -> DesktopToolResult<()> {
@@ -712,6 +854,7 @@ async fn execute_screenshot_action(
     screenshots_root: &std::path::Path,
     include_base64: bool,
     elements: bool,
+    include_text: bool,
 ) -> DesktopToolResult<(ScreenshotResponse, String, Option<Vec<UiElementInfo>>)> {
     let save_path = save_path.or_else(|| Some(default_operate_screenshot_path(screenshots_root)));
     let request = ScreenshotRequest {
@@ -750,11 +893,12 @@ async fn execute_screenshot_action(
     .to_string();
 
     // elements=true：扫描可交互元素树（当前 Windows 实现；其他平台返回空并在 summary 提示）。
+    // text=true 时额外纳入非交互文本标签，模型可借「用户名: [输入框]」这类上下文定位目标（E2）。
     // UIA 遍历是同步阻塞调用（数百 ms），放到阻塞线程池执行，避免占用 Tokio 工作线程。
     let mut tree = if elements {
         let mode_for_scan = mode.clone();
         Some(
-            tokio::task::spawn_blocking(move || collect_ui_tree_for_mode(&mode_for_scan))
+            tokio::task::spawn_blocking(move || collect_ui_tree_for_mode(&mode_for_scan, include_text))
                 .await
                 .unwrap_or_default(),
         )
@@ -944,7 +1088,7 @@ fn element_intersects_region(e: &UiElementInfo, rx0: f64, ry0: f64, rx1: f64, ry
 
 /// 按截图模式扫描可交互元素树：focused_window 只扫聚焦窗口，desktop 扫全部可见窗口，
 /// region 只返回与截图区域相交窗口的元素（元素矩形与 region 有交集才保留）。
-fn collect_ui_tree_for_mode(mode: &ScreenshotModeSpec) -> Vec<UiElementInfo> {
+fn collect_ui_tree_for_mode(mode: &ScreenshotModeSpec, include_text: bool) -> Vec<UiElementInfo> {
     // Monitor 模式的坐标基准是目标显示器；其余模式沿用主屏。
     let bounds = match mode {
         ScreenshotModeSpec::Monitor(id) => match monitor_bounds_by_id(Some(*id)) {
@@ -1018,7 +1162,7 @@ fn collect_ui_tree_for_mode(mode: &ScreenshotModeSpec) -> Vec<UiElementInfo> {
             .map(|w| (w.id().unwrap_or(0) as usize, w.title().unwrap_or_default()))
             .collect(),
     };
-    let mut elements = collect_ui_tree_for_windows(&targets, origin_x, origin_y, primary_width, primary_height);
+    let mut elements = collect_ui_tree_for_windows(&targets, origin_x, origin_y, primary_width, primary_height, include_text);
     if let Some((rx0, ry0, rx1, ry1)) = region_rect {
         // 元素级过滤：元素矩形与 region 有交集才保留（region 截图区域之外的元素不返回）
         elements.retain(|e| element_intersects_region(e, rx0, ry0, rx1, ry1));
@@ -1029,6 +1173,22 @@ fn collect_ui_tree_for_mode(mode: &ScreenshotModeSpec) -> Vec<UiElementInfo> {
 #[cfg(test)]
 mod operate_actions_tests {
     use super::*;
+
+    #[test]
+    fn blocked_app_hit_should_match_case_insensitively_and_skip_empty_entries() {
+        let blocked = vec!["密码".to_string(), "  ".to_string(), "Settings".to_string()];
+        // 中文子串命中
+        assert_eq!(blocked_app_hit(&blocked, "1Password 密码管理器"), Some("密码"));
+        // 英文忽略大小写命中
+        assert_eq!(blocked_app_hit(&blocked, "windows settings"), Some("Settings"));
+        // 未命中
+        assert_eq!(blocked_app_hit(&blocked, "记事本"), None);
+        // 空标题不拦截（避免误伤无标题窗口）
+        assert_eq!(blocked_app_hit(&blocked, "   "), None);
+        // 空名单不改变现有行为
+        let empty: Vec<String> = Vec::new();
+        assert_eq!(blocked_app_hit(&empty, "1Password 密码管理器"), None);
+    }
 
     #[test]
     fn region_tree_should_filter_out_of_region_elements() {
