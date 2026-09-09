@@ -289,10 +289,24 @@ fn resolve_foreground_window(target: &ForegroundTarget) -> DesktopToolResult<Win
                 .collect::<Vec<_>>();
             match matched.as_slice() {
                 [only] => Ok((*only).clone()),
-                [] => Err(DesktopToolError::invalid_params(format!(
-                    "目标窗口不存在：没有标题包含 `{title}` 的可见窗口；当前可见窗口：{}",
-                    window_title_candidates(&windows)
-                ))),
+                [] => {
+                    // G2：标题无命中时，按进程名再试一次（唯一命中才算数）
+                    let proc_matched = windows
+                        .iter()
+                        .filter(|w| {
+                            w.process_name
+                                .as_ref()
+                                .is_some_and(|n| n.to_lowercase().contains(&needle))
+                        })
+                        .collect::<Vec<_>>();
+                    match proc_matched.as_slice() {
+                        [only] => Ok((*only).clone()),
+                        _ => Err(DesktopToolError::invalid_params(format!(
+                            "目标窗口不存在：没有标题或进程名包含 `{title}` 的可见窗口；当前可见窗口：{}",
+                            window_title_candidates(&windows)
+                        ))),
+                    }
+                }
                 many => Err(DesktopToolError::invalid_params(format!(
                     "目标窗口不唯一：标题包含 `{title}` 的窗口有 {} 个：{}；请改用更精确的标题或直接给 windowId",
                     many.len(),
@@ -303,8 +317,59 @@ fn resolve_foreground_window(target: &ForegroundTarget) -> DesktopToolResult<Win
     }
 }
 
+/// 按名解析窗口（G2）：先按标题子串（唯一命中），再按进程名子串（唯一命中）。
+/// 找不到或命中多个时列出候选，供 app / screenshot 的名字选择器与前台目标复用。
+fn resolve_window_by_name(name: &str) -> DesktopToolResult<WindowInfo> {
+    let windows = crate::platform::list_all_windows();
+    let needle = name.to_lowercase();
+    let title_matched = windows
+        .iter()
+        .filter(|w| !w.title.is_empty() && w.title.to_lowercase().contains(&needle))
+        .collect::<Vec<_>>();
+    match title_matched.as_slice() {
+        [only] => return Ok((*only).clone()),
+        [] => {}
+        many => {
+            return Err(DesktopToolError::invalid_params(format!(
+                "目标窗口不唯一：标题包含 `{name}` 的窗口有 {} 个：{}；请改用更精确的标题或直接给 windowId",
+                many.len(),
+                many.iter().map(|w| format!("{}（{}）", w.title, w.window_id)).collect::<Vec<_>>().join("、")
+            )));
+        }
+    }
+    let proc_matched = windows
+        .iter()
+        .filter(|w| {
+            w.process_name
+                .as_ref()
+                .is_some_and(|n| n.to_lowercase().contains(&needle))
+        })
+        .collect::<Vec<_>>();
+    match proc_matched.as_slice() {
+        [only] => Ok((*only).clone()),
+        [] => Err(DesktopToolError::invalid_params(format!(
+            "目标窗口不存在：没有标题或进程名包含 `{name}` 的可见窗口；当前可见窗口：{}",
+            window_title_candidates(&windows)
+        ))),
+        many => Err(DesktopToolError::invalid_params(format!(
+            "目标窗口不唯一：进程名包含 `{name}` 的窗口有 {} 个：{}；请改用标题或直接给 windowId",
+            many.len(),
+            many.iter().map(|w| format!("{}（{}）", w.title, w.window_id)).collect::<Vec<_>>().join("、")
+        ))),
+    }
+}
+
+/// 解析 app 动作的目标窗口选择器：句柄直用，名字走按名解析（每次执行现查，不缓存句柄）。
+fn resolve_app_window(selector: &AppWindowSelector) -> DesktopToolResult<u32> {
+    match selector {
+        AppWindowSelector::Id(id) => Ok(*id),
+        AppWindowSelector::Name(name) => resolve_window_by_name(name).map(|w| w.window_id as u32),
+    }
+}
+
 /// 可见窗口标题候选（最多 12 条），用于报错时给模型可改的名字。
 fn window_title_candidates(windows: &[WindowInfo]) -> String {
+
     let mut items = windows
         .iter()
         .filter(|w| !w.title.is_empty())
@@ -636,10 +701,12 @@ async fn execute_mouse_button_state(enigo: &mut enigo::Enigo, button: OperateMou
     enigo.button(mapped, direction).map_err(|err| map_input_err(err, context))
 }
 
-async fn execute_mouse_scroll(enigo: &mut enigo::Enigo, direction: i32, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration) -> DesktopToolResult<()> {
+async fn execute_mouse_scroll(enigo: &mut enigo::Enigo, horizontal: bool, direction: i32, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration) -> DesktopToolResult<()> {
     sleep_duration(pre_delay).await;
+    // enigo 符号约定：垂直正=下、水平正=右（调用方已按此换算，见 parser）。
+    let axis = if horizontal { enigo::Axis::Horizontal } else { enigo::Axis::Vertical };
     for idx in 0..repeat {
-        enigo.scroll(direction, enigo::Axis::Vertical).map_err(|err| map_input_err(err, "mouse scroll failed"))?;
+        enigo.scroll(direction, axis).map_err(|err| map_input_err(err, "mouse scroll failed"))?;
         if idx + 1 < repeat {
             sleep_duration(delay).await;
         }
@@ -835,6 +902,103 @@ fn restore_clipboard_unicode_text(previous: Option<String>) {
     }
 }
 
+// ==================== 剪贴板显式读写（A4） ====================
+
+/// 剪贴板读摘要上限：超出截断，避免超长内容撑爆步骤摘要。
+const CLIPBOARD_READ_SUMMARY_LIMIT: usize = 2000;
+
+/// 执行 clipboard read：只读不改，不破坏用户剪贴板内容。非 Windows 明确报错并给替代路径。
+fn execute_clipboard_read() -> DesktopToolResult<String> {
+    #[cfg(target_os = "windows")]
+    {
+        match read_clipboard_unicode_text() {
+            None => Ok("clipboard read completed, empty=true（剪贴板为空或无文本内容）".to_string()),
+            Some(text) => {
+                let len = text.chars().count();
+                if len > CLIPBOARD_READ_SUMMARY_LIMIT {
+                    let truncated: String = text.chars().take(CLIPBOARD_READ_SUMMARY_LIMIT).collect();
+                    Ok(format!("clipboard read completed, len={len}, value={truncated:?}…（已截断，全长 {len} 字符）"))
+                } else {
+                    Ok(format!("clipboard read completed, len={len}, value={text:?}"))
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err(DesktopToolError::invalid_params(
+            "clipboard 读写当前仅在 Windows 可用；其他平台请改用 text/key 直接输入，或用 app getvalue 读回控件值".to_string(),
+        ))
+    }
+}
+
+/// 执行 clipboard write：显式覆盖剪贴板（意图明确才用）。非 Windows 同上报错。
+fn execute_clipboard_write(text: &str) -> DesktopToolResult<String> {
+    #[cfg(target_os = "windows")]
+    {
+        write_clipboard_unicode_text(text)?;
+        Ok(format!("clipboard write completed, len={}（已覆盖剪贴板）", text.chars().count()))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = text;
+        Err(DesktopToolError::invalid_params(
+            "clipboard 读写当前仅在 Windows 可用；其他平台请改用 text/key 直接输入，或用 app getvalue 读回控件值".to_string(),
+        ))
+    }
+}
+
+// ==================== 执行后验证（F3） ====================
+
+/// 前台动作执行后的轻量确认：报告当前前台是谁（verify=true 时附加到步骤摘要）。
+/// 不额外截图，只做一次窗口枚举；查不到前台时返回空串，不影响步骤结果。
+fn post_action_verify_note() -> String {
+    let windows = crate::platform::list_all_windows();
+    match windows.iter().find(|w| w.focused) {
+        Some(w) if w.title.is_empty() => format!("，verify=当前前台为空标题窗口（{}）", w.window_id),
+        Some(w) => format!("，verify=当前前台「{}」", w.title),
+        None => "，verify=无前台窗口".to_string(),
+    }
+}
+
+/// 默认截图目录的生命周期上限（J3）：只清理 operate_*.webp；保留最新的 200 个、且不超过 7 天。
+/// 用户显式 save= 的路径不动。返回删除文件数；清理失败静默，不阻断截图结果。
+const OPERATE_SCREENSHOT_KEEP_COUNT: usize = 200;
+const OPERATE_SCREENSHOT_KEEP_SECS: u64 = 7 * 24 * 3600;
+
+fn prune_operate_screenshots(dir: &std::path::Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut files = Vec::<(std::path::PathBuf, Option<std::time::SystemTime>)>::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !path.is_file() || !name.starts_with("operate_") || !name.ends_with(".webp") {
+            continue;
+        }
+        let mtime = entry.metadata().and_then(|m| m.modified()).ok();
+        files.push((path, mtime));
+    }
+    // 按 mtime 倒序（未知时间戳的排最后、优先淘汰）
+    files.sort_by(|a, b| b.1.cmp(&a.1));
+    let now = std::time::SystemTime::now();
+    let mut removed = 0usize;
+    for (idx, (path, mtime)) in files.iter().enumerate() {
+        let expired = mtime.is_some_and(|t| {
+            now.duration_since(t)
+                .map(|d| d.as_secs() > OPERATE_SCREENSHOT_KEEP_SECS)
+                .unwrap_or(false)
+        });
+        if idx >= OPERATE_SCREENSHOT_KEEP_COUNT || expired {
+            if std::fs::remove_file(path).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
 /// 生成 operate 截图默认保存路径：{screenshots_root}/operate_{毫秒时间戳}.webp
 fn default_operate_screenshot_path(screenshots_root: &std::path::Path) -> String {
     let ms = std::time::SystemTime::now()
@@ -855,11 +1019,13 @@ async fn execute_screenshot_action(
     include_base64: bool,
     elements: bool,
     include_text: bool,
-) -> DesktopToolResult<(ScreenshotResponse, String, Option<Vec<UiElementInfo>>)> {
+    max_pixels: Option<u64>,
+) -> DesktopToolResult<(ScreenshotResponse, String, Option<Vec<UiElementInfo>>, usize)> {
+    let use_default_path = save_path.is_none();
     let save_path = save_path.or_else(|| Some(default_operate_screenshot_path(screenshots_root)));
     let request = ScreenshotRequest {
         mode: match mode {
-            ScreenshotModeSpec::Desktop | ScreenshotModeSpec::FocusedWindow | ScreenshotModeSpec::WindowId(_) => ScreenshotMode::Desktop,
+            ScreenshotModeSpec::Desktop | ScreenshotModeSpec::FocusedWindow | ScreenshotModeSpec::WindowId(_) | ScreenshotModeSpec::WindowName(_) => ScreenshotMode::Desktop,
             ScreenshotModeSpec::Region(_) => ScreenshotMode::Region,
             ScreenshotModeSpec::Monitor(_) => ScreenshotMode::Monitor,
         },
@@ -877,16 +1043,23 @@ async fn execute_screenshot_action(
         save_path,
         webp_quality: quality,
         include_base64,
+        max_pixels,
     };
     let result = match mode {
         ScreenshotModeSpec::Desktop | ScreenshotModeSpec::Region(_) | ScreenshotModeSpec::Monitor(_) => run_screenshot_tool(request).await?,
         ScreenshotModeSpec::FocusedWindow => run_capture_window_tool(request, None)?,
         ScreenshotModeSpec::WindowId(window_id) => run_capture_window_tool(request, Some(*window_id))?,
+        ScreenshotModeSpec::WindowName(name) => {
+            let window = resolve_window_by_name(name)?;
+            run_capture_window_tool(request, Some(window.window_id as u32))?
+        }
     };
+    // 默认路径截图顺手做生命周期裁剪（J3）；用户显式 save 的路径不动
+    let pruned = if use_default_path { prune_operate_screenshots(screenshots_root) } else { 0 };
     let mode_name = match mode {
         ScreenshotModeSpec::Desktop => "desktop",
         ScreenshotModeSpec::FocusedWindow => "focused_window",
-        ScreenshotModeSpec::WindowId(_) => "window_id",
+        ScreenshotModeSpec::WindowId(_) | ScreenshotModeSpec::WindowName(_) => "window",
         ScreenshotModeSpec::Region(_) => "region",
         ScreenshotModeSpec::Monitor(_) => "monitor",
     }
@@ -914,7 +1087,7 @@ async fn execute_screenshot_action(
         store_element_tree(elems);
     }
 
-    Ok((result, mode_name, tree))
+    Ok((result, mode_name, tree, pruned))
 }
 
 // ==================== app 后台动作（元素 ref 注册 + 分发） ====================
@@ -996,7 +1169,7 @@ async fn execute_app_get_value(window_id: u32, el: u32) -> DesktopToolResult<Str
         .map_err(DesktopToolError::invalid_params)
 }
 
-async fn execute_app_scroll(window_id: u32, target: AppScriptTarget, monitor: Option<u32>, up: bool, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration) -> DesktopToolResult<&'static str> {
+async fn execute_app_scroll(window_id: u32, target: AppScriptTarget, monitor: Option<u32>, horizontal: bool, positive: bool, repeat: u32, delay: std::time::Duration, pre_delay: std::time::Duration) -> DesktopToolResult<&'static str> {
     sleep_duration(pre_delay).await;
     let app_target = build_app_target(window_id, target, monitor).await?;
     let window_id = window_id as usize;
@@ -1006,7 +1179,7 @@ async fn execute_app_scroll(window_id: u32, target: AppScriptTarget, monitor: Op
             sleep_duration(delay).await;
         }
         let app_target = app_target.clone();
-        method = tokio::task::spawn_blocking(move || crate::platform::app_scroll(window_id, &app_target, up, true, 1))
+        method = tokio::task::spawn_blocking(move || crate::platform::app_scroll(window_id, &app_target, horizontal, positive, true, 1))
             .await
             .map_err(|err| DesktopToolError::internal_error(format!("app scroll task failed: {err}")))?
             .map_err(DesktopToolError::invalid_params)?;
@@ -1038,35 +1211,49 @@ async fn execute_app_key(window_id: u32, keys: &[String], repeat: u32, delay: st
 /// 附加摘要：getvalue 返回读到的值；写/点/滚/键动作返回动作后的内部焦点控件描述（focus=Type('name')），
 /// 让模型不重截就能确认焦点去向。post_delay 在动作完成后统一等待。
 async fn execute_app_action(window_id: u32, action: AppScriptAction, post_delay: std::time::Duration) -> DesktopToolResult<(&'static str, &'static str, Option<String>)> {
-    let (verb, method) = match action {
+    let (verb, method, prefix) = match action {
         AppScriptAction::Click { target, monitor, repeat, dblclick, pre_delay } => {
             let method = execute_app_click(window_id, target, monitor, repeat, dblclick, pre_delay).await?;
-            ("click", method)
+            ("click", method, None)
         }
-        AppScriptAction::SetValue { el, text, pre_delay } => {
-            let method = execute_app_set_value(window_id, el, text, pre_delay).await?;
-            ("setvalue", method)
+        AppScriptAction::SetValue { el, text, pre_delay, verify } => {
+            let method = execute_app_set_value(window_id, el, text.clone(), pre_delay).await?;
+            // F3：verify=true 时读回实际值做一致性确认，只附带到摘要，不改变步骤成败
+            let verify_note = if verify {
+                match execute_app_get_value(window_id, el).await {
+                    Ok(actual) if actual == text => Some("verify=回读一致".to_string()),
+                    Ok(actual) => Some(format!("verify=回读不一致（期望{text:?}，实际{actual:?}）")),
+                    Err(err) => Some(format!("verify=回读失败：{}", err.message)),
+                }
+            } else {
+                None
+            };
+            ("setvalue", method, verify_note)
         }
         AppScriptAction::GetValue { el } => {
             let value = execute_app_get_value(window_id, el).await?;
             return Ok(("getvalue", "valuepattern", Some(format!("value={value:?}"))));
         }
-        AppScriptAction::ScrollUp { target, monitor, repeat, delay, pre_delay } => {
-            let method = execute_app_scroll(window_id, target, monitor, true, repeat, delay, pre_delay).await?;
-            ("scroll_up", method)
-        }
-        AppScriptAction::ScrollDown { target, monitor, repeat, delay, pre_delay } => {
-            let method = execute_app_scroll(window_id, target, monitor, false, repeat, delay, pre_delay).await?;
-            ("scroll_down", method)
+        AppScriptAction::Scroll { target, monitor, horizontal, positive, repeat, delay, pre_delay } => {
+            let method = execute_app_scroll(window_id, target, monitor, horizontal, positive, repeat, delay, pre_delay).await?;
+            ("scroll", method, None)
         }
         AppScriptAction::Key { keys, repeat, delay, pre_delay } => {
             let method = execute_app_key(window_id, &keys, repeat, delay, pre_delay).await?;
-            ("key", method)
+            ("key", method, None)
         }
     };
     sleep_duration(post_delay).await;
     let focus = query_focus_summary(window_id).await;
-    Ok((verb, method, focus.map(|(t, n)| format!("focus={t}('{n}')"))))
+    let mut parts = Vec::new();
+    if let Some(note) = prefix {
+        parts.push(note);
+    }
+    if let Some((kind, name)) = focus {
+        parts.push(format!("focus={kind}('{name}')"));
+    }
+    let extra = if parts.is_empty() { None } else { Some(parts.join("，")) };
+    Ok((verb, method, extra))
 }
 
 /// 动作完成后查询目标窗口的内部焦点控件；仅对修改型动作有意义，失败静默为 None。
@@ -1127,6 +1314,13 @@ fn collect_ui_tree_for_mode(mode: &ScreenshotModeSpec, include_text: bool) -> Ve
                 .map(|w| w.title().unwrap_or_default())
                 .unwrap_or_default();
             vec![(*window_id as usize, title)]
+        }
+        ScreenshotModeSpec::WindowName(name) => {
+            // G2：名字解析失败时返回空树，真正的报错（含候选）由截图执行路径返回
+            match resolve_window_by_name(name) {
+                Ok(window) => vec![(window.window_id, window.title)],
+                Err(_) => Vec::new(),
+            }
         }
         ScreenshotModeSpec::FocusedWindow => windows
             .iter()
@@ -1249,7 +1443,7 @@ mod operate_actions_tests {
     fn key_combo_should_parse_mixed_named_and_char() {
         // 组合键 = 命名键 + 字符键，字符键必须能被识别为 Char，
         // 才能在后端注入真实按键事件触发快捷键
-        let action = parse_script(&OperateRequest { script: "key Control+L".to_string(), timeout_ms: None })
+        let action = parse_script(&OperateRequest { script: "key Control+L".to_string(), timeout_ms: None, retry: None, restore_focus: None })
             .unwrap()
             .into_iter()
             .next()

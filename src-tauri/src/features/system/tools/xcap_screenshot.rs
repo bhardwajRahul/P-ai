@@ -251,7 +251,7 @@ fn encode_screenshot_response(
         || height > IMAGE_NORMALIZE_FOR_LLM_REQUEST_DEFAULT_MAX_DIMENSION
     {
         return Err(DesktopToolError::invalid_params(format!(
-            "截图分辨率过大（{}x{}），当前最多支持 {}x{}；请缩小截取范围：只截目标区域（region）、单块显示器（monitor）或目标窗口（window_id）",
+            "截图分辨率过大（{}x{}），当前最多支持 {}x{}；请缩小截取范围：只截目标区域（region）、单块显示器（monitor）或目标窗口（window_id/window）",
             width,
             height,
             IMAGE_NORMALIZE_FOR_LLM_REQUEST_DEFAULT_MAX_DIMENSION,
@@ -259,12 +259,15 @@ fn encode_screenshot_response(
         )));
     }
     let encode_started = Instant::now();
+    // F2：调用方给像素预算时等比缩小到预算内（默认保持全尺寸，历史行为不变）
+    let full_pixels = u64::from(width) * u64::from(height);
+    let target_pixel_budget = input.max_pixels.unwrap_or(full_pixels).min(full_pixels).max(1);
     let normalized = normalize_rgba_image_for_llm_request_with_options(
         rgba,
         width,
         height,
         LlmRequestImageNormalizeOptions {
-            target_pixel_budget: u64::from(width) * u64::from(height),
+            target_pixel_budget,
             webp_quality: input.webp_quality,
             max_source_bytes: u64::MAX,
             max_dimension: IMAGE_NORMALIZE_FOR_LLM_REQUEST_DEFAULT_MAX_DIMENSION,
@@ -496,6 +499,7 @@ fn encode_screenshot_response_should_reject_over_10k_capture() {
         save_path: None,
         webp_quality: 75.0,
         include_base64: true,
+        max_pixels: None,
     };
     let width = 10_001u32;
     let height = 8u32;
@@ -533,6 +537,7 @@ fn encode_screenshot_response_should_skip_base64_and_save_file_when_disabled() {
         save_path: Some(save_path.clone()),
         webp_quality: 75.0,
         include_base64: false,
+        max_pixels: None,
     };
     let width = 64u32;
     let height = 64u32;

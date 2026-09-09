@@ -1,4 +1,14 @@
 /// 取动作所在的脚本行号（用于失败回传定位）。
+fn screenshot_content_hash(base64: &Option<String>) -> Option<u64> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    base64.as_ref().map(|text| {
+        let mut hasher = DefaultHasher::new();
+        text.hash(&mut hasher);
+        hasher.finish()
+    })
+}
+
 fn desktop_action_line(action: &DesktopScriptAction) -> usize {
     match action {
         DesktopScriptAction::MouseClick { line, .. }
@@ -13,6 +23,7 @@ fn desktop_action_line(action: &DesktopScriptAction) -> usize {
         | DesktopScriptAction::WindowList { line }
         | DesktopScriptAction::WindowActivate { line, .. }
         | DesktopScriptAction::Screenshot { line, .. }
+        | DesktopScriptAction::Clipboard { line, .. }
         | DesktopScriptAction::App { line, .. } => *line,
     }
 }
@@ -30,6 +41,8 @@ async fn run_operate_tool(
         runtime_log_warn("[桌面脚本] DPI 感知设置失败，高缩放或多显示器场景下坐标可能偏移".to_string());
     }
     let actions = parse_script(&input)?;
+    // 单步重试预算（D4）：只对输入步骤的执行调用生效，钳制在 0~3，默认不重试
+    let retry_budget = input.retry.unwrap_or(0).min(3);
     let total_actions = actions.len();
     runtime_log_info(format!(
         "[桌面脚本] 开始，任务=run_operate_tool，total_actions={}，timestamp={}",
@@ -46,6 +59,13 @@ async fn run_operate_tool(
     let mut width = None;
     let mut height = None;
     let mut latest_windows: Option<Vec<WindowInfo>> = None;
+    // 执行前的前台（C4）：restore_focus=true 时结束后切回，恢复失败只记 warnings
+    let initial_foreground = crate::platform::list_all_windows()
+        .into_iter()
+        .find(|w| w.focused)
+        .map(|w| w.window_id);
+    // 上次截图的内容哈希（F1）：画面相同时不重复传输 base64
+    let mut last_screenshot_hash: Option<u64> = None;
 
     // 步骤失败即记录失败位置并停止后续步骤，已完成的步骤仍然返回（D1）
     macro_rules! run_step {
@@ -58,6 +78,33 @@ async fn run_operate_tool(
                 }
             }
         };
+    }
+    // 单步重试（D4）：输入步骤执行失败时按预算重试；参数非法不重试（写法错了重试也没用）。
+    // 门控拦截/焦点策略/超时中断发生在执行调用之前，自然不在重试范围内。
+    // 求值为 Some((结果, 重试次数))；预算耗尽时记录 failure 并求值为 None，调用方用 `None => break` 中断。
+    macro_rules! run_step_retry {
+        ($line:expr, $call:expr) => {{
+            let mut __attempts: u32 = 0;
+            loop {
+                match $call.await {
+                    Ok(__value) => break Some((__value, __attempts)),
+                    Err(__err) => {
+                        let __retryable = !matches!(__err.code, DesktopToolErrorCode::InvalidParams);
+                        if __retryable && __attempts < retry_budget {
+                            __attempts += 1;
+                            runtime_log_warn(format!(
+                                "[桌面脚本] 步骤失败准备重试，任务=run_operate_tool，line={}，attempt={}，原因={}",
+                                $line, __attempts, __err.message
+                            ));
+                            sleep_duration(std::time::Duration::from_millis(200)).await;
+                        } else {
+                            failure = Some(OperateFailure { line: $line, message: __err.message, focus_failed: None });
+                            break None;
+                        }
+                    }
+                }
+            }
+        }};
     }
     // 声明了 target 的前台动作，执行前按 focus 策略处理目标窗口（C1/C2/C3），
     // 同时校验敏感应用门控（J1）：命中禁止名单即阻断
@@ -73,6 +120,13 @@ async fn run_operate_tool(
         };
     }
     let note_suffix = |note: Option<String>| note.map(|text| format!("，{text}")).unwrap_or_default();
+    let retry_suffix = |attempts: u32| {
+        if attempts > 0 {
+            format!("，重试{attempts}次后成功")
+        } else {
+            String::new()
+        }
+    };
 
     for action in actions {
         // 脚本内超时中断（D3）：工具级超时是硬中断、已执行步骤会丢，
@@ -88,14 +142,18 @@ async fn run_operate_tool(
             }
         }
         match action {
-            DesktopScriptAction::MouseClick { line, button, target, monitor, repeat, delay, pre_delay, press, window_target, focus } => {
+            DesktopScriptAction::MouseClick { line, button, target, monitor, repeat, delay, pre_delay, press, window_target, focus, verify } => {
                 let focus_note = ensure_foreground!(line, window_target, focus);
-                run_step!(line, execute_mouse_click(&mut enigo, button, &target, monitor, repeat, delay, pre_delay, press));
+                let ((), retried) = match run_step_retry!(line, execute_mouse_click(&mut enigo, button, &target, monitor, repeat, delay, pre_delay, press)) {
+                    Some(pair) => pair,
+                    None => break,
+                };
                 let hit_note = mouse_hit_note(&target, monitor);
+                let verify_note = if verify { post_action_verify_note() } else { String::new() };
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Mouse,
-                    summary: format!("mouse click completed, repeat={repeat}{}{hit_note}", note_suffix(focus_note)),
+                    summary: format!("mouse click completed, repeat={repeat}{}{hit_note}{verify_note}{}", note_suffix(focus_note), retry_suffix(retried)),
                     ok: true,
                     saved_path: None,
                 };
@@ -107,11 +165,14 @@ async fn run_operate_tool(
             }
             DesktopScriptAction::MouseDrag { line, button, from, to, monitor, duration, pre_delay, window_target, focus } => {
                 let focus_note = ensure_foreground!(line, window_target, focus);
-                run_step!(line, execute_mouse_drag(&mut enigo, button, &from, &to, monitor, duration, pre_delay));
+                let ((), retried) = match run_step_retry!(line, execute_mouse_drag(&mut enigo, button, &from, &to, monitor, duration, pre_delay)) {
+                    Some(pair) => pair,
+                    None => break,
+                };
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Mouse,
-                    summary: format!("mouse drag completed{}", note_suffix(focus_note)),
+                    summary: format!("mouse drag completed{}{}", note_suffix(focus_note), retry_suffix(retried)),
                     ok: true,
                     saved_path: None,
                 };
@@ -123,11 +184,14 @@ async fn run_operate_tool(
             }
             DesktopScriptAction::MouseMove { line, target, monitor, pre_delay, window_target, focus } => {
                 let focus_note = ensure_foreground!(line, window_target, focus);
-                run_step!(line, execute_mouse_move(&mut enigo, &target, monitor, pre_delay));
+                let ((), retried) = match run_step_retry!(line, execute_mouse_move(&mut enigo, &target, monitor, pre_delay)) {
+                    Some(pair) => pair,
+                    None => break,
+                };
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Mouse,
-                    summary: format!("mouse move completed{}", note_suffix(focus_note)),
+                    summary: format!("mouse move completed{}{}", note_suffix(focus_note), retry_suffix(retried)),
                     ok: true,
                     saved_path: None,
                 };
@@ -139,11 +203,14 @@ async fn run_operate_tool(
             }
             DesktopScriptAction::MouseButtonState { line, button, pressed, pre_delay, window_target, focus } => {
                 let focus_note = ensure_foreground!(line, window_target, focus);
-                run_step!(line, execute_mouse_button_state(&mut enigo, button, pressed, pre_delay));
+                let ((), retried) = match run_step_retry!(line, execute_mouse_button_state(&mut enigo, button, pressed, pre_delay)) {
+                    Some(pair) => pair,
+                    None => break,
+                };
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Mouse,
-                    summary: format!("mouse {} completed{}", if pressed { "down" } else { "up" }, note_suffix(focus_note)),
+                    summary: format!("mouse {} completed{}{}", if pressed { "down" } else { "up" }, note_suffix(focus_note), retry_suffix(retried)),
                     ok: true,
                     saved_path: None,
                 };
@@ -153,13 +220,17 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::MouseScroll { line, direction, repeat, delay, pre_delay, window_target, focus } => {
+            DesktopScriptAction::MouseScroll { line, horizontal, direction, repeat, delay, pre_delay, window_target, focus } => {
                 let focus_note = ensure_foreground!(line, window_target, focus);
-                run_step!(line, execute_mouse_scroll(&mut enigo, direction, repeat, delay, pre_delay));
+                let ((), retried) = match run_step_retry!(line, execute_mouse_scroll(&mut enigo, horizontal, direction, repeat, delay, pre_delay)) {
+                    Some(pair) => pair,
+                    None => break,
+                };
+                let axis = if horizontal { "horizontal" } else { "vertical" };
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Mouse,
-                    summary: format!("mouse scroll completed, repeat={repeat}{}", note_suffix(focus_note)),
+                    summary: format!("mouse scroll completed, axis={axis}, repeat={repeat}{}{}", note_suffix(focus_note), retry_suffix(retried)),
                     ok: true,
                     saved_path: None,
                 };
@@ -169,8 +240,16 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::App { line, window_id, action, post_delay } => {
-                // 后台直连同样受门控约束（J1）：按 window_id 查标题，命中即阻断；
+            DesktopScriptAction::App { line, window, action, post_delay } => {
+                // G2：名字选择器每次执行现查，不缓存句柄；解析失败（含候选）直接中断
+                let window_id = match resolve_app_window(&window) {
+                    Ok(id) => id,
+                    Err(err) => {
+                        failure = Some(OperateFailure { line, message: err.message, focus_failed: None });
+                        break;
+                    }
+                };
+                // 后台直连同样受门控约束（J1）：按解析出的句柄查标题，命中即阻断；
                 // 窗口已不存在时不拦截，交由原有路径报错
                 if !blocked_apps.is_empty() {
                     let hit = crate::platform::list_all_windows()
@@ -182,12 +261,19 @@ async fn run_operate_tool(
                         break;
                     }
                 }
-                let (verb, method, extra) = run_step!(line, execute_app_action(window_id, action, post_delay));
+                let ((verb, method, extra), retried) = match run_step_retry!(line, execute_app_action(window_id, action.clone(), post_delay)) {
+                    Some(triple) => triple,
+                    None => break,
+                };
                 let extra_text = extra.map(|e| format!(", {e}")).unwrap_or_default();
+                let window_label = match &window {
+                    AppWindowSelector::Id(id) => format!("window_id={id}"),
+                    AppWindowSelector::Name(name) => format!("window=\"{name}\"（{window_id}）"),
+                };
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::App,
-                    summary: format!("app {verb} completed, window_id={window_id}, method={method}{extra_text}"),
+                    summary: format!("app {verb} completed, {window_label}, method={method}{extra_text}{}", retry_suffix(retried)),
                     ok: true,
                     saved_path: None,
                 };
@@ -197,13 +283,17 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::Key { line, keys, repeat, delay, pre_delay, press, window_target, focus } => {
+            DesktopScriptAction::Key { line, keys, repeat, delay, pre_delay, press, window_target, focus, verify } => {
                 let focus_note = ensure_foreground!(line, window_target, focus);
-                run_step!(line, execute_key_action(&mut enigo, &keys, line, repeat, delay, pre_delay, press));
+                let ((), retried) = match run_step_retry!(line, execute_key_action(&mut enigo, &keys, line, repeat, delay, pre_delay, press)) {
+                    Some(pair) => pair,
+                    None => break,
+                };
+                let verify_note = if verify { post_action_verify_note() } else { String::new() };
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Key,
-                    summary: format!("key action completed, combo={}, repeat={repeat}{}", keys.join("+"), note_suffix(focus_note)),
+                    summary: format!("key action completed, combo={}, repeat={repeat}{}{verify_note}{}", keys.join("+"), note_suffix(focus_note), retry_suffix(retried)),
                     ok: true,
                     saved_path: None,
                 };
@@ -213,13 +303,17 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::Text { line, text, repeat, delay, pre_delay, window_target, focus } => {
+            DesktopScriptAction::Text { line, text, repeat, delay, pre_delay, window_target, focus, verify } => {
                 let focus_note = ensure_foreground!(line, window_target, focus);
-                run_step!(line, execute_text_action(&mut enigo, &text, repeat, delay, pre_delay));
+                let ((), retried) = match run_step_retry!(line, execute_text_action(&mut enigo, &text, repeat, delay, pre_delay)) {
+                    Some(pair) => pair,
+                    None => break,
+                };
+                let verify_note = if verify { post_action_verify_note() } else { String::new() };
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Text,
-                    summary: format!("text input completed, chars={}, repeat={repeat}{}", text.chars().count(), note_suffix(focus_note)),
+                    summary: format!("text input completed, chars={}, repeat={repeat}{}{verify_note}{}", text.chars().count(), note_suffix(focus_note), retry_suffix(retried)),
                     ok: true,
                     saved_path: None,
                 };
@@ -329,15 +423,19 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::Screenshot { line, mode, save_path, quality, elements, include_text } => {
-                let (result, mode_name, ui_tree) =
-                    run_step!(line, execute_screenshot_action(&mode, save_path, quality, screenshots_root, include_base64, elements, include_text));
+            DesktopScriptAction::Screenshot { line, mode, save_path, quality, elements, include_text, max_pixels } => {
+                let (result, mode_name, ui_tree, pruned) =
+                    run_step!(line, execute_screenshot_action(&mode, save_path, quality, screenshots_root, include_base64, elements, include_text, max_pixels));
+                // J3：默认路径截图顺手裁剪过期文件，只在清掉东西时告诉模型
+                if pruned > 0 {
+                    warnings.push(format!("已清理 {pruned} 个过期临时截图（仅清理 operate_*.webp 默认路径，保留最新 200 个且 7 天内）"));
+                }
                 let tree_summary = match &ui_tree {
+                    // E4/H3：空树时把平台原因讲清楚，避免模型反复重试；Windows 沿用原有文案
                     Some(elems) if elems.is_empty() => {
-                        if cfg!(target_os = "windows") {
-                            "，控件树为空或目标窗口未暴露 UIA".to_string()
-                        } else {
-                            "，当前平台不支持控件树".to_string()
+                        match crate::platform::ui_tree_empty_hint() {
+                            Some(hint) => format!("，{hint}"),
+                            None => "，控件树为空或目标窗口未暴露 UIA".to_string(),
                         }
                     }
                     Some(elems) if elems.len() >= crate::platform::MAX_ELEMENTS => format!(
@@ -347,6 +445,18 @@ async fn run_operate_tool(
                     Some(elems) => format!("，控件树元素数={}", elems.len()),
                     None => String::new(),
                 };
+                // F1：画面与本次调用的上次截图相同时不重复传输 base64，模型沿用上下文中的上一张图
+                let hash = screenshot_content_hash(&result.image_base64);
+                let (dedup, base64_out) = match (hash, last_screenshot_hash) {
+                    (Some(current), Some(previous)) if current == previous => (true, None),
+                    _ => (false, result.image_base64.clone()),
+                };
+                last_screenshot_hash = hash;
+                let dedup_note = if dedup {
+                    format!("，dedup=true（画面与上次截图相同，未重复传输，hash={}）", hash.unwrap_or(0))
+                } else {
+                    String::new()
+                };
                 latest_screenshot = Some(LatestScreenshotInfo {
                     mode: mode_name.clone(),
                     width: result.width,
@@ -355,13 +465,13 @@ async fn run_operate_tool(
                     tree: ui_tree,
                 });
                 image_mime = Some(result.image_mime.clone());
-                image_base64 = result.image_base64.clone();
+                image_base64 = base64_out;
                 width = Some(result.width);
                 height = Some(result.height);
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Screenshot,
-                    summary: format!("screenshot completed, mode={mode_name}{tree_summary}"),
+                    summary: format!("screenshot completed, mode={mode_name}{tree_summary}{dedup_note}"),
                     ok: true,
                     saved_path: result.path,
                 };
@@ -371,6 +481,48 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
+            DesktopScriptAction::Clipboard { line, op } => {
+                // A4：剪贴板当数据通道用；read 只读不改，write 显式覆盖（意图明确才用）
+                let summary = match run_step_retry!(line, async {
+                    match &op {
+                        ClipboardOp::Read => execute_clipboard_read(),
+                        ClipboardOp::Write(text) => execute_clipboard_write(text),
+                    }
+                }) {
+                    Some((text, _)) => text,
+                    None => break,
+                };
+                let step = DesktopScriptStepResult {
+                    line,
+                    kind: DesktopScriptStepKind::Clipboard,
+                    summary,
+                    ok: true,
+                    saved_path: None,
+                };
+                runtime_log_info(format!(
+                    "[桌面脚本] 步骤完成，任务=run_operate_tool，line={}，kind=Clipboard，summary={}",
+                    line, step.summary
+                ));
+                steps.push(step);
+            }
+        }
+    }
+
+    // 执行后焦点恢复（C4）：restore_focus=true 时把前台切回执行前的窗口，失败只记 warnings，不影响主结果
+    if input.restore_focus.unwrap_or(false) {
+        if let Some(window_id) = initial_foreground {
+            let restored = tokio::task::spawn_blocking(move || crate::platform::activate_window(window_id))
+                .await
+                .map(|(_, ok)| ok)
+                .unwrap_or(false);
+            if restored {
+                runtime_log_info("[桌面脚本] 已按 restore_focus 恢复执行前的前台窗口".to_string());
+            } else {
+                warnings.push(format!("restore_focus 恢复前台失败（window_id={window_id}，窗口可能已关闭）；不影响本次执行结果"));
+                runtime_log_warn(format!("[桌面脚本] restore_focus 恢复前台失败，window_id={window_id}"));
+            }
+        } else {
+            warnings.push("restore_focus 未生效：执行前没有记录到前台窗口；不影响本次执行结果".to_string());
         }
     }
 
@@ -401,6 +553,21 @@ async fn run_operate_tool(
             .map(|value| value.to_string())
             .unwrap_or_else(|| "-".to_string())
     ));
+
+    // 操作审计（J2）：逐步骤记录时间、动作、目标、结果，关键操作可追溯
+    let audit_time = now_iso();
+    for step in &steps {
+        runtime_log_info(format!(
+            "[桌面脚本][审计] 时间={audit_time}，line={}，kind={:?}，结果=成功，摘要={}",
+            step.line, step.kind, step.summary
+        ));
+    }
+    if let Some(item) = &failure {
+        runtime_log_info(format!(
+            "[桌面脚本][审计] 时间={audit_time}，line={}，结果=失败，原因={}",
+            item.line, item.message
+        ));
+    }
 
     Ok(OperateResponse {
         ok,
@@ -454,7 +621,7 @@ mod operate_tool_tests {
     use super::*;
 
     fn parse_single(script: &str) -> DesktopScriptAction {
-        parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None })
+        parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None, retry: None, restore_focus: None })
             .unwrap()
             .into_iter()
             .next()
@@ -510,7 +677,7 @@ mod operate_tool_tests {
 
     #[test]
     fn parse_mouse_drag_requires_two_points() {
-        let err = parse_script(&OperateRequest { script: "mouse left drag @0.1,0.1".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "mouse left drag @0.1,0.1".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("拖拽格式"));
     }
 
@@ -574,19 +741,19 @@ mod operate_tool_tests {
 
     #[test]
     fn parse_focus_without_target_is_rejected() {
-        let err = parse_script(&OperateRequest { script: "key Enter focus=strict".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "key Enter focus=strict".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("focus 必须与 target"));
     }
 
     #[test]
     fn parse_focus_invalid_value_is_rejected() {
-        let err = parse_script(&OperateRequest { script: "text \"hi\" target=\"x\" focus=always".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "text \"hi\" target=\"x\" focus=always".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("focus 非法"));
     }
 
     #[test]
     fn parse_target_invalid_value_is_rejected() {
-        let err = parse_script(&OperateRequest { script: "text \"hi\" target=notepad".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "text \"hi\" target=notepad".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("windowId 非法"));
     }
 
@@ -619,7 +786,7 @@ mod operate_tool_tests {
 
     #[test]
     fn parse_mouse_move_requires_point() {
-        let err = parse_script(&OperateRequest { script: "mouse move".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "mouse move".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("第 1 行 mouse"));
         assert!(err.message.contains("移动格式"));
     }
@@ -627,8 +794,8 @@ mod operate_tool_tests {
     #[test]
     fn parse_app_click_by_element_ref() {
         match parse_single("app 0x1a2b click el=3 pre_delay=0.1") {
-            DesktopScriptAction::App { window_id, action, .. } => {
-                assert_eq!(window_id, 0x1a2b);
+            DesktopScriptAction::App { window, action, .. } => {
+                assert!(matches!(window, AppWindowSelector::Id(0x1a2b)));
                 match action {
                     AppScriptAction::Click { target, repeat, .. } => {
                         assert!(matches!(target, AppScriptTarget::Element(3)));
@@ -644,8 +811,8 @@ mod operate_tool_tests {
     #[test]
     fn parse_app_click_by_point() {
         match parse_single("app 123 click @0.50,0.50 repeat=2") {
-            DesktopScriptAction::App { window_id, action, .. } => {
-                assert_eq!(window_id, 123);
+            DesktopScriptAction::App { window, action, .. } => {
+                assert!(matches!(window, AppWindowSelector::Id(123)));
                 match action {
                     AppScriptAction::Click { target, repeat, .. } => {
                         assert!(matches!(target, AppScriptTarget::Point(_)));
@@ -660,7 +827,7 @@ mod operate_tool_tests {
 
     #[test]
     fn parse_app_setvalue_rejects_point_target() {
-        let err = parse_script(&OperateRequest { script: "app 1 setvalue @0.5,0.5 \"hi\"".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "app 1 setvalue @0.5,0.5 \"hi\"".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("setvalue"));
         assert!(err.message.contains("el="));
     }
@@ -668,11 +835,13 @@ mod operate_tool_tests {
     #[test]
     fn parse_app_scroll_script() {
         match parse_single("app 45 scroll_down el=7 repeat=3 delay=0.2") {
-            DesktopScriptAction::App { window_id, action, .. } => {
-                assert_eq!(window_id, 45);
+            DesktopScriptAction::App { window, action, .. } => {
+                assert!(matches!(window, AppWindowSelector::Id(45)));
                 match action {
-                    AppScriptAction::ScrollDown { target, repeat, delay, .. } => {
+                    AppScriptAction::Scroll { target, horizontal, positive, repeat, delay, .. } => {
                         assert!(matches!(target, AppScriptTarget::Element(7)));
+                        assert!(!horizontal);
+                        assert!(positive);
                         assert_eq!(repeat, 3);
                         assert_eq!(delay, std::time::Duration::from_millis(200));
                     }
@@ -684,10 +853,34 @@ mod operate_tool_tests {
     }
 
     #[test]
+    fn parse_app_scroll_left_is_horizontal() {
+        match parse_single("app 45 scroll_left el=7") {
+            DesktopScriptAction::App { action, .. } => {
+                assert!(matches!(
+                    action,
+                    AppScriptAction::Scroll { horizontal: true, positive: false, .. }
+                ));
+            }
+            _ => panic!("expected app action"),
+        }
+    }
+
+    #[test]
+    fn parse_app_window_by_name() {
+        match parse_single("app \"记事本\" click el=1") {
+            DesktopScriptAction::App { window, action, .. } => {
+                assert!(matches!(window, AppWindowSelector::Name(_)));
+                assert!(matches!(action, AppScriptAction::Click { .. }));
+            }
+            _ => panic!("expected app action"),
+        }
+    }
+
+    #[test]
     fn parse_app_key_script() {
         match parse_single("app 663002 key Enter") {
-            DesktopScriptAction::App { window_id, action, .. } => {
-                assert_eq!(window_id, 663002);
+            DesktopScriptAction::App { window, action, .. } => {
+                assert!(matches!(window, AppWindowSelector::Id(663002)));
                 match action {
                     AppScriptAction::Key { keys, repeat, .. } => {
                         assert_eq!(keys, vec!["Enter".to_string()]);
@@ -715,8 +908,8 @@ mod operate_tool_tests {
     #[test]
     fn parse_app_getvalue_script() {
         match parse_single("app 77 getvalue el=5") {
-            DesktopScriptAction::App { window_id, action: AppScriptAction::GetValue { el }, .. } => {
-                assert_eq!(window_id, 77);
+            DesktopScriptAction::App { window, action: AppScriptAction::GetValue { el }, .. } => {
+                assert!(matches!(window, AppWindowSelector::Id(77)));
                 assert_eq!(el, 5);
             }
             _ => panic!("expected app getvalue action"),
@@ -725,7 +918,7 @@ mod operate_tool_tests {
 
     #[test]
     fn parse_app_getvalue_rejects_point_target() {
-        let err = parse_script(&OperateRequest { script: "app 1 getvalue @0.5,0.5".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "app 1 getvalue @0.5,0.5".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("getvalue"));
         assert!(err.message.contains("el="));
     }
@@ -753,7 +946,7 @@ mod operate_tool_tests {
 
     #[test]
     fn parse_app_dblclick_rejects_bad_value() {
-        let err = parse_script(&OperateRequest { script: "app 8 click @0.5,0.5 dblclick=yes".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "app 8 click @0.5,0.5 dblclick=yes".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("dblclick") || err.message.contains("布尔参数非法"));
     }
 
@@ -770,7 +963,7 @@ mod operate_tool_tests {
 
     #[test]
     fn parse_screenshot_window_id_conflicts_with_region() {
-        let err = parse_script(&OperateRequest { script: "screenshot window_id=1 region=@0.1,0.1,0.2,0.2".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "screenshot window_id=1 region=@0.1,0.1,0.2,0.2".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("window_id"));
     }
 
@@ -784,7 +977,7 @@ mod operate_tool_tests {
 
     #[test]
     fn parse_text_requires_quotes() {
-        let err = parse_script(&OperateRequest { script: "text hello".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "text hello".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("第 1 行 text"));
         assert!(err.message.contains("双引号"));
     }
@@ -800,7 +993,7 @@ mod operate_tool_tests {
     #[test]
     fn parse_text_multiline_inside_quotes_stays_single_action() {
         let script = "text \"第一行\n第二行\"";
-        let actions = parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None }).unwrap();
+        let actions = parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap();
         assert_eq!(actions.len(), 1);
         match &actions[0] {
             DesktopScriptAction::Text { text, .. } => assert_eq!(text, "第一行\n第二行"),
@@ -811,14 +1004,14 @@ mod operate_tool_tests {
     #[test]
     fn parse_script_newline_outside_quotes_splits_actions() {
         let script = "text \"第一行\"\ntext \"第二行\"\nscreenshot";
-        let actions = parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None }).unwrap();
+        let actions = parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap();
         assert_eq!(actions.len(), 3);
     }
 
     #[test]
     fn parse_script_multiline_line_numbers_are_accurate() {
         let script = "text \"a\"\nkey Enter\nscreenshot";
-        let actions = parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None }).unwrap();
+        let actions = parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap();
         match &actions[1] {
             DesktopScriptAction::Key { line, .. } => assert_eq!(*line, 2),
             other => panic!("expected key action at line 2, got {other:?}"),
@@ -828,21 +1021,21 @@ mod operate_tool_tests {
     #[test]
     fn parse_script_unclosed_quote_reports_line_number() {
         let script = "text \"第一行\n第二行";
-        let err = parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: script.to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("第 1 行"));
         assert!(err.message.contains("双引号未闭合"));
     }
 
     #[test]
     fn screenshot_save_requires_absolute_path() {
-        let err = parse_script(&OperateRequest { script: r#"screenshot save="tmp/shot.webp""#.to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: r#"screenshot save="tmp/shot.webp""#.to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("第 1 行 screenshot"));
         assert!(err.message.contains("绝对路径"));
     }
 
     #[test]
     fn mouse_coordinates_must_be_normalized() {
-        let err = parse_script(&OperateRequest { script: "mouse left click @1.2,0.5".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "mouse left click @1.2,0.5".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("第 1 行 mouse"));
         assert!(err.message.contains("0.0~1.0"));
     }
@@ -873,7 +1066,7 @@ mod operate_tool_tests {
 
     #[test]
     fn screenshot_tree_invalid_should_reject() {
-        let err = parse_script(&OperateRequest { script: "screenshot elements=yes".to_string(), timeout_ms: None }).unwrap_err();
+        let err = parse_script(&OperateRequest { script: "screenshot elements=yes".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("第 1 行 screenshot"));
         assert!(err.message.contains("elements 非法"));
     }
