@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-07T22:49:32.623Z",
+  "generatedAt": "2026-09-09T16:04:39.923Z",
   "latestVersion": "v0.84.1",
   "releases": [
     {
@@ -1081,11 +1081,6 @@
       "version": "v0.9.0",
       "path": "docs/changelog/releases/v0.9.0.md",
       "summary": "发布（release-0.9.0）：整理并发布当前这一轮聊天窗口、Markdown 渲染、流式输出与会话链路重构成果"
-    },
-    {
-      "version": "UNRELEASED",
-      "path": "docs/changelog/releases/UNRELEASED.md",
-      "summary": ""
     }
   ]
 }
