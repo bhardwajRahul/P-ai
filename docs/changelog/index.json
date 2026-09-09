@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-09-09T16:04:39.923Z",
-  "latestVersion": "v0.84.1",
+  "generatedAt": "2026-09-09T17:54:23.048Z",
+  "latestVersion": "v0.85.0",
   "releases": [
+    {
+      "version": "v0.85.0",
+      "path": "docs/changelog/releases/v0.85.0.md",
+      "summary": "AI 修改文件不再等待审批：工作区权限为「审批」时，新建、修改、重命名、删除文件会直接执行，不再弹出智能评估与人工审批确认；每次改动在执行前仍会留下备份，可以照常撤回。"
+    },
     {
       "version": "v0.84.1",
       "path": "docs/changelog/releases/v0.84.1.md",
