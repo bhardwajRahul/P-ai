@@ -359,14 +359,6 @@ fn resolve_window_by_name(name: &str) -> DesktopToolResult<WindowInfo> {
     }
 }
 
-/// 解析 app 动作的目标窗口选择器：句柄直用，名字走按名解析（每次执行现查，不缓存句柄）。
-fn resolve_app_window(selector: &AppWindowSelector) -> DesktopToolResult<u32> {
-    match selector {
-        AppWindowSelector::Id(id) => Ok(*id),
-        AppWindowSelector::Name(name) => resolve_window_by_name(name).map(|w| w.window_id as u32),
-    }
-}
-
 /// 可见窗口标题候选（最多 12 条），用于报错时给模型可改的名字。
 fn window_title_candidates(windows: &[WindowInfo]) -> String {
 
@@ -1068,7 +1060,7 @@ async fn execute_screenshot_action(
     // elements=true：扫描可交互元素树（当前 Windows 实现；其他平台返回空并在 summary 提示）。
     // text=true 时额外纳入非交互文本标签，模型可借「用户名: [输入框]」这类上下文定位目标（E2）。
     // UIA 遍历是同步阻塞调用（数百 ms），放到阻塞线程池执行，避免占用 Tokio 工作线程。
-    let mut tree = if elements {
+    let tree = if elements {
         let mode_for_scan = mode.clone();
         Some(
             tokio::task::spawn_blocking(move || collect_ui_tree_for_mode(&mode_for_scan, include_text))
@@ -1079,55 +1071,24 @@ async fn execute_screenshot_action(
         None
     };
 
-    // 为元素分配快照引用编号（app 动作 el= 的取值），并登记最近一次快照供动作解析核对
-    if let Some(elems) = tree.as_mut() {
-        for (idx, elem) in elems.iter_mut().enumerate() {
-            elem.element_ref = Some(idx as u32 + 1);
-        }
-        store_element_tree(elems);
-    }
+    // tree 原样返回响应，不再分配 ref 编号（el= 已退役，变量动作按元素名新鲜扫描）
 
     Ok((result, mode_name, tree, pruned))
 }
 
-// ==================== app 后台动作（元素 ref 注册 + 分发） ====================
+// ==================== app 后台动作（元素名寻址 + 分发） ====================
 
-/// 最近一次 operate 截图返回的元素快照（含 ref 编号），供 app 动作 el= 解析与核对。
-static LAST_ELEMENT_TREE: std::sync::Mutex<Vec<UiElementInfo>> = std::sync::Mutex::new(Vec::new());
-
-fn store_element_tree(tree: &[UiElementInfo]) {
-    if let Ok(mut slot) = LAST_ELEMENT_TREE.lock() {
-        *slot = tree.to_vec();
-    }
-}
-
-/// 解析 el=<n>：在最近快照中定位元素，校验所属窗口，并换算为该窗口内的扫描序号。
-fn resolve_element_ref(el: u32, window_id: u32) -> DesktopToolResult<(usize, String, String)> {
-    let tree = LAST_ELEMENT_TREE
-        .lock()
-        .map_err(|_| DesktopToolError::internal_error("元素快照注册表被占用"))?;
-    let pos = tree
-        .iter()
-        .position(|e| e.element_ref == Some(el))
-        .ok_or_else(|| {
-            DesktopToolError::invalid_params(format!("el={el} 不存在：请先执行 screenshot（elements=true）获取元素引用"))
-        })?;
-    let entry = &tree[pos];
-    if entry.window_id != window_id {
-        return Err(DesktopToolError::invalid_params(format!(
-            "el={el} 属于窗口 {}，与目标窗口 {window_id} 不一致",
-            entry.window_id
-        )));
-    }
-    let ordinal = tree[..pos].iter().filter(|e| e.window_id == entry.window_id).count();
-    Ok((ordinal, entry.control_type.clone(), entry.name.clone()))
+/// 按元素名解析窗口内控件：每次执行新鲜扫描，不依赖截图快照（ref 已取消）。
+/// 返回 (窗口内序号, 类型, 全名)；找不到或命中多个时错误自带候选。
+fn resolve_element_by_name(window_id: u32, name: &str) -> DesktopToolResult<(usize, String, String)> {
+    crate::platform::app_find_element_by_name(window_id as usize, name).map_err(DesktopToolError::invalid_params)
 }
 
 async fn build_app_target(window_id: u32, target: AppScriptTarget, monitor: Option<u32>) -> DesktopToolResult<AppTarget> {
     match target {
-        AppScriptTarget::Element(el) => {
-            let (ordinal, control_type, name) = resolve_element_ref(el, window_id)?;
-            Ok(AppTarget::Element { el, ordinal, control_type, name })
+        AppScriptTarget::Name(name) => {
+            let (ordinal, control_type, full_name) = resolve_element_by_name(window_id, &name)?;
+            Ok(AppTarget::NamedElement { ordinal, control_type, name: full_name })
         }
         AppScriptTarget::Point(point) => {
             let bounds = monitor_bounds_by_id(monitor)?;
@@ -1148,10 +1109,10 @@ async fn execute_app_click(window_id: u32, target: AppScriptTarget, monitor: Opt
         .map_err(DesktopToolError::invalid_params)
 }
 
-async fn execute_app_set_value(window_id: u32, el: u32, text: String, pre_delay: std::time::Duration) -> DesktopToolResult<&'static str> {
+async fn execute_app_set_value(window_id: u32, name: &str, text: String, pre_delay: std::time::Duration) -> DesktopToolResult<&'static str> {
     sleep_duration(pre_delay).await;
-    let (ordinal, control_type, name) = resolve_element_ref(el, window_id)?;
-    let app_target = AppTarget::Element { el, ordinal, control_type, name };
+    let (ordinal, control_type, full_name) = resolve_element_by_name(window_id, name)?;
+    let app_target = AppTarget::NamedElement { ordinal, control_type, name: full_name };
     let window_id = window_id as usize;
     tokio::task::spawn_blocking(move || crate::platform::app_set_value(window_id, &app_target, &text))
         .await
@@ -1159,9 +1120,9 @@ async fn execute_app_set_value(window_id: u32, el: u32, text: String, pre_delay:
         .map_err(DesktopToolError::invalid_params)
 }
 
-async fn execute_app_get_value(window_id: u32, el: u32) -> DesktopToolResult<String> {
-    let (ordinal, control_type, name) = resolve_element_ref(el, window_id)?;
-    let app_target = AppTarget::Element { el, ordinal, control_type, name };
+async fn execute_app_get_value(window_id: u32, name: &str) -> DesktopToolResult<String> {
+    let (ordinal, control_type, full_name) = resolve_element_by_name(window_id, name)?;
+    let app_target = AppTarget::NamedElement { ordinal, control_type, name: full_name };
     let window_id = window_id as usize;
     tokio::task::spawn_blocking(move || crate::platform::app_get_value(window_id, &app_target))
         .await
@@ -1216,11 +1177,11 @@ async fn execute_app_action(window_id: u32, action: AppScriptAction, post_delay:
             let method = execute_app_click(window_id, target, monitor, repeat, dblclick, pre_delay).await?;
             ("click", method, None)
         }
-        AppScriptAction::SetValue { el, text, pre_delay, verify } => {
-            let method = execute_app_set_value(window_id, el, text.clone(), pre_delay).await?;
+        AppScriptAction::SetValue { name, text, pre_delay, verify } => {
+            let method = execute_app_set_value(window_id, &name, text.clone(), pre_delay).await?;
             // F3：verify=true 时读回实际值做一致性确认，只附带到摘要，不改变步骤成败
             let verify_note = if verify {
-                match execute_app_get_value(window_id, el).await {
+                match execute_app_get_value(window_id, &name).await {
                     Ok(actual) if actual == text => Some("verify=回读一致".to_string()),
                     Ok(actual) => Some(format!("verify=回读不一致（期望{text:?}，实际{actual:?}）")),
                     Err(err) => Some(format!("verify=回读失败：{}", err.message)),
@@ -1230,8 +1191,8 @@ async fn execute_app_action(window_id: u32, action: AppScriptAction, post_delay:
             };
             ("setvalue", method, verify_note)
         }
-        AppScriptAction::GetValue { el } => {
-            let value = execute_app_get_value(window_id, el).await?;
+        AppScriptAction::GetValue { name } => {
+            let value = execute_app_get_value(window_id, &name).await?;
             return Ok(("getvalue", "valuepattern", Some(format!("value={value:?}"))));
         }
         AppScriptAction::Scroll { target, monitor, horizontal, positive, repeat, delay, pre_delay } => {
@@ -1390,15 +1351,15 @@ mod operate_actions_tests {
         let region = ScreenshotModeSpec::Region(NormalizedRegion { x: 0.16, y: 0.04, width: 0.36, height: 0.9 });
         let all = vec![
             // region 内
-            UiElementInfo { window_id: 1, window_title: "in".into(), control_type: "Button".into(), name: "in".into(), x: 0.3, y: 0.5, width: 0.05, height: 0.05, focused: false, element_ref: None },
+            UiElementInfo { window_id: 1, window_title: "in".into(), control_type: "Button".into(), name: "in".into(), x: 0.3, y: 0.5, width: 0.05, height: 0.05, focused: false },
             // 完全在 region 外（任务栏 y=0.958 场景）
-            UiElementInfo { window_id: 2, window_title: "taskbar".into(), control_type: "Button".into(), name: "taskbar".into(), x: 0.3, y: 0.958, width: 0.05, height: 0.03, focused: false, element_ref: None },
+            UiElementInfo { window_id: 2, window_title: "taskbar".into(), control_type: "Button".into(), name: "taskbar".into(), x: 0.3, y: 0.958, width: 0.05, height: 0.03, focused: false },
             // x 越界（Chrome 场景，y 高达 4.x）
-            UiElementInfo { window_id: 3, window_title: "chrome".into(), control_type: "Button".into(), name: "chrome".into(), x: 0.3, y: 4.2, width: 0.05, height: 0.05, focused: false, element_ref: None },
+            UiElementInfo { window_id: 3, window_title: "chrome".into(), control_type: "Button".into(), name: "chrome".into(), x: 0.3, y: 4.2, width: 0.05, height: 0.05, focused: false },
             // 部分相交：矩形左边缘在 region 内，右边缘超出
-            UiElementInfo { window_id: 4, window_title: "partial".into(), control_type: "Edit".into(), name: "partial".into(), x: 0.4, y: 0.5, width: 0.3, height: 0.05, focused: false, element_ref: None },
+            UiElementInfo { window_id: 4, window_title: "partial".into(), control_type: "Edit".into(), name: "partial".into(), x: 0.4, y: 0.5, width: 0.3, height: 0.05, focused: false },
             // 负坐标（PAI 窗口主屏外元素）
-            UiElementInfo { window_id: 5, window_title: "neg".into(), control_type: "Button".into(), name: "neg".into(), x: -0.2, y: 0.5, width: 0.05, height: 0.05, focused: false, element_ref: None },
+            UiElementInfo { window_id: 5, window_title: "neg".into(), control_type: "Button".into(), name: "neg".into(), x: -0.2, y: 0.5, width: 0.05, height: 0.05, focused: false },
         ];
         let kept: Vec<&UiElementInfo> = all
             .iter()

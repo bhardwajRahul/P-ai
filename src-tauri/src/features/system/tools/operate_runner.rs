@@ -24,6 +24,7 @@ fn desktop_action_line(action: &DesktopScriptAction) -> usize {
         | DesktopScriptAction::WindowActivate { line, .. }
         | DesktopScriptAction::Screenshot { line, .. }
         | DesktopScriptAction::Clipboard { line, .. }
+        | DesktopScriptAction::AppDeclare { line, .. }
         | DesktopScriptAction::App { line, .. } => *line,
     }
 }
@@ -66,6 +67,9 @@ async fn run_operate_tool(
         .map(|w| w.window_id);
     // 上次截图的内容哈希（F1）：画面相同时不重复传输 base64
     let mut last_screenshot_hash: Option<u64> = None;
+    // 脚本内窗口变量表（变量 → (窗口名, 声明行 monitor)）：声明行登记，使用行现查句柄，不缓存；
+    // 脚本结束即丢弃，不跨调用
+    let mut app_symbols = std::collections::HashMap::<String, (String, Option<u32>)>::new();
 
     // 步骤失败即记录失败位置并停止后续步骤，已完成的步骤仍然返回（D1）
     macro_rules! run_step {
@@ -240,10 +244,34 @@ async fn run_operate_tool(
                 ));
                 steps.push(step);
             }
-            DesktopScriptAction::App { line, window, action, post_delay } => {
-                // G2：名字选择器每次执行现查，不缓存句柄；解析失败（含候选）直接中断
-                let window_id = match resolve_app_window(&window) {
-                    Ok(id) => id,
+            DesktopScriptAction::AppDeclare { line, var, name, monitor } => {
+                // 声明只登记名字与显示器，不查句柄；重复声明即覆盖
+                app_symbols.insert(var.clone(), (name.clone(), monitor));
+                let monitor_note = monitor.map(|id| format!(", monitor={id}")).unwrap_or_default();
+                let step = DesktopScriptStepResult {
+                    line,
+                    kind: DesktopScriptStepKind::App,
+                    summary: format!("app declare completed, {var} = app \"{name}\"{monitor_note}"),
+                    ok: true,
+                    saved_path: None,
+                };
+                runtime_log_info(format!(
+                    "[桌面脚本] 步骤完成，任务=run_operate_tool，line={}，kind=AppDeclare，summary={}",
+                    line, step.summary
+                ));
+                steps.push(step);
+            }
+            DesktopScriptAction::App { line, var, action, post_delay } => {
+                // 变量每次使用现查句柄，不缓存（窗口关闭重开后句柄会变，同脚本重跑行为一致）
+                let (name, declared_monitor) = match app_symbols.get(&var) {
+                    Some(entry) => entry.clone(),
+                    None => {
+                        failure = Some(OperateFailure { line, message: format!("变量 `{var}` 未声明：先用 `{var} = app \"窗口名\"` 声明"), focus_failed: None });
+                        break;
+                    }
+                };
+                let window_id = match resolve_window_by_name(&name) {
+                    Ok(window) => window.window_id as u32,
                     Err(err) => {
                         failure = Some(OperateFailure { line, message: err.message, focus_failed: None });
                         break;
@@ -261,15 +289,22 @@ async fn run_operate_tool(
                         break;
                     }
                 }
+                // 坐标基准显示器：动作行 monitor 优先，未写时用声明行 monitor
+                let mut action = action;
+                if declared_monitor.is_some() {
+                    match &mut action {
+                        AppScriptAction::Click { monitor, .. } | AppScriptAction::Scroll { monitor, .. } if monitor.is_none() => {
+                            *monitor = declared_monitor;
+                        }
+                        _ => {}
+                    }
+                }
                 let ((verb, method, extra), retried) = match run_step_retry!(line, execute_app_action(window_id, action.clone(), post_delay)) {
                     Some(triple) => triple,
                     None => break,
                 };
                 let extra_text = extra.map(|e| format!(", {e}")).unwrap_or_default();
-                let window_label = match &window {
-                    AppWindowSelector::Id(id) => format!("window_id={id}"),
-                    AppWindowSelector::Name(name) => format!("window=\"{name}\"（{window_id}）"),
-                };
+                let window_label = format!("{var}=\"{name}\"（{window_id}）");
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::App,
@@ -791,15 +826,59 @@ mod operate_tool_tests {
         assert!(err.message.contains("移动格式"));
     }
 
+    /// 变量脚本解析 helper：自动在动作前加声明行
+    fn parse_var_script(var: &str, window: &str, action_line: &str) -> Vec<DesktopScriptAction> {
+        let script = format!("{var} = app \"{window}\"\n{action_line}");
+        parse_script(&OperateRequest { script, timeout_ms: None, retry: None, restore_focus: None }).unwrap()
+    }
+
     #[test]
-    fn parse_app_click_by_element_ref() {
-        match parse_single("app 0x1a2b click el=3 pre_delay=0.1") {
-            DesktopScriptAction::App { window, action, .. } => {
-                assert!(matches!(window, AppWindowSelector::Id(0x1a2b)));
+    fn parse_var_declare_script() {
+        match parse_single("w = app \"记事本\"") {
+            DesktopScriptAction::AppDeclare { var, name, monitor, .. } => {
+                assert_eq!(var, "w");
+                assert_eq!(name, "记事本");
+                assert!(monitor.is_none());
+            }
+            _ => panic!("expected app declare"),
+        }
+    }
+
+    #[test]
+    fn parse_var_declare_with_monitor() {
+        match parse_single("note = app \"记事本\" monitor=1") {
+            DesktopScriptAction::AppDeclare { var, name, monitor, .. } => {
+                assert_eq!(var, "note");
+                assert_eq!(name, "记事本");
+                assert_eq!(monitor, Some(1));
+            }
+            _ => panic!("expected app declare"),
+        }
+    }
+
+    #[test]
+    fn parse_var_declare_rejects_keyword_name() {
+        let err = parse_script(&OperateRequest { script: "mouse = app \"记事本\"".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
+        assert!(err.message.contains("不得与动作关键字重名"));
+    }
+
+    #[test]
+    fn parse_var_action_requires_declare() {
+        let err = parse_script(&OperateRequest { script: "w click \"保存\"".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
+        assert!(err.message.contains("未声明"));
+    }
+
+    #[test]
+    fn parse_var_click_by_name() {
+        let actions = parse_var_script("w", "记事本", "w click \"保存\" pre_delay=0.1");
+        assert!(matches!(&actions[0], DesktopScriptAction::AppDeclare { .. }));
+        match &actions[1] {
+            DesktopScriptAction::App { var, action, .. } => {
+                assert_eq!(var, "w");
                 match action {
                     AppScriptAction::Click { target, repeat, .. } => {
-                        assert!(matches!(target, AppScriptTarget::Element(3)));
-                        assert_eq!(repeat, 1);
+                        assert!(matches!(target, AppScriptTarget::Name(name) if name == "保存"));
+                        assert_eq!(*repeat, 1);
                     }
                     _ => panic!("expected click action"),
                 }
@@ -809,14 +888,15 @@ mod operate_tool_tests {
     }
 
     #[test]
-    fn parse_app_click_by_point() {
-        match parse_single("app 123 click @0.50,0.50 repeat=2") {
-            DesktopScriptAction::App { window, action, .. } => {
-                assert!(matches!(window, AppWindowSelector::Id(123)));
+    fn parse_var_click_by_point() {
+        let actions = parse_var_script("w", "记事本", "w click @0.50,0.50 repeat=2");
+        match &actions[1] {
+            DesktopScriptAction::App { var, action, .. } => {
+                assert_eq!(var, "w");
                 match action {
                     AppScriptAction::Click { target, repeat, .. } => {
                         assert!(matches!(target, AppScriptTarget::Point(_)));
-                        assert_eq!(repeat, 2);
+                        assert_eq!(*repeat, 2);
                     }
                     _ => panic!("expected click action"),
                 }
@@ -826,24 +906,30 @@ mod operate_tool_tests {
     }
 
     #[test]
-    fn parse_app_setvalue_rejects_point_target() {
-        let err = parse_script(&OperateRequest { script: "app 1 setvalue @0.5,0.5 \"hi\"".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
-        assert!(err.message.contains("setvalue"));
-        assert!(err.message.contains("el="));
+    fn parse_var_click_rejects_el_with_hint() {
+        let err = parse_script(&OperateRequest { script: "w = app \"记事本\"\nw click el=3".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
+        assert!(err.message.contains("已退役"));
+        assert!(err.message.contains("w click"));
     }
 
     #[test]
-    fn parse_app_scroll_script() {
-        match parse_single("app 45 scroll_down el=7 repeat=3 delay=0.2") {
-            DesktopScriptAction::App { window, action, .. } => {
-                assert!(matches!(window, AppWindowSelector::Id(45)));
+    fn parse_legacy_app_syntax_rejected_with_hint() {
+        let err = parse_script(&OperateRequest { script: "app 123 click el=3".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
+        assert!(err.message.contains("已退役"));
+    }
+
+    #[test]
+    fn parse_var_scroll_script() {
+        let actions = parse_var_script("w", "记事本", "w scroll_down \"列表\" repeat=3 delay=0.2");
+        match &actions[1] {
+            DesktopScriptAction::App { action, .. } => {
                 match action {
                     AppScriptAction::Scroll { target, horizontal, positive, repeat, delay, .. } => {
-                        assert!(matches!(target, AppScriptTarget::Element(7)));
-                        assert!(!horizontal);
-                        assert!(positive);
-                        assert_eq!(repeat, 3);
-                        assert_eq!(delay, std::time::Duration::from_millis(200));
+                        assert!(matches!(target, AppScriptTarget::Name(name) if name == "列表"));
+                        assert!(!*horizontal);
+                        assert!(*positive);
+                        assert_eq!(*repeat, 3);
+                        assert_eq!(*delay, std::time::Duration::from_millis(200));
                     }
                     _ => panic!("expected scroll action"),
                 }
@@ -853,8 +939,9 @@ mod operate_tool_tests {
     }
 
     #[test]
-    fn parse_app_scroll_left_is_horizontal() {
-        match parse_single("app 45 scroll_left el=7") {
+    fn parse_var_scroll_left_is_horizontal() {
+        let actions = parse_var_script("w", "记事本", "w scroll_left @0.5,0.5");
+        match &actions[1] {
             DesktopScriptAction::App { action, .. } => {
                 assert!(matches!(
                     action,
@@ -866,88 +953,93 @@ mod operate_tool_tests {
     }
 
     #[test]
-    fn parse_app_window_by_name() {
-        match parse_single("app \"记事本\" click el=1") {
-            DesktopScriptAction::App { window, action, .. } => {
-                assert!(matches!(window, AppWindowSelector::Name(_)));
-                assert!(matches!(action, AppScriptAction::Click { .. }));
-            }
-            _ => panic!("expected app action"),
-        }
-    }
-
-    #[test]
-    fn parse_app_key_script() {
-        match parse_single("app 663002 key Enter") {
-            DesktopScriptAction::App { window, action, .. } => {
-                assert!(matches!(window, AppWindowSelector::Id(663002)));
-                match action {
-                    AppScriptAction::Key { keys, repeat, .. } => {
-                        assert_eq!(keys, vec!["Enter".to_string()]);
-                        assert_eq!(repeat, 1);
-                    }
-                    _ => panic!("expected key action"),
-                }
-            }
-            _ => panic!("expected app action"),
-        }
-    }
-
-    #[test]
-    fn parse_app_key_combo_script() {
-        match parse_single("app 10 key Control+A repeat=2 delay=0.1") {
-            DesktopScriptAction::App { action: AppScriptAction::Key { keys, repeat, delay, .. }, .. } => {
-                assert_eq!(keys, vec!["Control".to_string(), "A".to_string()]);
-                assert_eq!(repeat, 2);
-                assert_eq!(delay, std::time::Duration::from_millis(100));
+    fn parse_var_key_script() {
+        let actions = parse_var_script("w", "记事本", "w key Control+A repeat=2 delay=0.1");
+        match &actions[1] {
+            DesktopScriptAction::App { var, action: AppScriptAction::Key { keys, repeat, delay, .. }, .. } => {
+                assert_eq!(var, "w");
+                assert_eq!(keys, &vec!["Control".to_string(), "A".to_string()]);
+                assert_eq!(*repeat, 2);
+                assert_eq!(*delay, std::time::Duration::from_millis(100));
             }
             _ => panic!("expected app key action"),
         }
     }
 
     #[test]
-    fn parse_app_getvalue_script() {
-        match parse_single("app 77 getvalue el=5") {
-            DesktopScriptAction::App { window, action: AppScriptAction::GetValue { el }, .. } => {
-                assert!(matches!(window, AppWindowSelector::Id(77)));
-                assert_eq!(el, 5);
+    fn parse_var_setvalue_script() {
+        let actions = parse_var_script("w", "记事本", "w setvalue \"用户名\" = \"admin\" post_delay=1.5");
+        match &actions[1] {
+            DesktopScriptAction::App { action: AppScriptAction::SetValue { name, text, .. }, post_delay, .. } => {
+                assert_eq!(name, "用户名");
+                assert_eq!(text, "admin");
+                assert_eq!(*post_delay, std::time::Duration::from_millis(1500));
+            }
+            _ => panic!("expected app setvalue action"),
+        }
+    }
+
+    #[test]
+    fn parse_var_setvalue_requires_equals_sign() {
+        let err = parse_script(&OperateRequest { script: "w = app \"记事本\"\nw setvalue \"用户名\" \"admin\"".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
+        assert!(err.message.contains("setvalue"));
+    }
+
+    #[test]
+    fn parse_var_setvalue_rejects_point_target() {
+        let err = parse_script(&OperateRequest { script: "w = app \"记事本\"\nw setvalue @0.5,0.5 = \"hi\"".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
+        assert!(err.message.contains("setvalue"));
+        assert!(err.message.contains("已退役"));
+    }
+
+    #[test]
+    fn parse_var_getvalue_script() {
+        let actions = parse_var_script("w", "记事本", "w getvalue \"用户名\"");
+        match &actions[1] {
+            DesktopScriptAction::App { var, action: AppScriptAction::GetValue { name }, .. } => {
+                assert_eq!(var, "w");
+                assert_eq!(name, "用户名");
             }
             _ => panic!("expected app getvalue action"),
         }
     }
 
     #[test]
-    fn parse_app_getvalue_rejects_point_target() {
-        let err = parse_script(&OperateRequest { script: "app 1 getvalue @0.5,0.5".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
+    fn parse_var_getvalue_rejects_point_target() {
+        let err = parse_script(&OperateRequest { script: "w = app \"记事本\"\nw getvalue @0.5,0.5".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("getvalue"));
-        assert!(err.message.contains("el="));
+        assert!(err.message.contains("已退役"));
     }
 
     #[test]
-    fn parse_app_post_delay_script() {
-        match parse_single("app 9 setvalue el=2 \"abc\" post_delay=1.5") {
-            DesktopScriptAction::App { post_delay, .. } => {
-                assert_eq!(post_delay, std::time::Duration::from_millis(1500));
-            }
-            _ => panic!("expected app action"),
-        }
-    }
-
-    #[test]
-    fn parse_app_click_dblclick_script() {
-        match parse_single("app 8 click el=4 dblclick=true") {
+    fn parse_var_click_dblclick_script() {
+        let actions = parse_var_script("w", "记事本", "w click \"保存\" dblclick=true");
+        match &actions[1] {
             DesktopScriptAction::App { action: AppScriptAction::Click { target, dblclick, .. }, .. } => {
-                assert!(matches!(target, AppScriptTarget::Element(4)));
-                assert!(dblclick);
+                assert!(matches!(target, AppScriptTarget::Name(_)));
+                assert!(*dblclick);
             }
             _ => panic!("expected app click action"),
         }
     }
 
     #[test]
-    fn parse_app_dblclick_rejects_bad_value() {
-        let err = parse_script(&OperateRequest { script: "app 8 click @0.5,0.5 dblclick=yes".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
+    fn parse_var_dblclick_rejects_bad_value() {
+        let err = parse_script(&OperateRequest { script: "w = app \"记事本\"\nw click \"保存\" dblclick=yes".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap_err();
         assert!(err.message.contains("dblclick") || err.message.contains("布尔参数非法"));
+    }
+
+    #[test]
+    fn parse_var_redeclare_overwrites() {
+        let actions = parse_script(&OperateRequest { script: "w = app \"记事本\"\nw = app \"计算器\"\nw click \"保存\"".to_string(), timeout_ms: None, retry: None, restore_focus: None }).unwrap();
+        assert_eq!(actions.len(), 3);
+        match &actions[1] {
+            DesktopScriptAction::AppDeclare { var, name, .. } => {
+                assert_eq!(var, "w");
+                assert_eq!(name, "计算器");
+            }
+            _ => panic!("expected redeclare"),
+        }
     }
 
     #[test]
