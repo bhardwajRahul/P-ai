@@ -1,6 +1,6 @@
 use enigo::{Keyboard, Mouse};
 
-use crate::platform::AppTarget;
+use crate::platform::{AppClickOutcome, AppTarget};
 
 /// 设置进程 DPI 感知（per-monitor v2）。成功前每次调用都会重试：
 /// 首次调用可能因为宿主窗口尚未就绪而失败，后续调用仍有机会成功；
@@ -1098,7 +1098,7 @@ async fn build_app_target(window_id: u32, target: AppScriptTarget, monitor: Opti
     }
 }
 
-async fn execute_app_click(window_id: u32, target: AppScriptTarget, monitor: Option<u32>, repeat: u32, dblclick: bool, pre_delay: std::time::Duration) -> DesktopToolResult<&'static str> {
+async fn execute_app_click(window_id: u32, target: AppScriptTarget, monitor: Option<u32>, repeat: u32, dblclick: bool, pre_delay: std::time::Duration) -> DesktopToolResult<AppClickOutcome> {
     sleep_duration(pre_delay).await;
     let app_target = build_app_target(window_id, target, monitor).await?;
     let window_id = window_id as usize;
@@ -1174,8 +1174,8 @@ async fn execute_app_key(window_id: u32, keys: &[String], repeat: u32, delay: st
 async fn execute_app_action(window_id: u32, action: AppScriptAction, post_delay: std::time::Duration) -> DesktopToolResult<(&'static str, &'static str, Option<String>)> {
     let (verb, method, prefix) = match action {
         AppScriptAction::Click { target, monitor, repeat, dblclick, pre_delay } => {
-            let method = execute_app_click(window_id, target, monitor, repeat, dblclick, pre_delay).await?;
-            ("click", method, None)
+            let outcome = execute_app_click(window_id, target, monitor, repeat, dblclick, pre_delay).await?;
+            ("click", outcome.method, click_notes(&outcome))
         }
         AppScriptAction::SetValue { name, text, pre_delay, verify } => {
             let method = execute_app_set_value(window_id, &name, text.clone(), pre_delay).await?;
@@ -1211,10 +1211,34 @@ async fn execute_app_action(window_id: u32, action: AppScriptAction, post_delay:
         parts.push(note);
     }
     if let Some((kind, name)) = focus {
-        parts.push(format!("focus={kind}('{name}')"));
+        parts.push(focus_note(&kind, &name));
     }
     let extra = if parts.is_empty() { None } else { Some(parts.join("，")) };
     Ok((verb, method, extra))
+}
+
+/// 焦点描述（P2-6）：焦点落在窗口本身说明内部还没有可聚焦控件，
+/// 此时窗口标题常是加载中的临时标题（如「无标题 - Google Chrome」），报它没有信息价值还容易误导。
+fn focus_note(kind: &str, name: &str) -> String {
+    if kind == "Window" {
+        "focus=窗口本身（内部暂无可聚焦控件）".to_string()
+    } else {
+        format!("focus={kind}('{name}')")
+    }
+}
+
+/// 点击动作的附加说明（P0-1/P1-3）：
+/// 降级投递必须说明「消息发出去了、未确认生效」，否则模型会把坐标投递读成动作成功；
+/// invoke 命中链接时说明页面可能已跳转——模型据此才不会再对着新标签页点「返回」。
+fn click_notes(outcome: &AppClickOutcome) -> Option<String> {
+    let mut notes = Vec::new();
+    if let Some(downgrade) = outcome.downgrade.as_ref() {
+        notes.push(downgrade.clone());
+    }
+    if outcome.method == "invoke" && outcome.hit_control_type == Some("Hyperlink") {
+        notes.push("命中的是链接，页面可能已跳转或新开标签页".to_string());
+    }
+    if notes.is_empty() { None } else { Some(notes.join("；")) }
 }
 
 /// 动作完成后查询目标窗口的内部焦点控件；仅对修改型动作有意义，失败静默为 None。
@@ -1328,6 +1352,48 @@ fn collect_ui_tree_for_mode(mode: &ScreenshotModeSpec, include_text: bool) -> Ve
 #[cfg(test)]
 mod operate_actions_tests {
     use super::*;
+
+    #[test]
+    fn click_notes_should_flag_downgrade_and_hyperlink_jump() {
+        // 降级投递：模型不能把 postmessage 读成成功（P0-1）
+        let downgrade = AppClickOutcome {
+            method: "postmessage",
+            downgrade: Some("TabItem('首页 - 知乎') 无 Invoke 支持，已退化为坐标投递，结果不保证".to_string()),
+            hit_control_type: Some("TabItem"),
+        };
+        let notes = click_notes(&downgrade).expect("降级必须带说明");
+        assert!(notes.contains("已退化为坐标投递"));
+        assert!(notes.contains("结果不保证"));
+        assert!(!notes.contains("页面可能已跳转"), "非链接不加跳转提示：{notes}");
+
+        // invoke 命中链接：提示页面可能已跳转（P1-3）
+        let link = AppClickOutcome { method: "invoke", downgrade: None, hit_control_type: Some("Hyperlink") };
+        let notes = click_notes(&link).expect("链接必须带跳转提示");
+        assert!(notes.contains("页面可能已跳转或新开标签页"));
+
+        // invoke 命中按钮：无副作用，不加噪音
+        let button = AppClickOutcome { method: "invoke", downgrade: None, hit_control_type: Some("Button") };
+        assert!(click_notes(&button).is_none());
+
+        // 坐标兜底且无元素命中：同样要说明未确认生效
+        let bare_point = AppClickOutcome {
+            method: "postmessage",
+            downgrade: Some("坐标未命中元素，已按坐标投递，结果不保证".to_string()),
+            hit_control_type: None,
+        };
+        assert!(click_notes(&bare_point).is_some());
+    }
+
+    #[test]
+    fn focus_note_should_avoid_transient_window_title() {
+        // 焦点落在窗口本身时报语义化描述，不报加载中的临时标题（P2-6）
+        let note = focus_note("Window", "无标题 - Google Chrome");
+        assert_eq!(note, "focus=窗口本身（内部暂无可聚焦控件）");
+        assert!(!note.contains("Google Chrome"));
+
+        // 内部控件焦点保持原有 Type('name') 口径
+        assert_eq!(focus_note("Edit", "地址和搜索栏"), "focus=Edit('地址和搜索栏')");
+    }
 
     #[test]
     fn blocked_app_hit_should_match_case_insensitively_and_skip_empty_entries() {

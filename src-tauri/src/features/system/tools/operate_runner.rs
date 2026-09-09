@@ -59,7 +59,7 @@ async fn run_operate_tool(
     let mut image_base64 = None;
     let mut width = None;
     let mut height = None;
-    let mut latest_windows: Option<Vec<WindowInfo>> = None;
+    let mut latest_windows: Option<Vec<WindowBrief>> = None;
     // 执行前的前台（C4）：restore_focus=true 时结束后切回，恢复失败只记 warnings
     let initial_foreground = crate::platform::list_all_windows()
         .into_iter()
@@ -410,7 +410,7 @@ async fn run_operate_tool(
                     "[桌面脚本] 步骤完成，任务=run_operate_tool，line={}，kind=WindowList，summary={}",
                     line, step.summary
                 ));
-                latest_windows = Some(windows);
+                latest_windows = Some(windows.iter().map(WindowBrief::from).collect());
                 steps.push(step);
             }
             DesktopScriptAction::WindowActivate { line, target } => {
@@ -669,6 +669,38 @@ mod operate_tool_tests {
             DesktopScriptAction::MouseClick { repeat, .. } => assert_eq!(repeat, 2),
             _ => panic!("expected mouse click"),
         }
+    }
+
+    #[test]
+    fn window_brief_should_drop_geometry_fields() {
+        // window list 紧凑输出（P2-5）：只留引用窗口用得上的字段，坐标尺寸进程号不再下发
+        let window = WindowInfo {
+            window_id: 133128,
+            title: "首页 - 知乎".to_string(),
+            process_id: 4242,
+            process_name: Some("chrome".to_string()),
+            x: 100,
+            y: 200,
+            width: 1280,
+            height: 720,
+            minimized: false,
+            focused: true,
+        };
+        let brief = WindowBrief::from(&window);
+        let value = serde_json::to_value(&brief).expect("serialize window brief");
+        assert_eq!(value["windowId"], serde_json::json!(133128));
+        assert_eq!(value["title"], serde_json::json!("首页 - 知乎"));
+        assert_eq!(value["processName"], serde_json::json!("chrome"));
+        assert_eq!(value["focused"], serde_json::json!(true));
+        assert_eq!(value["minimized"], serde_json::json!(false));
+        for dropped in ["x", "y", "width", "height", "processId"] {
+            assert!(value.get(dropped).is_none(), "{dropped} 不应出现在紧凑输出里：{value}");
+        }
+
+        // 进程名查不到时不输出空字段，避免模型误以为有空名字的进程
+        let unnamed = WindowBrief::from(&WindowInfo { process_name: None, ..window });
+        let value = serde_json::to_value(&unnamed).expect("serialize window brief without process name");
+        assert!(value.get("processName").is_none());
     }
 
     #[test]
@@ -1210,6 +1242,72 @@ mod operate_tool_tests {
             "apply_patch blobs must survive cleanup"
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 记事本真实闭环探针（需真实 Windows 桌面，手动跑）：
+    /// 验证第四批变量语法与手感优化在真实窗口上的完整链路——
+    /// 变量声明、按名 setvalue/getvalue、未命中候选分组、window list 紧凑输出。
+    /// 自拉自杀，KillGuard 保证测试结束回收记事本进程。
+    #[tokio::test]
+    #[ignore = "需要真实 Windows 桌面"]
+    async fn probe_notepad_variable_script_end_to_end() {
+        struct KillGuard(std::process::Child);
+        impl Drop for KillGuard {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        // 用唯一临时文件名启动记事本：标题唯一，避免命中用户已打开的其他记事本窗口
+        let probe_file = std::env::temp_dir().join(format!("pai-operate-probe-{}.txt", std::process::id()));
+        std::fs::write(&probe_file, "").expect("create probe file");
+        let child = std::process::Command::new("notepad").arg(&probe_file).spawn().expect("launch notepad");
+        let _guard = KillGuard(child);
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+
+        let root = std::env::temp_dir().join("pai-operate-probe");
+        std::fs::create_dir_all(&root).expect("create probe root");
+        let window_name = probe_file.file_stem().and_then(|s| s.to_str()).expect("probe file stem");
+        let script = [
+            "window list".to_string(),
+            format!("w = app \"{window_name}\""),
+            "w setvalue \"文本编辑器\" = \"探针写入-abc123\"".to_string(),
+            "w getvalue \"文本编辑器\"".to_string(),
+        ]
+        .join("\n");
+        let response = run_operate_tool(
+            OperateRequest { script, timeout_ms: None, retry: None, restore_focus: None },
+            &root,
+            false,
+            &[],
+        )
+        .await
+        .expect("run operate probe script");
+        for step in &response.steps {
+            eprintln!("[operate-probe] line={} kind={:?} ok={} summary={}", step.line, step.kind, step.ok, step.summary);
+        }
+        if let Some(failure) = &response.failure {
+            eprintln!("[operate-probe] failure line={} message={}", failure.line, failure.message);
+        }
+        let windows = response.windows.as_ref().expect("window list 应返回 windows 字段");
+        eprintln!("[operate-probe] windows={} 条，首条={:?}", windows.len(), windows.first().map(|w| (&w.title, w.window_id)));
+        let json = serde_json::to_value(windows).expect("serialize windows");
+        assert!(json[0].get("x").is_none(), "紧凑输出不应含坐标：{json}");
+        assert!(response.failure.is_none(), "脚本不应失败：{:?}", response.failure);
+        let getvalue = response.steps.iter().find(|s| s.summary.contains("getvalue")).expect("getvalue 步骤存在");
+        assert!(getvalue.summary.contains("探针写入-abc123"), "回读值应与写入一致：{}", getvalue.summary);
+
+        // 未命中时的候选分组：至少要能看到 Document 或 Button 这类真实控件类型
+        let probe_hwnd = windows
+            .iter()
+            .find(|w| w.title.contains(window_name))
+            .map(|w| w.window_id)
+            .expect("window list 应包含本次拉起的记事本窗口");
+        let err = crate::platform::app_find_element_by_name(probe_hwnd, "不存在的元素名").unwrap_err();
+        eprintln!("[operate-probe] 未命中文案={err}");
+        let _ = std::fs::remove_file(&probe_file);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
