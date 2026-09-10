@@ -29,6 +29,59 @@ fn desktop_action_line(action: &DesktopScriptAction) -> usize {
     }
 }
 
+// ==================== Enigo 实例复用 ====================
+
+/// 进程内复用的 Enigo 实例（A1）。
+/// macOS 上 `Enigo::new` 会做一次辅助功能权限检查，每次调用都新建会让该检查反复执行，
+/// 并在缺权限时反复触发系统弹窗；这里复用一个实例，拿不到时下次调用再试。
+static OPERATE_ENIGO: std::sync::Mutex<Option<enigo::Enigo>> = std::sync::Mutex::new(None);
+
+/// 关闭 enigo 自带的权限弹窗：缺权限由工具结果讲清楚，交给模型引导用户。
+fn operate_enigo_settings() -> enigo::Settings {
+    enigo::Settings {
+        open_prompt_to_get_permissions: false,
+        ..enigo::Settings::default()
+    }
+}
+
+/// 取用实例：优先复用进程内实例，没有则新建；新建失败时给出可引导用户的说明。
+fn acquire_operate_enigo() -> DesktopToolResult<enigo::Enigo> {
+    if let Ok(mut slot) = OPERATE_ENIGO.lock() {
+        if let Some(enigo) = slot.take() {
+            return Ok(enigo);
+        }
+    }
+    enigo::Enigo::new(&operate_enigo_settings()).map_err(|err| enigo_unavailable_error(&err))
+}
+
+/// 归还实例供后续调用复用；并发调用已占用槽位时直接丢弃，下次调用重新新建。
+fn release_operate_enigo(enigo: enigo::Enigo) {
+    if let Ok(mut slot) = OPERATE_ENIGO.lock() {
+        if slot.is_none() {
+            *slot = Some(enigo);
+        }
+    }
+}
+
+/// 权限缺失时的引导文案（A3）：直接给出打开设置面板的命令，由模型执行 shell 完成引导。
+#[cfg(target_os = "macos")]
+const OPERATE_ENIGO_PERMISSION_HINT: &str = "macOS 缺少辅助功能权限，无法模拟鼠标键盘输入。请先执行以下 shell 命令打开设置面板：\nopen \"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility\"\n然后在「隐私与安全性 → 辅助功能」中勾选 P-ai，完成后重试。";
+
+fn enigo_unavailable_error(err: &enigo::NewConError) -> DesktopToolError {
+    if !matches!(err, enigo::NewConError::NoPermission) {
+        return DesktopToolError::internal_error(format!("创建 Enigo 失败：{err}"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        runtime_log_warn("[桌面脚本] 缺少辅助功能权限，任务=run_operate_tool".to_string());
+        DesktopToolError::internal_error(OPERATE_ENIGO_PERMISSION_HINT)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        DesktopToolError::internal_error("缺少模拟输入所需权限，无法执行桌面操作。".to_string())
+    }
+}
+
 async fn run_operate_tool(
     input: OperateRequest,
     screenshots_root: &std::path::Path,
@@ -50,8 +103,10 @@ async fn run_operate_tool(
         total_actions,
         now_iso()
     ));
-    let mut enigo = enigo::Enigo::new(&enigo::Settings::default())
-        .map_err(|err| DesktopToolError::internal_error(format!("创建 Enigo 失败：{err}")))?;
+    let mut enigo = acquire_operate_enigo()?;
+    // 实例复用后 enigo 不再随调用结束被 drop，`release_keys_when_dropped` 不会触发；
+    // 记录脚本按下且尚未释放的鼠标键，收尾统一松开，避免长按状态跨调用残留
+    let mut held_mouse_buttons: Vec<OperateMouseButton> = Vec::new();
     let mut steps = Vec::<DesktopScriptStepResult>::new();
     let mut failure: Option<OperateFailure> = None;
     let mut latest_screenshot: Option<LatestScreenshotInfo> = None;
@@ -211,6 +266,13 @@ async fn run_operate_tool(
                     Some(pair) => pair,
                     None => break,
                 };
+                if pressed {
+                    if !held_mouse_buttons.contains(&button) {
+                        held_mouse_buttons.push(button);
+                    }
+                } else {
+                    held_mouse_buttons.retain(|item| *item != button);
+                }
                 let step = DesktopScriptStepResult {
                     line,
                     kind: DesktopScriptStepKind::Mouse,
@@ -603,6 +665,18 @@ async fn run_operate_tool(
             item.line, item.message
         ));
     }
+
+    // 脚本收尾松开残留的鼠标键：实例复用后不再有 Drop 兜底，
+    // 未配对的 mouse down 会把按下状态带到下一次调用
+    for button in held_mouse_buttons {
+        if let Err(err) = enigo.button(map_mouse_button(button), enigo::Direction::Release) {
+            warnings.push(format!(
+                "脚本结束时释放鼠标键 {button:?} 失败：{err}；该键可能仍处于按下状态"
+            ));
+        }
+    }
+
+    release_operate_enigo(enigo);
 
     Ok(OperateResponse {
         ok,
