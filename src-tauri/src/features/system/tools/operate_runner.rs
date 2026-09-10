@@ -86,7 +86,6 @@ async fn run_operate_tool(
     input: OperateRequest,
     screenshots_root: &std::path::Path,
     include_base64: bool,
-    blocked_apps: &[String],
 ) -> DesktopToolResult<OperateResponse> {
     let started = std::time::Instant::now();
     let mut warnings = Vec::<String>::new();
@@ -165,11 +164,10 @@ async fn run_operate_tool(
             }
         }};
     }
-    // 声明了 target 的前台动作，执行前按 focus 策略处理目标窗口（C1/C2/C3），
-    // 同时校验敏感应用门控（J1）：命中禁止名单即阻断
+    // 声明了 target 的前台动作，执行前按 focus 策略处理目标窗口（C1/C2/C3）
     macro_rules! ensure_foreground {
         ($line:expr, $target:expr, $focus:expr) => {
-            match apply_foreground_policy(&$target, $focus, blocked_apps).await {
+            match apply_foreground_policy(&$target, $focus).await {
                 Ok(note) => note,
                 Err(block) => {
                     failure = Some(OperateFailure { line: $line, message: block.message, focus_failed: block.focus_failed });
@@ -339,18 +337,6 @@ async fn run_operate_tool(
                         break;
                     }
                 };
-                // 后台直连同样受门控约束（J1）：按解析出的句柄查标题，命中即阻断；
-                // 窗口已不存在时不拦截，交由原有路径报错
-                if !blocked_apps.is_empty() {
-                    let hit = crate::platform::list_all_windows()
-                        .into_iter()
-                        .find(|w| w.window_id == window_id as usize)
-                        .and_then(|w| blocked_app_hit(blocked_apps, &w.title).map(|keyword| (w.title, keyword.to_string())));
-                    if let Some((title, keyword)) = hit {
-                        failure = Some(OperateFailure { line, message: blocked_app_message(&title, &keyword), focus_failed: None });
-                        break;
-                    }
-                }
                 // 坐标基准显示器：动作行 monitor 优先，未写时用声明行 monitor
                 let mut action = action;
                 if declared_monitor.is_some() {
@@ -483,11 +469,6 @@ async fn run_operate_tool(
                         break;
                     }
                 };
-                // 激活同样受门控约束（J1）：目标命中禁止名单即阻断，不切前台
-                if let Some(keyword) = blocked_app_hit(blocked_apps, &window.title) {
-                    failure = Some(OperateFailure { line, message: blocked_app_message(&window.title, keyword), focus_failed: None });
-                    break;
-                }
                 let before = foreground_title(&crate::platform::list_all_windows());
                 let window_id = window.window_id;
                 let activated = match tokio::task::spawn_blocking(move || crate::platform::activate_window(window_id)).await {
@@ -1355,7 +1336,6 @@ mod operate_tool_tests {
             OperateRequest { script, timeout_ms: None, retry: None, restore_focus: None },
             &root,
             false,
-            &[],
         )
         .await
         .expect("run operate probe script");

@@ -413,60 +413,15 @@ fn build_focus_failure(window: &WindowInfo, foreground_before: String) -> FocusF
 /// verify：不激活，只校验当前前台就是目标窗口，不符即阻断（避免输入静默打到别的应用）；
 /// best_effort：尝试激活，失败不阻断，返回一句现场描述供步骤摘要使用；
 /// strict：必须激活成功，失败即阻断并附结构化现场。
-/// 敏感应用门控（J1）：窗口标题命中用户配置的黑名单子串时返回命中的关键词。
-/// 空名单直接放行，不改变现有行为；匹配忽略大小写，空条目跳过。
-fn blocked_app_hit<'a>(blocked: &'a [String], title: &str) -> Option<&'a str> {
-    if blocked.is_empty() || title.trim().is_empty() {
-        return None;
-    }
-    let title_lower = title.to_lowercase();
-    blocked.iter().find_map(|keyword| {
-        let needle = keyword.trim();
-        if needle.is_empty() {
-            return None;
-        }
-        if title_lower.contains(&needle.to_lowercase()) {
-            Some(needle)
-        } else {
-            None
-        }
-    })
-}
-
-/// 门控阻断文案：说清命中了哪个关键词、该换目标还是改配置（I2）。
-fn blocked_app_message(title: &str, keyword: &str) -> String {
-    format!(
-        "目标应用已被禁止操作：窗口「{title}」命中禁止名单「{keyword}」；请换一个目标窗口，或在设置中修改禁止名单后重试"
-    )
-}
-
 async fn apply_foreground_policy(
     window_target: &Option<ForegroundTarget>,
     focus: FocusPolicy,
-    blocked_apps: &[String],
 ) -> Result<Option<String>, ForegroundBlock> {
     let Some(target) = window_target else {
-        // 未声明目标的动作直接作用于当前前台；前台命中黑名单同样阻断（J1）
-        if !blocked_apps.is_empty() {
-            let windows = crate::platform::list_all_windows();
-            if let Some(foreground) = windows.iter().find(|w| w.focused) {
-                if let Some(keyword) = blocked_app_hit(blocked_apps, &foreground.title) {
-                    return Err(ForegroundBlock {
-                        message: blocked_app_message(&foreground.title, keyword),
-                        focus_failed: None,
-                    });
-                }
-            }
-        }
+        // 未声明目标的动作直接作用于当前前台
         return Ok(None);
     };
     let window = resolve_foreground_window(target).map_err(|err| ForegroundBlock { message: err.message, focus_failed: None })?;
-    if let Some(keyword) = blocked_app_hit(blocked_apps, &window.title) {
-        return Err(ForegroundBlock {
-            message: blocked_app_message(&window.title, keyword),
-            focus_failed: None,
-        });
-    }
     match focus {
         FocusPolicy::Verify => {
             let windows = crate::platform::list_all_windows();
@@ -1393,22 +1348,6 @@ mod operate_actions_tests {
 
         // 内部控件焦点保持原有 Type('name') 口径
         assert_eq!(focus_note("Edit", "地址和搜索栏"), "focus=Edit('地址和搜索栏')");
-    }
-
-    #[test]
-    fn blocked_app_hit_should_match_case_insensitively_and_skip_empty_entries() {
-        let blocked = vec!["密码".to_string(), "  ".to_string(), "Settings".to_string()];
-        // 中文子串命中
-        assert_eq!(blocked_app_hit(&blocked, "1Password 密码管理器"), Some("密码"));
-        // 英文忽略大小写命中
-        assert_eq!(blocked_app_hit(&blocked, "windows settings"), Some("Settings"));
-        // 未命中
-        assert_eq!(blocked_app_hit(&blocked, "记事本"), None);
-        // 空标题不拦截（避免误伤无标题窗口）
-        assert_eq!(blocked_app_hit(&blocked, "   "), None);
-        // 空名单不改变现有行为
-        let empty: Vec<String> = Vec::new();
-        assert_eq!(blocked_app_hit(&empty, "1Password 密码管理器"), None);
     }
 
     #[test]
