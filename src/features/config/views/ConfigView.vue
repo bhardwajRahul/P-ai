@@ -93,11 +93,9 @@
           :config="config"
           :api-configs="config.apiConfigs"
           :personas="personas"
-          :assistant-department-agent-id="assistantDepartmentAgentId"
           :saving-config="savingConfig"
           :save-config-action="saveConfigAction"
           :set-status-action="setStatusAction"
-          @update:assistant-department-assignee-id="$emit('update:assistantDepartmentAgentId', $event)"
         />
       </div>
 
@@ -127,10 +125,12 @@
           :persona-editor-id="personaEditorId"
           :selected-persona="selectedPersona"
           :selected-persona-avatar-url="selectedPersonaAvatarUrl"
+          :departments="config.departments"
           :avatar-saving="avatarSaving"
           :avatar-error="avatarError"
           :persona-saving="personaSaving"
           :persona-dirty="personaDirty"
+          :config-saving="savingConfig"
           @update:persona-editor-id="$emit('update:personaEditorId', $event)"
           @add-persona="$emit('addPersona')"
           @remove-selected-persona="$emit('removeSelectedPersona')"
@@ -138,6 +138,7 @@
           @open-avatar-editor="openAvatarEditorForSelected"
           @import-persona-memories="$emit('importPersonaMemories', $event)"
           @save-personas="$emit('savePersonas')"
+          @toggle-persona-department-member="$emit('togglePersonaDepartmentMember', $event)"
           @convert-private-persona-to-public="$emit('convertPrivatePersonaToPublic', $event)"
         />
       </div>
@@ -498,7 +499,6 @@ const emit = defineEmits<{
   (e: "update:uiSizeScale", value: number): void;
   (e: "update:githubUpdateMethod", value: AppConfig["githubUpdateMethod"]): void;
   (e: "update:personaEditorId", value: string): void;
-  (e: "update:assistantDepartmentAgentId", value: string): void;
   (e: "update:responseStyleId", value: string): void;
   (e: "update:pdfReadMode", value: "text" | "image"): void;
   (e: "update:backgroundVoiceScreenshotKeywords", value: string): void;
@@ -520,6 +520,7 @@ const emit = defineEmits<{
   (e: "removeSelectedPersona"): void;
   (e: "resetPersonas"): void;
   (e: "savePersonas"): void;
+  (e: "togglePersonaDepartmentMember", value: { agentId: string; departmentId: string; member: boolean }): void;
   (e: "convertPrivatePersonaToPublic", agentId: string): void;
   (e: "importPersonaMemories", value: { agentId: string; file: File }): void;
   (e: "openConversationList"): void;
