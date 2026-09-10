@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-09-09T17:54:23.048Z",
-  "latestVersion": "v0.85.0",
+  "generatedAt": "2026-09-10T00:33:37.738Z",
+  "latestVersion": "v0.86.0",
   "releases": [
+    {
+      "version": "v0.86.0",
+      "path": "docs/changelog/releases/v0.86.0.md",
+      "summary": "AI 操作桌面应用更可靠：支持等待窗口或元素出现、副屏窗口寻址、拖拽、剪贴板读写，后台点击改按窗口名和元素名定位，找不到时给出候选清单，脚本中途出错也会说明已执行到哪一步。"
+    },
     {
       "version": "v0.85.0",
       "path": "docs/changelog/releases/v0.85.0.md",
