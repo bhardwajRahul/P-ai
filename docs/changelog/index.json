@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-09-10T00:33:37.738Z",
-  "latestVersion": "v0.86.0",
+  "generatedAt": "2026-09-10T18:06:13.804Z",
+  "latestVersion": "v0.87.0",
   "releases": [
+    {
+      "version": "v0.87.0",
+      "path": "docs/changelog/releases/v0.87.0.md",
+      "summary": "右侧栏改为工作区预览卡片墙：左上角下拉按钮变成预览入口，Git 更改、已打开文件、工作目录、新建追问、追问会话、后台终端、委托、任务、最近工具各成一张卡片，没有内容就不占位；右侧栏同时加宽以容纳两列。"
+    },
     {
       "version": "v0.86.0",
       "path": "docs/changelog/releases/v0.86.0.md",
