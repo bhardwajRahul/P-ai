@@ -478,24 +478,71 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
 
-      - name: Build signed macOS DMG
+      # 自签名证书默认不受信任，会被 tauri 的身份解析过滤掉，报
+      # "failed to resolve signing identity"。这里自建 keychain、把证书设为可信根，
+      # 再让 tauri 直接按证书名签名。证书必须长期复用：换证书等于换签名身份，
+      # 所有用户已授予的权限都会失效。
+      - name: Set up self-signed signing keychain
         if: (github.event_name == 'push' || inputs.publish_release == true) && env.HAS_APPLE_CERTIFICATE == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/pai-signing.keychain-db"
+          KEYCHAIN_PWD="$(openssl rand -hex 24)"
+          CERT_P12="$RUNNER_TEMP/pai-signing.p12"
+          CERT_PEM="$RUNNER_TEMP/pai-signing.pem"
+
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_P12"
+
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security set-keychain-settings "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN"
+          security import "$CERT_P12" -P "$APPLE_CERTIFICATE_PASSWORD" -A \
+            -t cert -f pkcs12 -k "$KEYCHAIN" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PWD" "$KEYCHAIN"
+
+          security list-keychains -d user -s "$KEYCHAIN"
+          security default-keychain -d user -s "$KEYCHAIN"
+
+          security find-certificate -c "PAI Self-Signed" -p "$KEYCHAIN" > "$CERT_PEM"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$CERT_PEM"
+
+          if ! security find-identity -v -p codesigning "$KEYCHAIN" | grep -q "PAI Self-Signed"; then
+            echo "::error::证书设为可信根后仍不是有效签名身份"
+            exit 1
+          fi
+          rm -f "$CERT_P12"
+
+      - name: Build signed macOS DMG
+        if: (github.event_name == 'push' || inputs.publish_release == true) && env.HAS_APPLE_CERTIFICATE == 'true'
+        env:
+          APPLE_SIGNING_IDENTITY: "PAI Self-Signed"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+        run: pnpm tauri:build:macos
+
+      - name: Verify macOS signature
+        if: (github.event_name == 'push' || inputs.publish_release == true) && env.HAS_APPLE_CERTIFICATE == 'true'
         run: |
-          # 公证三件套任一缺失时整体 unset，让 tauri-bundler 走 warn 跳过公证；
-          # 空串会被 notarize_auth 当作有效凭证导致空凭证公证失败。
-          if [ -z "$APPLE_ID" ] || [ -z "$APPLE_PASSWORD" ] || [ -z "$APPLE_TEAM_ID" ]; then
-            unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          set -euo pipefail
+          APP="$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)"
+          if [ -z "$APP" ]; then
+            echo "::error::未找到构建产物 .app"
+            exit 1
           fi
-          pnpm tauri:build:macos
+          codesign -dv --verbose=4 "$APP" 2>&1
+          codesign -d -r- "$APP" 2>&1
+          # 设计要求必须锚在证书上；只剩 cdhash 说明签名身份没生效，
+          # 用户权限会随每次更新丢失。
+          if ! codesign -d -r- "$APP" 2>&1 | grep -q "certificate"; then
+            echo "::error::签名要求未锚定到证书，权限无法跨版本保留"
+            exit 1
+          fi
 
       - name: Build preview macOS DMG (no updater artifacts)
         if: github.event_name == 'workflow_dispatch' && inputs.publish_release != true
