@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-09-10T18:06:13.804Z",
-  "latestVersion": "v0.87.0",
+  "generatedAt": "2026-09-11T03:39:37.367Z",
+  "latestVersion": "v0.88.0",
   "releases": [
+    {
+      "version": "v0.88.0",
+      "path": "docs/changelog/releases/v0.88.0.md",
+      "summary": "右侧栏预览卡片墙重做，新增「历史委托」卡与「计划预览」卡；Git 卡会随 IDE、终端里的文件改动自动刷新。"
+    },
     {
       "version": "v0.87.0",
       "path": "docs/changelog/releases/v0.87.0.md",
