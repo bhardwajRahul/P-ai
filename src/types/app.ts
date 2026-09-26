@@ -381,9 +381,8 @@ export type AppConfig = {
   desktopOperationNoticeEnabled: boolean;
   desktopOperateEnabled: boolean;
   /**
-   * 记录「上次操作的 API 端点」（providerId::modelId）。
-   * 会在点开供应商详情、保存、设人格主模型时被静默改写，是行为记录，
-   * 没有任何运行时消费方——不表示「默认/当前生效的供应商」。
+   * 上次操作的 API 端点（providerId::modelId）。推理请求链路不读它，不表示默认或当前生效的供应商；
+   * 配置界面的 ApiTab.vue 读取它来恢复选中的供应商。
    */
   selectedApiConfigId: string;
   // Active chat LLM provider config id (kept as legacy key name for storage compatibility).

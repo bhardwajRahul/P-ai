@@ -9,7 +9,7 @@
               class="btn btn-sm btn-square btn-ghost"
               type="button"
               :title="t('common.reset')"
-              :disabled="!relationDirty || saving"
+              :disabled="!relationDirty || busy"
               @click="restoreDraftsFromSaved"
             >
               <RotateCcw class="h-3.5 w-3.5" />
@@ -18,11 +18,11 @@
               class="btn btn-sm btn-square"
               type="button"
               :class="relationDirty ? 'btn-primary' : 'btn-ghost'"
-              :disabled="!selectedPersona || !!relationValidationMessage || !relationDirty || saving"
-              :title="saving ? t('config.api.saving') : relationDirty ? t('common.save') : t('status.configSaved')"
+              :disabled="!selectedPersona || !!relationValidationMessage || !relationDirty || busy"
+              :title="busy ? t('config.api.saving') : relationDirty ? t('common.save') : t('status.configSaved')"
               @click="savePersonaRelations"
             >
-              <Save v-if="!saving" class="h-3.5 w-3.5" />
+              <Save v-if="!busy" class="h-3.5 w-3.5" />
               <span v-else class="loading loading-spinner loading-sm"></span>
             </button>
           </div>
@@ -247,6 +247,8 @@ const flowInstance = ref<VueFlowStore | null>(null);
 const isFlowFullscreen = ref(false);
 const selectedPersonaId = ref("");
 const saving = ref(false);
+// 本组件发起的保存（saving）与其他入口传入的保存（props.saving）合并为同一忙碌态。
+const busy = computed(() => saving.value || props.saving);
 
 // ========== 组织成员与草稿 ==========
 

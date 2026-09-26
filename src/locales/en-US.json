@@ -289,7 +289,6 @@
       "modelCount": "{count} Models",
       "keyCount": "{count} Keys",
       "noMatches": "No matching providers",
-      "lastEditedProvider": "Last edited",
       "unsaved": "Unsaved",
       "manage": "Manage",
       "deleteProviderTitle": "Delete Provider",
