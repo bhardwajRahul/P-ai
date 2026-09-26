@@ -95,4 +95,9 @@ describe("AppMarkdownRenderer", () => {
     const html = await renderMarkdown("```html\n<div>x</div>\n```");
     expect(html).toContain("ecall-md-code-block");
   });
+
+  it("renders agent-embed tag as embed block", async () => {
+    const html = await renderMarkdown('<agent-embed src="demo.html"></agent-embed>');
+    expect(html).toContain("ecall-agent-embed");
+  });
 });

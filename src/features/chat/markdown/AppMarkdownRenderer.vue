@@ -92,6 +92,7 @@ import {
   consumeGroupedToolcallRefs,
 } from "./toolcall-ref-group";
 import CodeBlock from "./CodeBlock";
+import AgentEmbedSandbox from "../components/AgentEmbedSandbox.vue";
 import LazyMarkdownImage from "./LazyMarkdownImage";
 import type { MarkdownImagePreviewPayload } from "./MarkdownImage";
 import { stableMarkdownRuntimeKey } from "./markdown-runtime-key";
@@ -867,6 +868,13 @@ const BlockRenderer = defineComponent({
             ]))))),
           ]),
         ]);
+      }
+      if (block.type === "embed") {
+        return h(AgentEmbedSandbox, {
+          key: `${block.type}-${index}-${block.key}`,
+          src: block.src,
+          isDark: blockProps.isDark,
+        });
       }
       if (block.type === "code") {
         return h(CodeBlock, {

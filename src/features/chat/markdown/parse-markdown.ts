@@ -17,6 +17,7 @@ export type MarkdownBlock =
   | { type: "list"; ordered: boolean; items: MarkdownListItem[]; key: string }
   | { type: "table"; headers: string[]; rows: string[][]; key: string }
   | { type: "code"; lang: string; text: string; key: string }
+  | { type: "embed"; src: string; key: string }
   | { type: "math"; text: string; raw: string; key: string }
   | { type: "details"; summary: string; body: string; open: boolean; key: string }
   | { type: "footnotes"; items: { id: string; text: string }[]; key: string }
@@ -367,6 +368,18 @@ export function parseMarkdownBlocks(input: string, streaming = false): MarkdownB
 
     if (!line.trim()) {
       flushParagraph();
+      continue;
+    }
+
+    // 文件嵌入标签：<agent-embed src="..."> —— 指向工作区内的 HTML 沙箱文件
+    const embedMatch = line.match(/^\s{0,3}<agent-embed\s+src\s*=\s*"([^"]+)"\s*\/?>\s*(?:<\/agent-embed\s*>)?\s*$/i);
+    if (embedMatch) {
+      flushParagraph();
+      result.push({
+        type: "embed",
+        src: String(embedMatch[1] || "").trim(),
+        key: `embed-${result.length}`,
+      });
       continue;
     }
 

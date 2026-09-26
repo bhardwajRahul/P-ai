@@ -65,7 +65,8 @@ const SANDBOX_CSP = [
   // 样式：内联 + Google Fonts + 公共 CDN
   "style-src 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://fonts.googleapis.com",
   "font-src data: https://fonts.gstatic.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
-  "img-src data: blob: https:",
+  // 图片仅允许内联数据，防止沙箱内容借网络图片外发数据
+  "img-src data: blob:",
   "connect-src 'none'",
   "frame-src 'none'",
   "worker-src blob:",
