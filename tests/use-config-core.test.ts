@@ -127,6 +127,7 @@ describe("useConfigCore", () => {
       "OpenAI Main/gpt-4.1-mini · 中",
     ]);
     expect(config.apiConfigs[0].apiKey).toBe("key-1");
-    expect(config.selectedApiConfigId).toBe("provider-openai::model-main");
+    // 归一化只重建 apiConfigs，不得改写 selectedApiConfigId。
+    expect(config.selectedApiConfigId).toBe("");
   });
 });

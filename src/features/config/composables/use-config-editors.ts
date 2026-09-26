@@ -38,7 +38,6 @@ export function useConfigEditors(options: UseConfigEditorsOptions) {
     const provider = options.createApiProvider();
     options.config.apiProviders.push(provider);
     options.normalizeApiBindingsLocal();
-    options.config.selectedApiConfigId = `${provider.id}::${provider.models[0]?.id || ""}`;
   }
 
   function removeSelectedApiConfig() {

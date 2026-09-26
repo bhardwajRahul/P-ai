@@ -333,7 +333,7 @@ fn is_default_placeholder_provider(provider: &ApiProviderConfig) -> bool {
 
 fn provider_first_endpoint_id(provider: &ApiProviderConfig) -> Option<String> {
     provider.models.iter().find_map(|model| {
-        (!provider.deprecated && !model.deprecated && !model.model.trim().is_empty())
+        (!provider.deprecated && !model.deprecated)
             .then(|| api_endpoint_id(&provider.id, &model.id))
     })
 }
@@ -367,9 +367,6 @@ fn expand_api_configs_from_providers(config: &mut AppConfig) {
             if model.deprecated {
                 continue;
             }
-            if model.model.trim().is_empty() {
-                continue;
-            }
             expanded.push(ApiConfig {
                 id: api_endpoint_id(&provider.id, &model.id),
                 name: format!("{}/{}", provider.name.trim(), model.model.trim()),
@@ -401,7 +398,8 @@ fn expand_api_configs_from_providers(config: &mut AppConfig) {
             });
         }
     }
-    if expanded.is_empty() {
+    // 只有在完全没有配置供应商时才补一个默认供应商；已有供应商（哪怕没有模型）一律保留，不得覆盖用户配置。
+    if expanded.is_empty() && config.api_providers.is_empty() {
         let default_provider = ApiProviderConfig::default();
         config.api_providers = vec![default_provider.clone()];
         expanded.push(ApiConfig::default());
@@ -959,19 +957,6 @@ fn normalize_app_config(config: &mut AppConfig) {
     }
     expand_api_configs_from_providers(config);
 
-    if !config
-        .api_configs
-        .iter()
-        .any(|a| a.id == config.selected_api_config_id)
-    {
-        config.selected_api_config_id = config
-            .api_providers
-            .iter()
-            .find_map(provider_first_endpoint_id)
-            .or_else(|| config.api_configs.first().map(|api| api.id.clone()))
-            .unwrap_or_default();
-    }
-
     let chat_valid = config.api_configs.iter().any(|a| {
         a.id == config.expert_api_config_id
             && a.enable_text
@@ -1327,14 +1312,14 @@ fn resolve_selected_api_config(
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .unwrap_or(app_config.expert_api_config_id.as_str());
-    let target_id = resolve_model_role_api_config_id(app_config, target_id)
-        .unwrap_or_else(|| app_config.expert_api_config_id.trim().to_string());
+    // 角色（如 role:quick）解析不出具体端点时直接返回 None，由调用方报错，不静默降级到其他端点。
+    let target_id = resolve_model_role_api_config_id(app_config, target_id)?;
 
-    if let Some(found) = app_config.api_configs.iter().find(|p| p.id == target_id) {
-        return Some(found.clone());
-    }
-
-    app_config.api_configs.first().cloned()
+    app_config
+        .api_configs
+        .iter()
+        .find(|p| p.id == target_id)
+        .cloned()
 }
 
 fn resolve_api_config(

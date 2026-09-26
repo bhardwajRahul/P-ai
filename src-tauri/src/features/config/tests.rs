@@ -369,6 +369,53 @@
     }
 
     #[test]
+    fn normalize_app_config_should_not_switch_selected_api_config_id() {
+        let provider_id = "provider-without-models".to_string();
+        // selected 指向一个不存在的端点，归一化不得把它改指到任何已存在的端点。
+        let endpoint = "ghost-provider::ghost-model".to_string();
+        let mut cfg = AppConfig {
+            selected_api_config_id: endpoint.clone(),
+            expert_api_config_id: String::new(),
+            api_providers: vec![ApiProviderConfig {
+                id: provider_id.clone(),
+                name: "No Models".to_string(),
+                deprecated: false,
+                request_format: RequestFormat::OpenAI,
+                allow_concurrent_requests: false,
+                max_concurrent_requests: None,
+                enable_text: true,
+                enable_image: false,
+                enable_audio: false,
+                enable_video: false,
+                enable_tools: true,
+                tools: default_api_tools(),
+                base_url: "https://api.openai.com/v1".to_string(),
+                codex_auth_mode: default_codex_auth_mode(),
+                codex_local_auth_path: default_codex_local_auth_path(),
+                codex_custom_url: None,
+                codex_custom_api_key: None,
+                codex_originator: default_codex_originator(),
+                codex_residency_requirement: None,
+                api_keys: vec!["key-1".to_string()],
+                key_cursor: 0,
+                cached_model_options: Vec::new(),
+                // 供应商可以没有模型
+                models: Vec::new(),
+                failure_retry_count: 0,
+            }],
+            api_configs: Vec::new(),
+            ..AppConfig::default()
+        };
+
+        normalize_app_config(&mut cfg);
+
+        // 已有供应商（即使没有模型）必须原样保留，不得被默认供应商覆盖。
+        assert_eq!(cfg.selected_api_config_id, endpoint);
+        assert_eq!(cfg.api_providers.len(), 1);
+        assert_eq!(cfg.api_providers[0].id, provider_id);
+    }
+
+    #[test]
     fn startup_self_check_should_be_noop_after_deputy_semantics_removed() {
         let mut cfg = AppConfig::default();
         let snapshot = serde_json::to_string(&cfg).expect("config snapshot");

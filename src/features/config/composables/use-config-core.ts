@@ -116,7 +116,7 @@ export function useConfigCore(options: UseConfigCoreOptions) {
       apiKeys: [],
       keyCursor: 0,
       cachedModelOptions: modelName ? [modelName] : [],
-      models: [createApiModel(seed, modelName)],
+      models: modelName ? [createApiModel(seed, modelName)] : [],
       failureRetryCount: 0,
     };
   }
@@ -271,7 +271,6 @@ export function useConfigCore(options: UseConfigCoreOptions) {
       for (const model of models) {
         if (model.deprecated) continue;
         const modelValue = String(model.model || "").trim();
-        if (!modelValue) continue;
         const reasoningEffort = String(model.reasoningEffort || DEFAULT_REASONING_EFFORT).trim() || DEFAULT_REASONING_EFFORT;
         nextApiConfigs.push({
           id: `${provider.id}::${model.id}`,
@@ -300,50 +299,7 @@ export function useConfigCore(options: UseConfigCoreOptions) {
         });
       }
     }
-    if (nextApiConfigs.length === 0) {
-      const provider = options.config.apiProviders[0] ?? createApiProvider();
-      const model = Array.isArray(provider.models) ? (provider.models[0] ?? createApiModel()) : createApiModel();
-      const providerTools = Array.isArray(provider.tools)
-        ? provider.tools.map((tool) => ({ ...tool, args: [...(tool.args || [])], values: { ...(tool.values || {}) } }))
-        : [];
-      const providerApiKey = Array.isArray(provider.apiKeys) ? (provider.apiKeys[0] || "") : "";
-      const providerName = String(provider.name || "").trim() || provider.id;
-      const modelValue = String(model.model || "").trim();
-      const reasoningEffort = String(model.reasoningEffort || DEFAULT_REASONING_EFFORT).trim() || DEFAULT_REASONING_EFFORT;
-      nextApiConfigs.push({
-        id: `${provider.id}::${model.id}`,
-        name: apiConfigDisplayName(providerName, modelValue, reasoningEffort),
-        requestFormat: normalizeApiRequestFormat(provider.requestFormat),
-        allowConcurrentRequests: !!provider.allowConcurrentRequests,
-        maxConcurrentRequests: provider.maxConcurrentRequests ?? null,
-        enableText: !!provider.enableText,
-        enableImage: !!model.enableImage,
-        enableAudio: !!model.enableAudio,
-        enableVideo: !!model.enableVideo,
-        enableTools: model.enableTools !== false,
-        tools: providerTools,
-        baseUrl: effectiveProviderBaseUrl(provider),
-        apiKey: providerApiKey,
-        codexAuthMode: normalizeCodexAuthMode(provider.codexAuthMode),
-        codexLocalAuthPath: String(provider.codexLocalAuthPath || DEFAULT_CODEX_LOCAL_AUTH_PATH).trim() || DEFAULT_CODEX_LOCAL_AUTH_PATH,
-        codexCustomUrl: String(provider.codexCustomUrl || "").trim() || undefined,
-        codexCustomApiKey: String(provider.codexCustomApiKey || "").trim() || undefined,
-        codexOriginator: String(provider.codexOriginator || "").trim() || undefined,
-        codexResidencyRequirement: String(provider.codexResidencyRequirement || "").trim() || undefined,
-        model: modelValue,
-        displayName: String(model.displayName || "").trim() || undefined,
-        reasoningEffort,
-        temperature: Number(model.temperature ?? 1),
-        customTemperatureEnabled: !!model.customTemperatureEnabled,
-        contextWindowTokens: Math.round(Number(model.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS)),
-        customMaxOutputTokensEnabled: !!model.customMaxOutputTokensEnabled,
-        maxOutputTokens: toFiniteMaxOutputTokens(model.maxOutputTokens),
-      });
-    }
     options.config.apiConfigs.splice(0, options.config.apiConfigs.length, ...nextApiConfigs);
-    if (!nextApiConfigs.some((item) => item.id === options.config.selectedApiConfigId)) {
-      options.config.selectedApiConfigId = nextApiConfigs[0]?.id ?? "";
-    }
   }
 
   function buildConfigPayload(): AppConfig {

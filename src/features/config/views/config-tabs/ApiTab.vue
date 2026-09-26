@@ -805,7 +805,7 @@ function isModelDeprecated(model: ApiModelConfigItem | null | undefined): boolea
 
 function firstActiveModel(provider: ApiProviderConfigItem | null | undefined): ApiModelConfigItem | null {
   if (!provider) return null;
-  return (provider.models || []).find((model) => !isModelDeprecated(model) && String(model.model || "").trim().length > 0) ?? null;
+  return (provider.models || []).find((model) => !isModelDeprecated(model)) ?? null;
 }
 
 function reasoningEffortDisplayLabel(value: string): string {
@@ -933,17 +933,6 @@ function commitDraftGroups() {
   if (actuallyRemoved.length > 0) {
     clearRemovedApiConfigReferences(actuallyRemoved);
     props.normalizeApiBindingsAction();
-  }
-  // 仅当原选中卡被移除时才 fallback，保留用户当前选中
-  const [, selectedModelId] = String(props.config.selectedApiConfigId || "").split("::");
-  const selectedStillActive = selectedModelId && provider.models.some(
-    (model) => model.id === selectedModelId && !isModelDeprecated(model) && String(model.model || "").trim().length > 0,
-  );
-  if (!selectedStillActive) {
-    const fallback = firstActiveModel(provider);
-    props.config.selectedApiConfigId = fallback
-      ? `${provider.id}::${fallback.id}`
-      : firstActiveApiConfigIdExcluding(new Set(actuallyRemoved));
   }
 }
 
@@ -1681,7 +1670,7 @@ function createProvider(seed: string, capability: ApiCapability = selectedCapabi
     apiKeys: isCodex ? [] : [""],
     keyCursor: 0,
     cachedModelOptions: [],
-    models: [createModel(seed)],
+    models: [],
     failureRetryCount: 0,
   };
 }
@@ -1749,7 +1738,8 @@ async function addProvider() {
   const seed = buildProviderSeed();
   const provider = createProvider(seed, selectedCapability.value);
   props.config.apiProviders.push(provider);
-  props.config.selectedApiConfigId = `${provider.id}::${provider.models[0].id}`;
+  // 新建供应商没有模型，没有端点可写；只标记「正在浏览」，不改动当前选中端点。
+  browsingProviderId.value = provider.id;
 }
 
 function firstActiveApiConfigIdExcluding(excludedIds: Set<string>): string {
@@ -1757,7 +1747,6 @@ function firstActiveApiConfigIdExcluding(excludedIds: Set<string>): string {
     if (provider.deprecated) continue;
     for (const model of provider.models || []) {
       if (model.deprecated) continue;
-      if (!String(model.model || "").trim()) continue;
       const providerId = String(provider.id || "").trim();
       const modelId = String(model.id || "").trim();
       const endpointId = providerId && modelId ? `${providerId}::${modelId}` : "";
