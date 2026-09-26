@@ -810,7 +810,10 @@
         "noCandidate": "没有可选的下属人格。",
         "none": "未挂下属",
         "count": "{count} 位下属",
-        "saved": "委托人已保存"
+        "saved": "委托人已保存",
+        "ancestorTag": "上级",
+        "ancestorShort": "已是上级",
+        "ancestorHint": "该人格是当前人格的上级，设为下级会形成回环，不可勾选"
       },
       "capabilities": "能力与协同",
       "residentSkills": "随身技能与加载顺序",

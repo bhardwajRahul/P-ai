@@ -19,7 +19,11 @@
           v-for="item in candidates"
           :key="item.id"
           type="button"
-          class="flex w-full min-w-0 max-w-full items-center gap-3.5 px-4 py-3 text-left transition hover:bg-base-200/40 active:bg-base-200/60 overflow-hidden"
+          :disabled="item.isAncestor"
+          class="flex w-full min-w-0 max-w-full items-center gap-3.5 px-4 py-3 text-left transition overflow-hidden"
+          :class="item.isAncestor
+            ? 'cursor-not-allowed opacity-45'
+            : 'hover:bg-base-200/40 active:bg-base-200/60'"
           @click="toggle(item.id)"
         >
           <!-- 头像 -->
@@ -42,14 +46,28 @@
               <span v-if="item.isBuiltInSystem" class="badge badge-neutral badge-xs shrink-0">
                 {{ t("config.persona.systemTag") }}
               </span>
+              <span
+                v-if="item.isAncestor"
+                class="badge badge-ghost badge-xs shrink-0"
+                :title="t('config.persona.delegate.ancestorHint')"
+              >
+                {{ t("config.persona.delegate.ancestorTag") }}
+              </span>
             </div>
             <div v-if="item.summary" class="mt-0.5 block truncate text-xs text-base-content/50 max-w-full">
               {{ item.summary }}
             </div>
           </div>
 
-          <!-- 勾选状态指示 -->
+          <!-- 祖先项显示禁用原因占位；其余显示勾选状态 -->
           <span
+            v-if="item.isAncestor"
+            class="ml-auto shrink-0 text-xs text-base-content/40"
+          >
+            {{ t("config.persona.delegate.ancestorShort") }}
+          </span>
+          <span
+            v-else
             class="flex h-5 w-5 shrink-0 items-center justify-center rounded-selector border transition ml-auto"
             :class="isSelected(item.id)
               ? 'border-primary bg-primary text-primary-content shadow-xs'
@@ -74,6 +92,7 @@ import { useI18n } from "vue-i18n";
 import { Check } from "@lucide/vue";
 import ConfigCard from "../../../components/ConfigCard.vue";
 import type { PersonaProfile } from "../../../../../types/app";
+import { personaAncestorIds } from "../../../utils/persona-organization";
 
 const props = withDefaults(defineProps<{
   persona: PersonaProfile;
@@ -89,9 +108,33 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n();
 
-const candidates = computed(() =>
-  props.personas.filter((item) => String(item.id || "").trim() !== String(props.persona.id || "").trim()),
-);
+type CandidateItem = {
+  persona: PersonaProfile;
+  id: string;
+  name: string;
+  summary: string;
+  isBuiltInSystem: boolean;
+  /** 是否是当前人格的祖先——是则禁用勾选（勾了会成环），仅展示并标注。 */
+  isAncestor: boolean;
+};
+
+const candidates = computed<CandidateItem[]>(() => {
+  const selfId = String(props.persona.id || "").trim();
+  const ancestors = personaAncestorIds(selfId, props.personas);
+  return props.personas
+    .map((item) => {
+      const id = String(item.id || "").trim();
+      return {
+        persona: item,
+        id,
+        name: String(item.name || "").trim(),
+        summary: String(item.summary || "").trim(),
+        isBuiltInSystem: !!item.isBuiltInSystem,
+        isAncestor: ancestors.has(id),
+      };
+    })
+    .filter((item) => !!item.id && item.id !== selfId);
+});
 
 function avatarOf(id: string): string {
   return props.avatarUrlMap[id] || "";
@@ -106,6 +149,10 @@ function isSelected(id: string): boolean {
 }
 
 function toggle(id: string) {
+  const target = String(id || "").trim();
+  if (!target) return;
+  // 祖先项禁用，这里再兜一层，防止意外进入 toggle。
+  if (personaAncestorIds(String(props.persona.id || "").trim(), props.personas).has(target)) return;
   if (!Array.isArray(props.persona.childAgentIds)) {
     props.persona.childAgentIds = [];
   }

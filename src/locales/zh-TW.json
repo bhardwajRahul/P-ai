@@ -806,7 +806,10 @@
         "noCandidate": "沒有可選的下屬人格。",
         "none": "未掛下屬",
         "count": "{count} 位下屬",
-        "saved": "委託人已儲存"
+        "saved": "委託人已儲存",
+        "ancestorTag": "上級",
+        "ancestorShort": "已是上級",
+        "ancestorHint": "該人格是當前人格的上級，設為下級會形成迴環，不可勾選"
       },
       "capabilities": "能力與協同",
       "residentSkills": "隨身技能與載入順序",

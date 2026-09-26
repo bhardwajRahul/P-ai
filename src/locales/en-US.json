@@ -810,7 +810,10 @@
         "noCandidate": "No sub-persona available.",
         "none": "No delegate",
         "count": "{count} delegates",
-        "saved": "Delegates saved"
+        "saved": "Delegates saved",
+        "ancestorTag": "Superior",
+        "ancestorShort": "Is a superior",
+        "ancestorHint": "This persona is a superior of the current one; adding it as a subordinate would create a cycle"
       },
       "capabilities": "Capabilities & Delegation",
       "residentSkills": "Resident Skills & Injection Order",

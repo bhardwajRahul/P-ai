@@ -57,18 +57,23 @@
           </div>
           <div v-else class="flex flex-wrap gap-2">
             <button
-              v-for="persona in candidatePersonas"
-              :key="persona.id"
+              v-for="item in candidatePersonas"
+              :key="item.id"
               type="button"
+              :disabled="item.isAncestor"
               class="inline-flex h-9 max-w-full items-center gap-2 rounded-lg border px-3 text-left transition"
-              :class="selectedChildIds.includes(persona.id)
-                ? 'border-primary/50 bg-primary/10 text-base-content shadow-sm'
-                : 'border-base-content/10 bg-base-100 text-base-content hover:border-base-content/20'"
-              @click="toggleChildPersona(persona.id)"
+              :class="item.isAncestor
+                ? 'cursor-not-allowed border-base-content/10 bg-base-100 text-base-content/40'
+                : selectedChildIds.includes(item.id)
+                  ? 'border-primary/50 bg-primary/10 text-base-content shadow-sm'
+                  : 'border-base-content/10 bg-base-100 text-base-content hover:border-base-content/20'"
+              :title="item.isAncestor ? t('config.persona.delegate.ancestorHint') : undefined"
+              @click="toggleChildPersona(item.id)"
             >
               <span
+                v-if="!item.isAncestor"
                 class="flex h-4 w-4 shrink-0 items-center justify-center rounded border transition"
-                :class="selectedChildIds.includes(persona.id)
+                :class="selectedChildIds.includes(item.id)
                   ? 'border-primary bg-primary text-primary-content'
                   : 'border-base-content/20 bg-base-200 text-transparent'"
               >
@@ -78,14 +83,17 @@
                 class="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-base-200 text-[10px] font-semibold text-base-content/70"
               >
                 <img
-                  v-if="avatarOf(persona.id)"
-                  :src="avatarOf(persona.id)"
-                  :alt="persona.name"
+                  v-if="avatarOf(item.id)"
+                  :src="avatarOf(item.id)"
+                  :alt="item.persona.name"
                   class="h-full w-full object-cover"
                 />
-                <span v-else>{{ initialOf(persona.name) }}</span>
+                <span v-else>{{ initialOf(item.persona.name) }}</span>
               </span>
-              <span class="truncate text-sm font-medium">{{ persona.name }}</span>
+              <span class="truncate text-sm font-medium">{{ item.persona.name }}</span>
+              <span v-if="item.isAncestor" class="shrink-0 text-xs opacity-60">
+                {{ t("config.persona.delegate.ancestorTag") }}
+              </span>
             </button>
           </div>
         </div>
@@ -200,6 +208,7 @@ import { Check, Maximize2, Minimize2, RotateCcw, Save } from "@lucide/vue";
 import type { PersonaProfile } from "../../../../types/app";
 import SettingsStickyLayout from "../../components/SettingsStickyLayout.vue";
 import { useUnsavedChangesGuard } from "../../composables/use-unsaved-changes-guard";
+import { personaAncestorIds } from "../../utils/persona-organization";
 
 const props = withDefaults(defineProps<{
   personas: PersonaProfile[];
@@ -304,46 +313,30 @@ const selectedChildIds = computed(() =>
   relationDrafts.value.find((item) => item.id === selectedPersonaId.value)?.childAgentIds || [],
 );
 
-/** 某人格的全部祖先（沿 childAgentIds 反向找上级链），用于禁止把下级连成自己的祖先造成环。 */
-function ancestorIdsOf(personaId: string): Set<string> {
-  const ancestors = new Set<string>();
-  const parentOf = new Map<string, string[]>();
-  for (const draft of relationDrafts.value) {
-    for (const childId of draft.childAgentIds) {
-      const parents = parentOf.get(childId) || [];
-      parents.push(draft.id);
-      parentOf.set(childId, parents);
-    }
-  }
-  const queue = [personaId];
-  const visited = new Set<string>([personaId]);
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    for (const parent of parentOf.get(current) || []) {
-      if (visited.has(parent)) continue;
-      visited.add(parent);
-      ancestors.add(parent);
-      queue.push(parent);
-    }
-  }
-  return ancestors;
-}
-
-const selectedAncestorIdSet = computed(() => ancestorIdsOf(selectedPersonaId.value));
+// 草稿态祖先：候选下级排除自己祖先，防环（基于未保存的草稿关系，不是已保存数据）。
+const selectedAncestorIdSet = computed(() =>
+  personaAncestorIds(selectedPersonaId.value, relationDrafts.value),
+);
 
 const candidatePersonas = computed(() => {
   const selectedId = selectedPersonaId.value;
   if (!selectedId) return [];
   const selectedIds = new Set(selectedChildIds.value);
+  const ancestors = selectedAncestorIdSet.value;
   return orgPersonas.value
     .filter((persona) => {
       const id = String(persona.id || "").trim();
-      if (!id || id === selectedId) return false;
-      return !selectedAncestorIdSet.value.has(id);
+      return !!id && id !== selectedId;
+    })
+    .map((persona) => {
+      const id = String(persona.id || "").trim();
+      return { persona, id, isAncestor: ancestors.has(id) };
     })
     .sort((left, right) => {
-      const leftSelected = selectedIds.has(String(left.id || "").trim());
-      const rightSelected = selectedIds.has(String(right.id || "").trim());
+      // 已勾选的排前面，祖先（禁用）排最后，其余居中
+      if (left.isAncestor !== right.isAncestor) return left.isAncestor ? 1 : -1;
+      const leftSelected = selectedIds.has(left.id);
+      const rightSelected = selectedIds.has(right.id);
       if (leftSelected !== rightSelected) return leftSelected ? -1 : 1;
       return 0;
     });
@@ -519,14 +512,16 @@ function syncFlowGraph(forceReset: boolean) {
 function toggleChildPersona(childPersonaId: string) {
   const id = selectedPersonaId.value;
   if (!id) return;
-  const draft = relationDrafts.value.find((item) => item.id === id);
-  if (!draft) return;
   const childId = String(childPersonaId || "").trim();
   if (!childId || childId === id) return;
+  // 祖先项禁用，这里再兜一层。
+  if (selectedAncestorIdSet.value.has(childId)) return;
+  const draft = relationDrafts.value.find((item) => item.id === id);
+  if (!draft) return;
   const next = new Set(draft.childAgentIds);
   if (next.has(childId)) {
     next.delete(childId);
-  } else if (candidatePersonas.value.some((persona) => String(persona.id || "").trim() === childId)) {
+  } else if (candidatePersonas.value.some((item) => item.id === childId && !item.isAncestor)) {
     next.add(childId);
   }
   draft.childAgentIds = normalizeChildIds(Array.from(next), id);
