@@ -1,8 +1,10 @@
 import { computed, defineComponent, h, onBeforeUnmount, ref, watch } from "vue";
-import { Check, Copy, Maximize2 } from "@lucide/vue";
+import { Check, Copy, Maximize2, Play } from "@lucide/vue";
 import CodeBlockPreviewDialog from "../components/dialogs/CodeBlockPreviewDialog.vue";
+import InteractiveHtmlSandbox from "../components/InteractiveHtmlSandbox.vue";
 import MermaidBlock from "./MermaidBlock";
 import { createHighlightStream } from "./streaming-highlight";
+import { isInteractiveHtmlLang, isPlainHtmlLang } from "../utils/sandbox-html-builder";
 
 const HIGHLIGHT_CACHE_MAX = 80;
 const highlightCache = new Map<string, string>();
@@ -39,9 +41,12 @@ const CodeBlock = defineComponent({
     let lastStreamDark: boolean | null = null;
 
     const isMermaid = computed(() => codeProps.lang === "mermaid");
+    const isInteractiveHtml = computed(() => isInteractiveHtmlLang(codeProps.lang));
+    const isPlainHtml = computed(() => isPlainHtmlLang(codeProps.lang));
+    const sandboxEnabled = ref(false);
 
     async function highlightFull() {
-      if (isMermaid.value) return;
+      if (isMermaid.value || isInteractiveHtml.value) return;
       if (!codeProps.code) {
         highlightedHtml.value = "";
         return;
@@ -80,7 +85,7 @@ const CodeBlock = defineComponent({
     }
 
     async function highlightStreamingIncremental() {
-      if (isMermaid.value) return;
+      if (isMermaid.value || isInteractiveHtml.value) return;
       const code = codeProps.code || "";
       if (!code) {
         highlightedHtml.value = "";
@@ -115,7 +120,7 @@ const CodeBlock = defineComponent({
     }
 
     function scheduleHighlight() {
-      if (isMermaid.value) return;
+      if (isMermaid.value || isInteractiveHtml.value) return;
       if (!codeProps.code) {
         if (highlightDebounceTimer) {
           clearTimeout(highlightDebounceTimer);
@@ -246,10 +251,38 @@ const CodeBlock = defineComponent({
         });
       }
 
+      // ```html:interactive —— 交互式沙箱：流式期间展示骨架卡片，闭合后挂载沙箱
+      if (isInteractiveHtml.value || (isPlainHtml.value && sandboxEnabled.value)) {
+        if (codeProps.streaming && isInteractiveHtml.value) {
+          return h("div", { class: "ecall-md-sandbox-skeleton" }, [
+            h("div", { class: "ecall-sandbox-toolbar" }, [
+              h("span", { class: "ecall-sandbox-title" }, "正在编写交互组件…"),
+            ]),
+            h("div", { class: "ecall-sandbox-skeleton-body" }, [
+              h("span", { class: "ecall-sandbox-loading-dot" }),
+            ]),
+          ]);
+        }
+        return h(InteractiveHtmlSandbox, {
+          code: codeProps.code,
+          isDark: codeProps.isDark,
+          exitTitle: isInteractiveHtml.value ? "" : "返回代码",
+          onExit: () => { sandboxEnabled.value = false; },
+        });
+      }
+
       // 标题栏：左边语言名，右边复制按钮
       const titleBar = h("div", { class: "ecall-md-code-title" }, [
         h("span", { class: "ecall-md-code-lang" }, codeProps.lang || "text"),
         h("div", { class: "ecall-md-code-actions" }, [
+          isPlainHtml.value
+            ? h("button", {
+              type: "button",
+              class: "ecall-md-code-action",
+              title: "交互预览",
+              onClick: () => { sandboxEnabled.value = true; },
+            }, [h(Play, { class: "ecall-md-code-action-icon" })])
+            : null,
           h("button", {
             type: "button",
             class: "ecall-md-code-action",

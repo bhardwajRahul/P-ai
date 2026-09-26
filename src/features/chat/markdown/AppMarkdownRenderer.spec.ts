@@ -78,4 +78,21 @@ describe("AppMarkdownRenderer", () => {
     const quoteHtml = html.match(/<blockquote[\s\S]*?<\/blockquote>/)?.[0] || "";
     expect(quoteHtml).not.toContain("ecall-md-animate-word");
   });
+
+  it("renders html:interactive blocks as sandboxed iframe instead of code block", async () => {
+    const html = await renderMarkdown([
+      "```html:interactive",
+      "<!DOCTYPE html><html><body><button>点我</button></body></html>",
+      "```",
+    ].join("\n"));
+    expect(html).toContain("ecall-sandbox-card");
+    expect(html).toContain("iframe");
+    expect(html).toContain("sandbox=");
+    expect(html).not.toContain("ecall-md-code-block");
+  });
+
+  it("renders plain html blocks as normal code blocks", async () => {
+    const html = await renderMarkdown("```html\n<div>x</div>\n```");
+    expect(html).toContain("ecall-md-code-block");
+  });
 });

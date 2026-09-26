@@ -18,6 +18,12 @@ const webDispatcherPath = resolve(
   "jsonrpc_dispatch.rs",
 );
 const hostExtensionPath = resolve(sourceRoot, "features", "sidebar", "extension", "extension.js");
+// 交互式 HTML 沙箱通过 iframe srcdoc + postMessage 与内嵌文档通信，
+// 属于 DOM 内嵌页面隔离机制，不是宿主↔业务的传输桥，按文件显式豁免。
+const sandboxMessagingPaths = new Set([
+  resolve(sourceRoot, "features", "chat", "components", "InteractiveHtmlSandbox.vue"),
+  resolve(sourceRoot, "features", "chat", "utils", "sandbox-html-builder.ts"),
+]);
 const capabilityConsumerPaths = new Set([
   resolve(sourceRoot, "ConfigWindowApp.vue"),
   resolve(sourceRoot, "features", "chat", "components", "dialogs", "ChatImagePreviewDialog.vue"),
@@ -155,7 +161,9 @@ describe("统一传输边界", () => {
         [/\bonNativeFileDrop\b/, "native file-drop naming"],
         [/addEventListener\s*\(\s*["']message["']/, "direct host message listener"],
       ];
+      const isSandboxMessagingPath = sandboxMessagingPaths.has(path);
       for (const [pattern, label] of checks) {
+        if (isSandboxMessagingPath && label === "direct host message listener") continue;
         if (pattern.test(text)) violations.push(`${relativePath}: ${label}`);
       }
       if (
@@ -165,7 +173,7 @@ describe("统一传输边界", () => {
       ) {
         violations.push(`${relativePath}: native chat protocol command outside adapter`);
       }
-      if (path !== hostExtensionPath && /\.postMessage\s*\(/.test(text)) {
+      if (path !== hostExtensionPath && !isSandboxMessagingPath && /\.postMessage\s*\(/.test(text)) {
         violations.push(`${relativePath}: direct postMessage`);
       }
       if (path !== adapterPath && /getTransportCapabilities\s*\(/.test(text) && !capabilityConsumerPaths.has(path)) {

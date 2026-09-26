@@ -292,6 +292,27 @@ export async function saveTransportFileDialog(
   return dialog.save(options as Parameters<typeof dialog.save>[0]);
 }
 
+/**
+ * 导出文本文件统一入口：桌面走系统保存对话框写盘，Web/VS Code 走浏览器下载。
+ * 业务组件不探测宿主平台。
+ */
+export async function saveTransportTextFileAs(fileName: string, text: string, filters?: TransportFileDialogOptions["filters"]): Promise<boolean> {
+  if (isTauriRuntimeAvailable()) {
+    const target = await saveTransportFileDialog({
+      defaultPath: fileName,
+      ...(filters ? { filters } : {}),
+    });
+    if (!target) return false;
+    await writeTransportUtf8TextFile(target, text);
+    return true;
+  }
+  downloadBrowserTransportBlob(
+    fileName,
+    new Blob([String(text || "")], { type: "text/plain;charset=utf-8" }),
+  );
+  return true;
+}
+
 function browserFileAcceptValue(filters: TransportFileDialogOptions["filters"]): string {
   return (filters || [])
     .flatMap((filter) => filter.extensions || [])
