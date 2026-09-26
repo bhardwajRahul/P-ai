@@ -319,7 +319,7 @@
                 <span class="text-sm font-semibold text-base-content truncate group-hover:text-primary transition-colors">
                   {{ provider.name || provider.id }}
                 </span>
-                <span v-if="isDefaultProvider(provider.id)" class="badge badge-primary badge-xs shrink-0">{{ t('config.api.defaultProvider') }}</span>
+                <span v-if="isLastEditedProvider(provider.id)" class="badge badge-primary badge-xs shrink-0">{{ t('config.api.lastEditedProvider') }}</span>
                 <span v-if="isProviderDirty(provider)" class="badge badge-warning badge-xs shrink-0">{{ t('config.api.unsaved') }}</span>
               </div>
               <div class="font-mono text-caption opacity-50 truncate mt-1">
@@ -1017,7 +1017,10 @@ function onAddProviderClick() {
   inDetailMode.value = true;
 }
 
-function isDefaultProvider(providerId: string): boolean {
+// selectedApiConfigId 记录的是「上次使用的端点」（providerId::modelId），
+// 点开详情、保存、设人格主模型时都会被改写，没有任何运行时消费方。
+// 这里取它的 providerId 命中列表行，表示「最近操作的供应商」。
+function isLastEditedProvider(providerId: string): boolean {
   const [id] = String(props.config.selectedApiConfigId || "").split("::");
   return id === providerId;
 }

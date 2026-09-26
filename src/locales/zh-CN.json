@@ -289,7 +289,7 @@
       "modelCount": "{count} 个模型",
       "keyCount": "{count} 个密钥",
       "noMatches": "未找到匹配的供应商",
-      "defaultProvider": "默认",
+      "lastEditedProvider": "最后编辑",
       "unsaved": "未保存",
       "manage": "管理详情",
       "deleteProviderTitle": "删除供应商",

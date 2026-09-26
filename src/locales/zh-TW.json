@@ -285,7 +285,7 @@
       "modelCount": "{count} 個模型",
       "keyCount": "{count} 個密鑰",
       "noMatches": "未找到相符的供應商",
-      "defaultProvider": "預設",
+      "lastEditedProvider": "最後編輯",
       "unsaved": "未儲存",
       "manage": "管理詳情",
       "deleteProviderTitle": "刪除供應商",
