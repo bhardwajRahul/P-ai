@@ -219,6 +219,16 @@
         />
       </div>
 
+      <div v-else-if="props.configTab === 'organization'" class="flex-1 min-h-0">
+        <OrganizationTab
+          :personas="personas"
+          :persona-avatar-url-map="props.personaAvatarUrlMap"
+          :saving="personaSaving"
+          :save-relations="props.savePersonaRelations"
+          :set-status-action="setStatusAction"
+        />
+      </div>
+
       <div v-else-if="props.configTab === 'demo' && SHOW_DEV_DEMO_TAB" class="flex-1 min-h-0">
         <DemoTab
           :config="config"
@@ -442,6 +452,7 @@ import McpTab from "./config-tabs/McpTab.vue";
 import SkillTab from "./config-tabs/SkillTab.vue";
 import CatalogTab from "./config-tabs/CatalogTab.vue";
 import PersonaTab from "./config-tabs/PersonaTab.vue";
+import OrganizationTab from "./config-tabs/OrganizationTab.vue";
 import DemoTab from "./config-tabs/DemoTab.vue";
 import ChatSettingsTab from "./config-tabs/ChatSettingsTab.vue";
 import NotificationTab from "./config-tabs/NotificationTab.vue";
@@ -456,11 +467,11 @@ import StorageTab from "./config-tabs/StorageTab.vue";
 import AboutTab from "./config-tabs/AboutTab.vue";
 import SimpleSetupPanel from "./config-tabs/SimpleSetupPanel.vue";
 import { toErrorMessage } from "../../../utils/error";
-import { ArrowLeftRight, Beaker, Bell, ChevronRight, ClipboardList, Code, Cpu, Database, Home, Info, Keyboard, Menu, Palette, Puzzle, Radio, ScrollText, Sparkles, Star, Store, User, Wifi } from "@lucide/vue";
+import { ArrowLeftRight, Beaker, Bell, ChevronRight, ClipboardList, Code, Cpu, Database, Home, Info, Keyboard, Menu, Network, Palette, Puzzle, Radio, ScrollText, Sparkles, Star, Store, User, Wifi } from "@lucide/vue";
 import OverlayScrollArea from "../../shared/components/OverlayScrollArea.vue";
 import { useUnsavedChangesGuard } from "../composables/use-unsaved-changes-guard";
 
-type ConfigTab = "welcome" | "hotkey" | "api" | "mcp" | "skill" | "catalog" | "persona" | "demo" | "chatSettings" | "notification" | "networkAccess" | "remoteIm" | "usage" | "memory" | "task" | "logs" | "appearance" | "migration" | "about";
+type ConfigTab = "welcome" | "hotkey" | "api" | "mcp" | "skill" | "catalog" | "persona" | "organization" | "demo" | "chatSettings" | "notification" | "networkAccess" | "remoteIm" | "usage" | "memory" | "task" | "logs" | "appearance" | "migration" | "about";
 type AvatarTarget = { agentId: string };
 type ConfigNavItem = {
   tab: ConfigTab;
@@ -505,6 +516,7 @@ const CONFIG_NAV_GROUPS: ConfigNavGroup[] = [
     titleKey: "config.navGroups.agents",
     items: [
       { tab: "persona", icon: User, labelKey: "config.tabs.persona" },
+      { tab: "organization", icon: Network, labelKey: "config.tabs.organization" },
     ],
   },
   {

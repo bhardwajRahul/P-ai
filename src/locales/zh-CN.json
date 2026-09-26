@@ -49,6 +49,7 @@
       "skill": "技能",
       "catalog": "能力商店",
       "persona": "人格",
+      "organization": "组织",
       "demo": "Demo",
       "chatSettings": "常用",
       "notification": "通知",
@@ -68,6 +69,24 @@
       "discard": "放弃修改",
       "stay": "继续编辑",
       "saveAndLeave": "保存并离开"
+    },
+    "organization": {
+      "title": "组织",
+      "hint": "组织是人格上下级关系的视图。点选节点后在上方勾选直属下级，保存后生效。",
+      "empty": "暂无可展示的组织成员。",
+      "directChildren": "直属下级",
+      "childrenOf": "「{name}」的直属下级",
+      "directChildrenHint": "勾选即可把该人格设为当前选中人格的直属下级，保存后生效。",
+      "selectHint": "先在下方组织图中点选一个节点。",
+      "noCandidateChildren": "没有可作为下级的人格。",
+      "childCount": "{count} 个直属下级",
+      "rootBadge": "主助理",
+      "cycleError": "关系成环：{name} 出现在自己的下级链中，请先断开成环的勾选。",
+      "unsavedSwitchHint": "「{name}」的下级有未保存的修改。",
+      "autoLayout": "自动布局",
+      "autoLayoutDone": "已自动布局。",
+      "openFullscreen": "全屏查看",
+      "exitFullscreen": "退出全屏"
     },
     "catalog": {
       "refresh": "刷新",

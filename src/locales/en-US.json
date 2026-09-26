@@ -49,6 +49,7 @@
       "skill": "Skill",
       "catalog": "Capability Store",
       "persona": "Persona",
+      "organization": "Organization",
       "demo": "Demo",
       "chatSettings": "Common",
       "notification": "Notification",
@@ -68,6 +69,24 @@
       "discard": "Discard Changes",
       "stay": "Keep Editing",
       "saveAndLeave": "Save & Leave"
+    },
+    "organization": {
+      "title": "Organization",
+      "hint": "The organization visualizes persona reporting lines. Select a node to edit its direct subordinates above; changes apply after saving.",
+      "empty": "No organization members to display.",
+      "directChildren": "Direct subordinates",
+      "childrenOf": "Direct subordinates of \"{name}\"",
+      "directChildrenHint": "Check personas to set them as direct subordinates of the selected node; applies after saving.",
+      "selectHint": "Select a node in the graph below first.",
+      "noCandidateChildren": "No persona can be a subordinate.",
+      "childCount": "{count} direct subordinate persona(s)",
+      "rootBadge": "Primary",
+      "cycleError": "Cycle detected: {name} appears in its own subordinate chain. Uncheck the cyclic subordinate first.",
+      "unsavedSwitchHint": "\"{name}\" has unsaved subordinate changes.",
+      "autoLayout": "Auto layout",
+      "autoLayoutDone": "Auto layout applied.",
+      "openFullscreen": "Fullscreen",
+      "exitFullscreen": "Exit fullscreen"
     },
     "catalog": {
       "refresh": "Refresh",

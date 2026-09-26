@@ -386,6 +386,7 @@ type ConfigTab =
   | "skill"
   | "catalog"
   | "persona"
+  | "organization"
   | "demo"
   | "chatSettings"
   | "notification"
