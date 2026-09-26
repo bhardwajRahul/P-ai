@@ -86,12 +86,8 @@ function buildBridgeScript(): string {
   function reportHeight() {
     var doc = document.documentElement;
     var body = document.body;
-    var height = Math.max(
-      doc ? doc.scrollHeight : 0,
-      body ? body.scrollHeight : 0,
-      doc ? doc.offsetHeight : 0,
-      body ? body.offsetHeight : 0
-    );
+    // 只测 body 内容高度；documentElement 尺寸受 iframe 高度影响，会回环
+    var height = body ? Math.max(body.scrollHeight, body.offsetHeight) : 0;
     if (!isFinite(height) || height <= 0) return;
     var rounded = Math.ceil(height);
     if (rounded === lastHeight) return;
@@ -149,7 +145,7 @@ function buildBridgeScript(): string {
   if (typeof ResizeObserver === "function") {
     var observer = new ResizeObserver(scheduleReport);
     var observe = function () {
-      if (document.documentElement) observer.observe(document.documentElement);
+      // 只观察 body；documentElement 尺寸随 iframe 高度变化，观察它会形成回环
       if (document.body) observer.observe(document.body);
     };
     if (document.readyState === "loading") {
@@ -189,6 +185,7 @@ html, body {
   color: var(--color-base-content, inherit);
   font-family: inherit;
 }
+/* 沙箱嵌在聊天气泡内，外层已有留白，内容默认贴边、由组件内部自行控制间距 */
 </style>`;
 }
 

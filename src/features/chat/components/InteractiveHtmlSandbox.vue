@@ -160,6 +160,29 @@ function clampHeight(height: number): number {
   return Math.min(Math.max(Math.ceil(height), SANDBOX_MIN_HEIGHT), SANDBOX_MAX_HEIGHT * 4);
 }
 
+let shrinkTimer = 0;
+
+function applyFrameHeight(height: number) {
+  const next = height > SANDBOX_MAX_HEIGHT ? SANDBOX_MAX_HEIGHT : height;
+  heightOverflow.value = height > SANDBOX_MAX_HEIGHT;
+  // 变小防抖、变大立即应用、±2px 抖动忽略，避免 ResizeObserver 回环振荡
+  if (next === frameHeight.value) return;
+  if (next > frameHeight.value) {
+    if (shrinkTimer) {
+      window.clearTimeout(shrinkTimer);
+      shrinkTimer = 0;
+    }
+    frameHeight.value = next;
+    return;
+  }
+  if (Math.abs(next - frameHeight.value) <= 2) return;
+  if (shrinkTimer) window.clearTimeout(shrinkTimer);
+  shrinkTimer = window.setTimeout(() => {
+    shrinkTimer = 0;
+    frameHeight.value = next;
+  }, 160);
+}
+
 function onMessage(event: MessageEvent) {
   const frame = frameRef.value;
   if (!frame || event.source !== frame.contentWindow) return;
@@ -168,13 +191,7 @@ function onMessage(event: MessageEvent) {
   if (data.type === SANDBOX_MESSAGE_TYPE_RESIZE) {
     const height = clampHeight(Number(data.height));
     if (!height) return;
-    if (height > SANDBOX_MAX_HEIGHT) {
-      heightOverflow.value = true;
-      frameHeight.value = SANDBOX_MAX_HEIGHT;
-    } else {
-      heightOverflow.value = false;
-      frameHeight.value = height;
-    }
+    applyFrameHeight(height);
     frameReady.value = true;
     return;
   }
@@ -299,6 +316,7 @@ onBeforeUnmount(() => {
   }
   if (copyTimer) window.clearTimeout(copyTimer);
   if (loadingFallbackTimer) window.clearTimeout(loadingFallbackTimer);
+  if (shrinkTimer) window.clearTimeout(shrinkTimer);
 });
 </script>
 
