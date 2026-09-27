@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-09-26T22:57:12.739Z",
-  "latestVersion": "v0.95.0",
+  "generatedAt": "2026-09-27T17:28:31.623Z",
+  "latestVersion": "v0.95.1",
   "releases": [
+    {
+      "version": "v0.95.1",
+      "path": "docs/changelog/releases/v0.95.1.md",
+      "summary": "**内置模型清单新增 gpt-6-sol、gpt-6-luna 两个模型**：这两个模型可直接在供应商里选用；同时把 Codex 系大模型的上下文窗口从 256K 调整为 272K，更贴合后端实际可用的输入预算（spark 仍保持 128K）。"
+    },
     {
       "version": "v0.95.0",
       "path": "docs/changelog/releases/v0.95.0.md",
