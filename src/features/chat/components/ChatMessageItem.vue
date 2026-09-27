@@ -5,7 +5,6 @@
     :data-active-turn-user="activeTurnUser ? 'true' : undefined"
     :class="[
       'ecall-chat-message-row group/user-turn relative rounded-2xl px-4 transition-colors',
-      shouldAnimateEnter(block) ? 'ecall-message-enter' : '',
       isOwnMessage(block) ? 'ecall-chat-message-row-own' : 'ecall-chat-message-row-other',
       isOwnMessage(block) && compactWithPrevious ? 'ecall-message-continued' : '',
       selectionModeEnabled ? 'ecall-chat-message-row-selectable' : '',
@@ -973,10 +972,6 @@ function hasStreamingSpeechContent(block: ChatMessageBlock): boolean {
   return false;
 }
 
-function shouldAnimateEnter(block: ChatMessageBlock): boolean {
-  void block;
-  return false;
-}
 
 function toolCallsForBlock(block: ChatMessageBlock): Array<{ name: string; argsText: string; status?: "doing" | "done" }> {
   return block.toolCalls;
@@ -1978,20 +1973,6 @@ function openAttachmentPath(path: string) {
   margin: 0;
 }
 
-.ecall-message-enter {
-  animation: ecall-message-enter 220ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-@keyframes ecall-message-enter {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 .assistant-markdown :deep(.ecall-markdown-content.prose) {
   --tw-prose-body: currentColor;
