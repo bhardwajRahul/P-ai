@@ -501,13 +501,8 @@ body {
   transform: translateY(-6px);
 }
 
-.ecall-activity-item-move {
-  transition: transform var(--duration-fold) ease;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .ecall-activity-item-enter-active,
-  .ecall-activity-item-move {
+  .ecall-activity-item-enter-active {
     transition: none !important;
   }
 
