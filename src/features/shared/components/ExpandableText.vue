@@ -81,7 +81,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="ecall-expandable flex min-w-0 flex-col" :class="{ 'ecall-expandable--expanded': expanded, 'ecall-expandable--clamped': clamped }">
+  <div
+    class="ecall-expandable flex min-w-0 flex-col"
+    :class="{
+      'ecall-expandable--expanded': expanded,
+      'ecall-expandable--clamped': clamped,
+      'ecall-expandable--following': props.follow && expanded,
+    }"
+  >
     <div
       class="ecall-expandable__shell"
       :style="shellStyle"

@@ -1141,10 +1141,20 @@ function activityItemExpanded(item: ChatActivityItem): boolean {
   return activityItemKey(item) === newestActivityReasoningKey.value;
 }
 
-/** 展开且仍在流式中的最新思维块不设高度上限，随内容自然生长 */
+/** 最新一条正在流式的活动块（思维块或内容块）：流式生长时不设高度上限 */
+const newestStreamingActivityKey = computed(() => {
+  const items = resolvedActivityItems(props.block);
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === "reasoning" || item.kind === "content") return activityItemKey(item);
+  }
+  return "";
+});
+
+/** 展开且仍在流式中的最新思维或内容块不设高度上限，随内容自然生长 */
 function activityItemFollowsStream(item: Extract<ChatActivityItem, { kind: "reasoning" | "content" }>): boolean {
   if (!item.running || !activityItemExpanded(item)) return false;
-  return activityItemKey(item) === newestActivityReasoningKey.value;
+  return activityItemKey(item) === newestStreamingActivityKey.value;
 }
 
 function onActivityItemExpandedChange(item: ChatActivityItem, expanded: boolean): void {

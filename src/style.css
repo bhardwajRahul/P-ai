@@ -449,6 +449,9 @@ body {
     transition: max-height var(--duration-fold) ease, height var(--duration-fold) ease, overflow var(--duration-fold) allow-discrete var(--overflow-delay, 0s);
   }
 }
+.ecall-expandable--following .ecall-expandable__shell {
+  transition: none !important;
+}
 .ecall-expandable-text-clamped {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 2.25rem), transparent 100%);
 }
