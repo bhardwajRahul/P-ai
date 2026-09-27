@@ -900,20 +900,23 @@ fn default_context_window_tokens() -> u32 {
 }
 
 fn default_codex_context_window_tokens() -> u32 {
-    262_144
+    272_000
 }
 
 fn codex_context_window_tokens_for_model(model_id: &str) -> u32 {
     match model_id.trim().to_ascii_lowercase().as_str() {
-        // gpt-6 系按 gpt-5 系同级处理
+        // codex 后端实际输入预算统一 272K（对齐 opencode/cline 实测口径），
+        // 不采用官方目录宣称的 1.05M。
         "gpt-6-astra"
+        | "gpt-6-sol"
+        | "gpt-6-luna"
         | "gpt-5.6-sol"
         | "gpt-5.6-terra"
         | "gpt-5.6-luna"
         | "gpt-5.5"
         | "gpt-5.4"
         | "gpt-5.4-mini"
-        | "gpt-5.3-codex" => 262_144,
+        | "gpt-5.3-codex" => 272_000,
         "gpt-5.3-codex-spark" => 131_072,
         _ => default_codex_context_window_tokens(),
     }
@@ -1164,9 +1167,11 @@ mod codex_context_window_tests {
     use super::*;
 
     #[test]
-    fn codex_context_window_should_use_256k_except_for_128k_spark() {
+    fn codex_context_window_should_use_272k_except_for_128k_spark() {
         for model in [
             "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
@@ -1179,7 +1184,7 @@ mod codex_context_window_tests {
             let expected = if model == "gpt-5.3-codex-spark" {
                 131_072
             } else {
-                262_144
+                272_000
             };
             assert_eq!(codex_context_window_tokens_for_model(model), expected, "model: {model}");
         }

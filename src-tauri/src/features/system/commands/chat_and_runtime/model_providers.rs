@@ -173,6 +173,8 @@ enum ModelRefreshStrategy {
 fn codex_builtin_models() -> Vec<String> {
     vec![
         "gpt-6-astra".to_string(),
+        "gpt-6-sol".to_string(),
+        "gpt-6-luna".to_string(),
         "gpt-5.6-sol".to_string(),
         "gpt-5.6-terra".to_string(),
         "gpt-5.6-luna".to_string(),
@@ -1116,6 +1118,9 @@ mod model_metadata_selection_tests {
         let models = codex_builtin_models();
 
         for model in [
+            "gpt-6-astra",
+            "gpt-6-sol",
+            "gpt-6-luna",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
