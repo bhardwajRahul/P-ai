@@ -32,6 +32,8 @@ struct CodexStoredCredential {
 struct CodexJwtApiClaims {
     #[serde(default)]
     chatgpt_account_id: String,
+    #[serde(default)]
+    chatgpt_compute_residency: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -48,6 +50,8 @@ struct CodexJwtClaims {
     email: String,
     #[serde(default)]
     chatgpt_account_id: String,
+    #[serde(default)]
+    chatgpt_compute_residency: String,
     #[serde(default)]
     organizations: Vec<CodexJwtOrganization>,
     #[serde(rename = "https://api.openai.com/auth", default)]
@@ -307,6 +311,24 @@ fn codex_extract_account_id(claims: &CodexJwtClaims) -> String {
         .iter()
         .find_map(|item| (!item.id.trim().is_empty()).then(|| item.id.trim().to_string()))
         .unwrap_or_default()
+}
+
+/// 从 access_token JWT 提取 ChatGPT compute residency（对齐 opencode extractResidency）。
+/// `no_constraint` 表示无驻留约束，视为无值。
+fn codex_extract_residency_from_token(token: &str) -> Option<String> {
+    let claims = codex_parse_jwt_claims(token)?;
+    let residency = {
+        let nested = claims.api_auth.chatgpt_compute_residency.trim();
+        if nested.is_empty() {
+            claims.chatgpt_compute_residency.trim()
+        } else {
+            nested
+        }
+    };
+    if residency.is_empty() || residency == "no_constraint" {
+        return None;
+    }
+    Some(residency.to_string())
 }
 
 fn codex_token_preview(token: &str) -> String {

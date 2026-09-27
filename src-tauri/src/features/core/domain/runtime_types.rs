@@ -43,6 +43,8 @@ struct ResolvedApiConfig {
     extra_headers: Vec<(String, String)>,
     codex_auth: Option<CodexRuntimeAuth>,
     codex_custom_api_key: Option<String>,
+    codex_originator: Option<String>,
+    codex_residency_requirement: Option<String>,
 }
 
 struct ProviderRequestGate {

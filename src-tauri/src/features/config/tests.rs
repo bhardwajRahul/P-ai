@@ -818,6 +818,53 @@ enableTools = true
             .extra_headers
             .iter()
             .any(|(key, value)| key == "Session-Id" && !value.trim().is_empty()));
+        // custom_url 模式未显式配置 originator 时回落真实产品名 p_ai_desktop，
+        // 不沿用 OAuth 模式伪装官方客户端的默认 codex-tui。
+        assert_eq!(resolved.codex_originator.as_deref(), Some("p_ai_desktop"));
+    }
+
+    #[test]
+    fn resolve_api_config_should_keep_explicit_originator_in_custom_url_mode() {
+        let provider_id = "codex-custom-originator".to_string();
+        let model_id = "codex-model".to_string();
+        let mut cfg = AppConfig {
+            selected_api_config_id: api_endpoint_id(&provider_id, &model_id),
+            api_providers: vec![ApiProviderConfig {
+                id: provider_id.clone(),
+                name: "SharedChat".to_string(),
+                deprecated: false,
+                request_format: RequestFormat::Codex,
+                allow_concurrent_requests: false,
+                max_concurrent_requests: None,
+                enable_text: true,
+                enable_image: false,
+                enable_audio: false,
+                enable_video: false,
+                enable_tools: true,
+                tools: default_api_tools(),
+                base_url: "https://example.com/codex".to_string(),
+                codex_auth_mode: CODEX_AUTH_MODE_CUSTOM_URL.to_string(),
+                codex_local_auth_path: default_codex_local_auth_path(),
+                codex_custom_url: Some("https://example.com/codex".to_string()),
+                codex_custom_api_key: Some("key".to_string()),
+                codex_originator: "my-custom-agent".to_string(),
+                codex_residency_requirement: None,
+                api_keys: Vec::new(),
+                key_cursor: 0,
+                cached_model_options: Vec::new(),
+                models: vec![ApiModelConfig {
+                    id: model_id.clone(),
+                    model: "gpt-5.4".to_string(),
+                    ..ApiModelConfig::default()
+                }],
+                failure_retry_count: 0,
+            }],
+            ..AppConfig::default()
+        };
+        normalize_app_config(&mut cfg);
+        let resolved = resolve_api_config(&cfg, Some(&api_endpoint_id(&provider_id, &model_id)))
+            .expect("explicit originator resolve");
+        assert_eq!(resolved.codex_originator.as_deref(), Some("my-custom-agent"));
     }
 
     #[test]

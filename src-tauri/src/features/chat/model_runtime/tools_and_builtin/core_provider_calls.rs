@@ -553,7 +553,38 @@ fn provider_genai_headers(api_config: &ResolvedApiConfig) -> genai::Headers {
     match api_config.request_format {
         RequestFormat::Codex => {
             let mut headers = app_identity_genai_headers();
+            // codex 通道使用 provider 配置的 originator（默认 codex-tui），
+            // 对齐 opencode/cline 的 originator=<产品名> 口径。
+            if let Some(originator) = api_config
+                .codex_originator
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                headers.merge(vec![("originator".to_string(), originator.to_string())]);
+            }
             headers.merge(api_config.extra_headers.clone());
+            // 对齐 opencode：codex 端点需要 ChatGPT compute residency 头。
+            // 优先 provider 配置的显式值，否则从 access_token JWT claim 提取；
+            // no_constraint / 无值均不下发。
+            let residency = api_config
+                .codex_residency_requirement
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .or_else(|| {
+                    api_config
+                        .codex_auth
+                        .as_ref()
+                        .and_then(|auth| codex_extract_residency_from_token(&auth.access_token))
+                });
+            if let Some(residency) = residency {
+                headers.merge(vec![(
+                    "x-openai-internal-codex-residency".to_string(),
+                    residency,
+                )]);
+            }
             headers
         }
         _ => {
@@ -1690,6 +1721,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         }
     }
 
@@ -1763,6 +1796,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(&api_config, genai::adapter::AdapterKind::OpenAI, false, false, None);
@@ -1790,6 +1825,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(&api_config, genai::adapter::AdapterKind::OpenAIResp, true, true, None);
@@ -1820,6 +1857,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(&api_config, genai::adapter::AdapterKind::OpenAIResp, true, true, None);
@@ -1847,6 +1886,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(&api_config, genai::adapter::AdapterKind::OpenAIResp, true, true, None);
@@ -1893,6 +1934,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(&api_config, genai::adapter::AdapterKind::OpenAIResp, true, true, None);
@@ -1920,6 +1963,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(&api_config, genai::adapter::AdapterKind::DeepSeek, true, true, None);
@@ -1953,6 +1998,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(
@@ -1991,6 +2038,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(&api_config, genai::adapter::AdapterKind::OpenAI, true, true, None);
@@ -2025,6 +2074,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(&api_config, genai::adapter::AdapterKind::OpenAI, true, true, None);
@@ -2059,6 +2110,8 @@ mod openai_responses_genai_request_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         let options = build_provider_genai_chat_options(&api_config, genai::adapter::AdapterKind::OpenAI, true, true, None);
@@ -2356,6 +2409,8 @@ mod openai_responses_genai_request_tests {
                 extra_headers: Vec::new(),
                 codex_auth: None,
                 codex_custom_api_key: None,
+                codex_originator: None,
+                codex_residency_requirement: None,
             },
             "gemini-2.5-flash",
             genai::adapter::AdapterKind::Gemini,
@@ -2390,6 +2445,8 @@ mod openai_responses_genai_request_tests {
                 extra_headers: Vec::new(),
                 codex_auth: None,
                 codex_custom_api_key: None,
+                codex_originator: None,
+                codex_residency_requirement: None,
             },
             "claude-3-7-sonnet",
             genai::adapter::AdapterKind::Anthropic,

@@ -3764,6 +3764,8 @@ mod core_send_inner_tests {
             extra_headers: vec![("Session-Id".to_string(), "random-uuid".to_string())],
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         sync_codex_conversation_request_key(&mut resolved_api, "conversation-123");
@@ -3801,6 +3803,8 @@ mod core_send_inner_tests {
             extra_headers: Vec::new(),
             codex_auth: None,
             codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
         };
 
         sync_codex_conversation_request_key(&mut resolved_api, "conversation-123");

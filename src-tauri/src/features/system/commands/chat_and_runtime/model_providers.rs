@@ -806,6 +806,8 @@ async fn quick_genai_chat_inner(
         extra_headers: Vec::new(),
         codex_auth: None,
         codex_custom_api_key: None,
+        codex_originator: None,
+        codex_residency_requirement: None,
     };
     let prepared = PreparedPrompt {
         preamble: String::new(),

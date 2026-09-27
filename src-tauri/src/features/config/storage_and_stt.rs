@@ -1354,6 +1354,8 @@ fn resolve_api_config(
                 extra_headers: Vec::new(),
                 codex_auth: None,
                 codex_custom_api_key: None,
+                codex_originator: None,
+                codex_residency_requirement: None,
             });
         }
     }
@@ -1473,6 +1475,25 @@ fn resolve_api_config(
         extra_headers,
         codex_auth,
         codex_custom_api_key: selected.codex_custom_api_key.clone(),
+        // originator 按 auth_mode 分档：custom_url 中转不需要伪装官方客户端，
+        // 默认用真实产品名 pai；OAuth/本地读取模式沿用 provider 配置的伪装值。
+        codex_originator: selected_provider
+            .map(|provider| {
+                let configured = provider.codex_originator.trim();
+                if normalize_codex_auth_mode(&provider.codex_auth_mode) == CODEX_AUTH_MODE_CUSTOM_URL
+                    && configured == default_codex_originator()
+                {
+                    APP_HTTP_ORIGINATOR.to_string()
+                } else {
+                    configured.to_string()
+                }
+            })
+            .filter(|value| !value.is_empty()),
+        codex_residency_requirement: selected_provider
+            .and_then(|provider| provider.codex_residency_requirement.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
     })
 }
 
