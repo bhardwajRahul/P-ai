@@ -444,6 +444,11 @@ fn data_migration_steps() -> Vec<DataMigrationStep> {
             name: "v7_remove_hr_persona",
             run: migrate_remove_hr_persona,
         },
+        DataMigrationStep {
+            version: DATA_MIGRATION_VERSION_V8_DEPUTY_NOT_SYSTEM,
+            name: "v8_deputy_not_system",
+            run: migrate_deputy_not_system,
+        },
     ]
 }
 
@@ -529,6 +534,32 @@ fn migrate_remove_hr_persona(
         stats.data_changed = true;
         runtime_log_info(format!(
             "[应用数据迁移] HR 人格清理完成，任务=v7移除HR人格，删除节点={removed_nodes}，摘除下级引用={pruned_refs}"
+        ));
+    }
+    Ok(stats)
+}
+
+/// V8 迁移步骤：把内置副手人格（`deputy-agent`）的 `is_built_in_system` 从 true 纠正为 false。
+/// 副手是内置组织成员，不是「只做系统播报、不在选择器出现」的系统人格；早期默认构造把它错标为系统，
+/// 导致委托模型配置卡片等处被 `!is_built_in_system` 误拦。只纠正这一个已知的错标节点。
+/// 幂等：副手已是 false 时不写盘。
+fn migrate_deputy_not_system(
+    context: &DataMigrationContext<'_>,
+) -> Result<DataMigrationStepStats, String> {
+    let mut stats = DataMigrationStepStats::default();
+    let mut agents = read_agents_shard(&context.state.data_path)?;
+    let mut corrected = 0usize;
+    for agent in agents.iter_mut() {
+        if agent.id.trim() == DEPUTY_AGENT_ID && agent.is_built_in_system {
+            agent.is_built_in_system = false;
+            corrected += 1;
+        }
+    }
+    if corrected > 0 {
+        write_agents_shard(&context.state.data_path, &agents)?;
+        stats.data_changed = true;
+        runtime_log_info(format!(
+            "[应用数据迁移] 副手人格标记纠正完成，任务=v8副手非系统，agent_id={DEPUTY_AGENT_ID}，is_built_in_system=true→false，纠正节点={corrected}"
         ));
     }
     Ok(stats)

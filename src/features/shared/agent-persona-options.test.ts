@@ -59,7 +59,7 @@ describe("buildAgentPersonaOptions", () => {
 
   it("skips the built-in system personas", () => {
     const withSystem = [
-      { id: "deputy", name: "副手", isBuiltInSystem: true },
+      { id: "internal-system", name: "内部系统人格", isBuiltInSystem: true },
       { id: "system-persona", name: "pai system" },
       ...personas,
     ] as PersonaProfile[];

@@ -146,7 +146,9 @@ fn default_deputy_agent() -> AgentProfile {
         avatar_path: None,
         avatar_updated_at: None,
         is_built_in_user: false,
-        is_built_in_system: true,
+        // 副手是内置组织成员，不是系统播报人格：与 default-agent 保持一致，不带系统标记。
+        // 带系统标记会把它当作「只做系统播报、不在选择器出现」的隐藏人格，误拦截委托模型配置等处。
+        is_built_in_system: false,
         private_memory_enabled: false,
         memory_recall_mode: default_agent_memory_recall_mode(),
         source: default_main_source(),

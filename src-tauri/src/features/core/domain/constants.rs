@@ -21,7 +21,10 @@ const DATA_MIGRATION_VERSION_V5_DEPARTMENTS_TO_AGENT_ORGANIZATION: u32 = 5;
 const DATA_MIGRATION_VERSION_V6_AVATAR_PATH_RELATIVE: u32 = 6;
 /// V7：移除已废弃的 HR 人格节点，并从各人格的下级列表里摘除对它的引用。
 const DATA_MIGRATION_VERSION_V7_REMOVE_HR_PERSONA: u32 = 7;
-const DATA_MIGRATION_CURRENT_VERSION: u32 = DATA_MIGRATION_VERSION_V7_REMOVE_HR_PERSONA;
+/// V8：把内置副手人格（`deputy-agent`）被错标的「系统人格」标记纠正为 false。
+/// 副手是内置组织成员，不是系统播报人格；错标会让它被当作隐藏人格，误拦委托模型配置等处。
+const DATA_MIGRATION_VERSION_V8_DEPUTY_NOT_SYSTEM: u32 = 8;
+const DATA_MIGRATION_CURRENT_VERSION: u32 = DATA_MIGRATION_VERSION_V8_DEPUTY_NOT_SYSTEM;
 const MAX_MULTIMODAL_BYTES: usize = 10 * 1024 * 1024;
 const DEFAULT_AGENT_ID: &str = "default-agent";
 const DEPUTY_AGENT_ID: &str = "deputy-agent";

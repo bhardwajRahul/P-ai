@@ -1509,3 +1509,35 @@ enableTools = true
         let second = migrate_remove_hr_persona(&context).expect("rerun v7 migration");
         assert!(!second.data_changed, "重复迁移应幂等");
     }
+
+    #[test]
+    fn migration_should_correct_deputy_system_flag() {
+        let state = config_test_state();
+        // 历史数据：副手被错标为系统人格。
+        let mut agents = AppData::default().agents;
+        for agent in agents.iter_mut() {
+            if agent.id == DEPUTY_AGENT_ID {
+                agent.is_built_in_system = true;
+            }
+        }
+        write_agents_shard(&state.data_path, &agents).expect("write agents shard");
+
+        let config = AppConfig::default();
+        let context = DataMigrationContext {
+            state: &state,
+            config: &config,
+        };
+        let stats = migrate_deputy_not_system(&context).expect("run v8 deputy migration");
+        assert!(stats.data_changed);
+
+        let after = read_agents_shard(&state.data_path).expect("read agents shard");
+        let deputy = after
+            .iter()
+            .find(|agent| agent.id == DEPUTY_AGENT_ID)
+            .expect("deputy agent");
+        assert!(!deputy.is_built_in_system, "副手不应再被标为系统人格");
+
+        // 幂等：再次执行不再产生变化。
+        let second = migrate_deputy_not_system(&context).expect("rerun v8 migration");
+        assert!(!second.data_changed, "重复迁移应幂等");
+    }
