@@ -55,6 +55,18 @@ export function useBackgroundShell(options: UseBackgroundShellOptions) {
     }
   }
 
+  /** 磁贴打断入口：复用监控面板的 terminate 语义；终态写回由后端负责（Killed=用户打断） */
+  async function interruptShell(taskId: string) {
+    const conversationId = String(activeConversationId.value || "").trim();
+    const id = String(taskId || "").trim();
+    if (!conversationId || !id) return;
+    try {
+      await invokeTauri("backgroundShell.terminate", { conversationId, taskId: id }, 10000);
+    } catch (error) {
+      backgroundShellsErrorText.value = `打断后台任务失败：${String(error)}`;
+    }
+  }
+
   watch(
     [activeConversationId, active],
     ([conversationId, isActive], [prevConversationId]) => {
@@ -88,5 +100,6 @@ export function useBackgroundShell(options: UseBackgroundShellOptions) {
     backgroundShells,
     backgroundShellsErrorText,
     refreshBackgroundShells,
+    interruptShell,
   };
 }

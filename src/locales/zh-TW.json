@@ -1938,6 +1938,7 @@
       "openChangesTitle": "開啟全部變更",
       "switchBranchTitle": "切換分支（目前 {name}）",
       "shellLabel": "終端",
+      "shellInterrupt": "打斷",
       "delegateLabel": "委託",
       "taskLabel": "任務",
       "toolLabel": "最近工具",

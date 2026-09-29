@@ -510,7 +510,7 @@ fn terminal_background_shell_writeback(
     let title = match status {
         TerminalBackgroundShellStatus::Completed => "后台 shell 已完成",
         TerminalBackgroundShellStatus::Failed => "后台 shell 执行失败",
-        TerminalBackgroundShellStatus::Killed => "后台 shell 已终止",
+        TerminalBackgroundShellStatus::Killed => "后台 shell 已被用户打断",
         TerminalBackgroundShellStatus::TimedOut => "后台 shell 已超时",
         TerminalBackgroundShellStatus::Running => "后台 shell 状态更新",
     };

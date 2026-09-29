@@ -1814,6 +1814,7 @@
       "openChangesTitle": "Open all changes",
       "switchBranchTitle": "Switch branch (currently {name})",
       "shellLabel": "Terminal",
+      "shellInterrupt": "Interrupt",
       "delegateLabel": "Delegate",
       "taskLabel": "Task",
       "toolLabel": "Recent tools",

@@ -59,6 +59,8 @@
           :command="shell.command"
           :started-at="shell.startedAt"
           :now-ms="nowMs"
+          interruptible
+          @interrupt="emit('interruptShell', shell.id)"
         />
         <HomeDelegateCard
           v-for="delegate in runningDelegates"
@@ -192,6 +194,7 @@ const emit = defineEmits<{
   (e: "branchSwitched", workspacePath: string): void;
   (e: "gitError", message: string): void;
   (e: "openMonitorTab", value: ChatMonitorPanelMode): void;
+  (e: "interruptShell", taskId: string): void;
 }>();
 
 const { t } = useI18n();

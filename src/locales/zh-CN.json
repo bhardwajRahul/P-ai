@@ -1945,6 +1945,7 @@
       "openChangesTitle": "打开全部变更",
       "switchBranchTitle": "切换分支（当前 {name}）",
       "shellLabel": "终端",
+      "shellInterrupt": "打断",
       "delegateLabel": "委托",
       "taskLabel": "任务",
       "toolLabel": "最近工具",

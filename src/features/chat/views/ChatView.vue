@@ -751,6 +751,7 @@
           @branch-switched="(path) => props.syncWorkspaceBranch?.(path)"
           @git-error="handleHomeGitError"
           @open-monitor-tab="openMonitorTabFromHome"
+          @interrupt-shell="interruptShell"
         />
         <FileReaderPanel
           v-else-if="chatRightPanelMode === 'reader'"
@@ -3080,6 +3081,7 @@ const {
 
 const {
   backgroundShells,
+  interruptShell,
 } = useBackgroundShell({
   activeConversationId: toRef(props, "activeConversationId"),
   // 后台任务：工作区监控 bar 常驻展示运行数量，靠事件广播驱动刷新

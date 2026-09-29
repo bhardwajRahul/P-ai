@@ -6,6 +6,16 @@
     pulsing
   >
     <template #trailing>
+      <button
+        v-if="interruptible"
+        type="button"
+        class="btn btn-ghost btn-xs btn-circle -my-0.5 shrink-0 border border-base-300 bg-base-100 text-base-content/60 hover:text-error"
+        :title="t('chat.homePanel.shellInterrupt')"
+        :aria-label="t('chat.homePanel.shellInterrupt')"
+        @click.stop="emit('interrupt')"
+      >
+        <Square class="size-3" />
+      </button>
       <span class="shrink-0 text-xs text-base-content/45">{{ elapsedText }}</span>
     </template>
     <span class="line-clamp-2 text-sm leading-snug text-base-content/85">{{ description || command }}</span>
@@ -16,21 +26,28 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { SquareTerminal } from "@lucide/vue";
+import { Square, SquareTerminal } from "@lucide/vue";
 import CardShell from "./CardShell.vue";
 
 const props = withDefaults(defineProps<{
   description?: string;
   command?: string;
   startedAt?: string;
+  /** 运行中允许强制打断；为 true 时右上角常驻打断按钮 */
+  interruptible?: boolean;
   /** 由容器统一驱动的时钟，避免每张卡片各起一个定时器 */
   nowMs?: number;
 }>(), {
   description: "",
   command: "",
   startedAt: "",
+  interruptible: false,
   nowMs: 0,
 });
+
+const emit = defineEmits<{
+  (e: "interrupt"): void;
+}>();
 
 const { t } = useI18n();
 
