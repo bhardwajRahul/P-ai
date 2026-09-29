@@ -4,7 +4,7 @@
       <slot name="leading" />
     </div>
 
-    <div ref="tabListHostRef" class="min-w-0 flex-1 overflow-hidden">
+    <div ref="tabListHostRef" class="min-w-0 flex-1" :class="fileVariant ? '' : 'overflow-hidden'">
       <div
         role="tablist"
         class="flex w-full min-w-0 items-center gap-0"
@@ -14,11 +14,11 @@
         <div
           v-for="(tab, tabIndex) in tabs"
           :key="tab.key"
-          class="group relative flex min-w-8 max-w-40 flex-1 basis-0 overflow-hidden"
+          class="group relative flex min-w-8 max-w-40 flex-1 basis-0"
           :class="[
+            fileVariant ? 'rounded-lg' : 'overflow-hidden',
             tab.disabled ? 'pointer-events-none opacity-45' : 'cursor-pointer',
             tabBorderClass(tab.key, tabIndex),
-            fileVariant ? 'rounded-field' : '',
             fileVariant && tab.key === activeKey ? 'bg-base-100 shadow-sm' : '',
             fileVariant && tab.key !== activeKey ? 'hover:bg-base-300/60' : '',
           ]"
@@ -33,33 +33,63 @@
           <button
             type="button"
             role="tab"
-            class="btn btn-ghost btn-sm min-w-0 w-full flex-nowrap overflow-hidden"
+            class="min-w-0 flex-nowrap overflow-hidden"
             :class="[
+              fileVariant
+                ? 'flex h-auto min-h-7 flex-1 cursor-pointer items-center justify-start gap-1.5 rounded-lg bg-transparent px-2 py-1 text-left'
+                : 'btn btn-ghost btn-sm w-full',
               !fileVariant && tab.key === activeKey ? 'bg-base-100/60' : '',
               fileVariant && tab.key === activeKey ? 'text-base-content' : '',
               fileVariant && tab.key !== activeKey ? 'text-base-content/65 hover:text-base-content' : '',
-              tab.iconSrc || tab.icon ? 'gap-1.5' : '',
-              shouldReserveCloseSpace(tab) ? 'justify-start pr-8' : 'justify-center',
+              !fileVariant && (tab.iconSrc || tab.icon) ? 'gap-1.5' : '',
+              !fileVariant ? (shouldReserveCloseSpace(tab) ? 'justify-start pr-8' : 'justify-center') : '',
             ]"
             :aria-selected="tab.key === activeKey"
             @click.stop="selectTab(tab)"
           >
-            <img
-              v-if="tab.iconSrc"
-              :src="tab.iconSrc"
-              alt=""
-              class="panel-tab-strip-icon size-4 shrink-0 object-contain"
-            />
-            <component
-              :is="tab.icon"
-              v-else-if="tab.icon"
-              class="size-4 shrink-0"
-              aria-hidden="true"
-            />
+            <template v-if="fileVariant">
+              <span class="relative flex size-4 shrink-0 items-center justify-center">
+                <img
+                  v-if="tab.iconSrc"
+                  :src="tab.iconSrc"
+                  alt=""
+                  class="panel-tab-strip-icon absolute size-4 object-contain transition-opacity group-hover:opacity-0"
+                />
+                <component
+                  :is="tab.icon"
+                  v-else-if="tab.icon"
+                  class="absolute size-4 transition-opacity group-hover:opacity-0"
+                  aria-hidden="true"
+                />
+                <span
+                  v-if="tab.closeable && !tab.disabled"
+                  role="button"
+                  class="absolute inset-0 flex cursor-pointer items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+                  :title="closeTitle"
+                  @click.stop="closeTab(tab)"
+                >
+                  <X class="size-3.5" />
+                </span>
+              </span>
+            </template>
+            <template v-else>
+              <img
+                v-if="tab.iconSrc"
+                :src="tab.iconSrc"
+                alt=""
+                class="panel-tab-strip-icon size-4 shrink-0 object-contain"
+              />
+              <component
+                :is="tab.icon"
+                v-else-if="tab.icon"
+                class="size-4 shrink-0"
+                aria-hidden="true"
+              />
+            </template>
             <span class="min-w-0 overflow-hidden whitespace-nowrap font-medium" :class="fileVariant ? 'file-tab-label-fade' : 'truncate'">{{ tab.label }}</span>
           </button>
           <button
-            v-if="tab.closeable && shouldShowCloseButton(tab)"
+            v-if="!fileVariant && tab.closeable && shouldShowCloseButton(tab)"
             type="button"
             class="btn btn-ghost btn-xs btn-circle absolute right-1 top-1/2 -translate-y-1/2 border border-base-300 bg-base-100"
             :class="tab.key === activeKey
