@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-09-27T17:28:31.623Z",
-  "latestVersion": "v0.95.1",
+  "generatedAt": "2026-09-29T04:26:43.231Z",
+  "latestVersion": "v0.95.2",
   "releases": [
+    {
+      "version": "v0.95.2",
+      "path": "docs/changelog/releases/v0.95.2.md",
+      "summary": "**文件标签栏重做外观与关闭操作**：标签由胶囊形改为固定圆角矩形，切换文件时形状不再忽胖忽瘦；文件图标与关闭按钮合并到同一位置，悬停时图标淡出、关闭按钮淡入，点一下即关闭，不再另挂一个悬浮的关闭小按钮。"
+    },
     {
       "version": "v0.95.1",
       "path": "docs/changelog/releases/v0.95.1.md",
