@@ -747,6 +747,7 @@ import {
   readFileReaderSessionState,
   sessionActiveFilePath,
 } from "../file-reader-session";
+import { capRestoredTabPaths, resolveNewTabSlot } from "../tab-limit";
 
 const { t } = useI18n();
 
@@ -1809,7 +1810,7 @@ async function restoreFileReaderSession(key = props.sessionKey, fallbackRootPath
       asideMode.value = state.asideMode;
     }
 
-    const restoredTabs = listSessionFilePaths(state);
+    const restoredTabs = capRestoredSessionTabs(listSessionFilePaths(state), sessionActiveFilePath(state));
     tabs.value = restoredTabs.map((path) => createRestoredTab(path));
     // 当前文件：与卡片墙同一口径，会话里存的是伪路径或已不在列表内时落到第一个
     activePath.value = sessionActiveFilePath(state);
@@ -1881,6 +1882,26 @@ function replaceTabState(tab: FileTab, matchPath = tab.path) {
   tabs.value = tabs.value.map((item) => item.path === normalizedMatchPath ? { ...tab } : item);
 }
 
+/** 恢复会话时把历史标签裁到上限：保留最近打开的后若干项，并确保当前文件仍在列表内 */
+function capRestoredSessionTabs(paths: string[], activeSessionPath: string): string[] {
+  return capRestoredTabPaths(paths, activeSessionPath);
+}
+
+/** 写入新标签：未达上限则追加；已达上限时由新标签原地占用当前活跃标签的位置 */
+function appendTabWithCap(tab: FileTab): void {
+  const slot = resolveNewTabSlot(tabs.value.map((item) => item.path), activePath.value);
+  if (slot < 0) {
+    tabs.value = [...tabs.value, tab];
+    return;
+  }
+  const replacedPath = tabs.value[slot].path;
+  clearFileBlockCaches(replacedPath);
+  emit("clearContextReferences", [replacedPath]);
+  const nextTabs = tabs.value.slice();
+  nextTabs[slot] = tab;
+  tabs.value = nextTabs;
+}
+
 function upsertLoadingTab(path: string, reuseActiveTab = false) {
   const normalizedPath = normalizePath(path);
   const existing = tabs.value.find((tab) => tab.path === normalizedPath);
@@ -1919,7 +1940,8 @@ function upsertLoadingTab(path: string, reuseActiveTab = false) {
     path: normalizedPath, title: titleFromPath(normalizedPath), extension: "",
     kind: "code", content: "", rawMode: false, forcePlain: false, virtualized: false, totalLines: 0, blockLineCount: 0, loaded: false, loading: true, error: "",
   };
-  tabs.value = [...tabs.value, tab];
+  // 已达上限：不新增标签，新文件原地占用当前活跃标签的位置（对齐 Antigravity 的替换式标签栏）
+  appendTabWithCap(tab);
   activePath.value = normalizedPath;
   scheduleAddressScrollStateUpdate();
   return tab;
@@ -2354,7 +2376,7 @@ async function openGitDiffTab(source: GitDiffTabSource) {
     tab.content = diffText;
     tab.diffSource = { ...source, workspacePath };
     if (!existing) {
-      tabs.value = [...tabs.value, tab];
+      appendTabWithCap(tab);
     } else {
       replaceTabState(tab);
     }
