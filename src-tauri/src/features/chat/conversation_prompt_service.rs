@@ -872,15 +872,19 @@ impl ConversationPromptService {
     ) -> Vec<String> {
         let mut blocks = Vec::<String>::new();
         if let Some(state) = state {
-            blocks.push(build_hidden_skill_snapshot_block_for_agent(state, Some(agent)));
+            blocks.push(build_hidden_skill_snapshot_block_for_agent(
+                state,
+                conversation,
+                Some(agent),
+            ));
             if let Some(log_stage) = stage_logger {
                 log_stage("prepare_context.skill_snapshot_ready");
             }
-            blocks.push(build_resident_skill_fulltext_block(state, agent));
+            blocks.push(build_resident_skill_fulltext_block(state, conversation, agent));
             if let Some(log_stage) = stage_logger {
                 log_stage("prepare_context.resident_skills_ready");
             }
-            blocks.push(build_optional_skill_reference_block(state, agent));
+            blocks.push(build_optional_skill_reference_block(state, conversation, agent));
             if let Some(log_stage) = stage_logger {
                 log_stage("prepare_context.optional_skills_ready");
             }

@@ -528,6 +528,8 @@ impl ConversationServiceV2 {
         {
             return Ok(updated);
         }
+        // 项目/工作树切换会改变项目工作目录来源，失效该会话的项目 Skill 缓存，下次装配时重扫。
+        invalidate_conversation_project_skills(state, normalized_conversation_id);
         Ok(updated)
     }
 

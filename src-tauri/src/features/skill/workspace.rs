@@ -12,6 +12,168 @@ pub(crate) fn hidden_skill_cache_scope_key(state: &AppState) -> String {
     state.data_path.display().to_string()
 }
 
+/// 按会话缓存的项目专用 Skill 清单。
+#[derive(Clone, Debug)]
+pub(crate) struct ConversationProjectSkillsCacheEntry {
+    /// 扫描来源项目工作目录；用于检测项目/工作树切换后需要重扫。无项目绑定时为 None。
+    project_dir: Option<PathBuf>,
+    skills: Vec<SkillSummaryItem>,
+    last_activity: std::time::SystemTime,
+}
+
+/// 会话项目 Skill 缓存保留时长：3 天（按会话最后活动时间计算）。
+const CONVERSATION_PROJECT_SKILLS_TTL_SECS: u64 = 3 * 24 * 60 * 60;
+
+/// 会话绑定的项目 `.pai/skills` 目录。
+/// 工作树会话仍取项目工作目录，不取工作树目录。
+fn conversation_project_skills_dir(conversation: &Conversation, state: &AppState) -> Option<PathBuf> {
+    conversation_user_main_workspace_root(conversation, state)
+        .map(|root| root.join(".pai").join("skills"))
+}
+
+/// 扫描单个项目 skills 目录，解析出可选 Skill 清单。
+/// 项目 Skill 不使用助理空间的启用状态表，默认全部启用、非内置。
+fn load_project_skill_summaries_from_dir(skills_dir: &Path) -> Vec<SkillSummaryItem> {
+    let mut skills = Vec::<SkillSummaryItem>::new();
+    let Ok(entries) = fs::read_dir(skills_dir) else {
+        return skills;
+    };
+    let mut dirs = entries
+        .filter_map(|entry| entry.ok().map(|value| value.path()))
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    dirs.sort();
+    for dir in dirs {
+        let skill_md = dir.join("SKILL.md");
+        if !skill_md.is_file() {
+            continue;
+        }
+        let Ok((name, description, content)) = parse_skill_file(&skill_md) else {
+            continue;
+        };
+        let additional_files = scan_skill_additional_files(&dir, &skill_md);
+        skills.push(SkillSummaryItem {
+            name,
+            description,
+            content,
+            path: skill_md.to_string_lossy().to_string(),
+            additional_files,
+            is_builtin: false,
+            enabled: true,
+        });
+    }
+    skills
+}
+
+/// 失败时打印目录不存在、无 SKILL.md 或解析失败的具体原因，便于定位“项目 Skill 没进来”的环节。
+fn log_project_skill_scan_result(skills_dir: &Path, skills: &[SkillSummaryItem]) {
+    runtime_log_debug(format!(
+        "[项目Skill] 目录扫描完成，dir={}，skills={}",
+        skills_dir.display(),
+        skills.len()
+    ));
+}
+
+/// 懒加载当前会话的项目 Skill 清单：未初始化或项目目录变化时才重新扫描；
+/// 每次命中都会刷新最后活动时间，并清理超过 3 天未活动的会话缓存。
+fn ensure_conversation_project_skills(
+    state: &AppState,
+    conversation: &Conversation,
+) -> Vec<SkillSummaryItem> {
+    let conversation_id = conversation.id.trim().to_string();
+    if conversation_id.is_empty() {
+        return Vec::new();
+    }
+    let project_dir = conversation_project_skills_dir(conversation, state);
+    let now = std::time::SystemTime::now();
+    let Ok(mut guard) = state.conversation_project_skills_cache.lock() else {
+        runtime_log_warn(format!(
+            "[项目Skill] 缓存加锁失败，conversation_id={conversation_id}"
+        ));
+        return Vec::new();
+    };
+    guard.retain(|_, entry| {
+        now.duration_since(entry.last_activity)
+            .map(|age| age.as_secs() < CONVERSATION_PROJECT_SKILLS_TTL_SECS)
+            .unwrap_or(true)
+    });
+    if let Some(entry) = guard.get_mut(&conversation_id) {
+        if entry.project_dir == project_dir {
+            entry.last_activity = now;
+            return entry.skills.clone();
+        }
+    }
+    let skills = match project_dir.as_deref() {
+        Some(dir) => {
+            let skills = load_project_skill_summaries_from_dir(dir);
+            log_project_skill_scan_result(dir, &skills);
+            skills
+        }
+        None => Vec::new(),
+    };
+    runtime_log_debug(format!(
+        "[项目Skill] 会话缓存建立完成，conversation_id={conversation_id}，project_dir={}，skills={}",
+        project_dir
+            .as_deref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "none".to_string()),
+        skills.len()
+    ));
+    guard.insert(
+        conversation_id,
+        ConversationProjectSkillsCacheEntry {
+            project_dir,
+            skills: skills.clone(),
+            last_activity: now,
+        },
+    );
+    skills
+}
+
+/// 失效单个会话的项目 Skill 缓存（压缩、项目/工作树切换后使用）。
+pub(crate) fn invalidate_conversation_project_skills(state: &AppState, conversation_id: &str) {
+    let key = conversation_id.trim();
+    if key.is_empty() {
+        return;
+    }
+    if let Ok(mut guard) = state.conversation_project_skills_cache.lock() {
+        guard.remove(key);
+    }
+}
+
+/// 清空全部会话的项目 Skill 缓存（手动 reload 时使用）。
+pub(crate) fn clear_all_conversation_project_skills(state: &AppState) {
+    if let Ok(mut guard) = state.conversation_project_skills_cache.lock() {
+        guard.clear();
+    }
+}
+
+/// 全局（助理空间）已启用的 Skill 结构化清单；缓存缺失时返回 None。
+fn global_enabled_skills(state: &AppState) -> Option<Vec<SkillSummaryItem>> {
+    let cache_key = hidden_skill_cache_scope_key(state);
+    hidden_skill_summaries_cache()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.get(&cache_key).cloned())
+}
+
+/// 项目 Skill 覆盖同名助理空间 Skill，其余合并。
+fn merge_skill_lists(
+    mut base: Vec<SkillSummaryItem>,
+    project: Vec<SkillSummaryItem>,
+) -> Vec<SkillSummaryItem> {
+    if project.is_empty() {
+        return base;
+    }
+    let project_names = project
+        .iter()
+        .map(|item| item.name.trim().to_string())
+        .collect::<std::collections::HashSet<_>>();
+    base.retain(|item| !project_names.contains(item.name.trim()));
+    base.extend(project);
+    base
+}
+
 fn llm_workspace_skills_root_at(workspace_root: &Path) -> PathBuf {
     workspace_root.join("skills")
 }
@@ -499,6 +661,9 @@ pub(crate) fn clear_hidden_skill_snapshot_cache(state: &AppState) -> Result<(), 
         .lock()
         .map_err(|_| "Failed to lock hidden skill summaries cache".to_string())?;
     summaries_guard.remove(&hidden_skill_cache_scope_key(state));
+    drop(summaries_guard);
+    // 手动 reload 时同步清空全部会话的项目 Skill 缓存，下次装配提示词时重新扫描。
+    clear_all_conversation_project_skills(state);
     Ok(())
 }
 
@@ -511,60 +676,72 @@ pub(crate) fn build_hidden_skill_snapshot_block(state: &AppState) -> String {
 
 pub(crate) fn build_hidden_skill_snapshot_block_for_agent(
     state: &AppState,
+    conversation: &Conversation,
     agent: Option<&AgentProfile>,
 ) -> String {
-    if agent
-        .map(|item| !item.permission_control.enabled)
-        .unwrap_or(true)
-    {
-        return build_hidden_skill_snapshot_block(state);
-    }
-    let cache_key = hidden_skill_cache_scope_key(state);
-    let cached_skills = hidden_skill_summaries_cache()
-        .lock()
-        .ok()
-        .and_then(|guard| guard.get(&cache_key).cloned());
-    match cached_skills {
-        Some(skills) => {
-            let filtered = filter_skills_for_agent(agent, &skills);
-            render_hidden_skill_snapshot_block(state, &filtered, None)
-        }
+    let permission_enabled = agent
+        .map(|item| item.permission_control.enabled)
+        .unwrap_or(false);
+    let project = ensure_conversation_project_skills(state, conversation);
+    let project = if permission_enabled {
+        filter_skills_for_agent(agent, &project)
+    } else {
+        project
+    };
+    let global = match global_enabled_skills(state) {
+        Some(list) => list,
         None => {
-            runtime_log_warn(
-                "[技能工作区] 隐藏技能快照未命中结构化缓存，返回现有快照文本；如需更新请显式刷新技能工作区。"
-                    .to_string(),
-            );
-            build_hidden_skill_snapshot_block(state)
+            if project.is_empty() {
+                runtime_log_warn(
+                    "[技能工作区] 隐藏技能快照未命中结构化缓存，返回现有快照文本；如需更新请显式刷新技能工作区。"
+                        .to_string(),
+                );
+                return build_hidden_skill_snapshot_block(state);
+            }
+            Vec::new()
         }
-    }
+    };
+    let global = if permission_enabled {
+        filter_skills_for_agent(agent, &global)
+    } else {
+        global
+    };
+    let merged = merge_skill_lists(global, project);
+    render_hidden_skill_snapshot_block(state, &merged, None)
 }
 
-/// 某人格当前可用的 skill（已启用 + 权限允许）。
-fn agent_available_skills(state: &AppState, agent: &AgentProfile) -> Vec<SkillSummaryItem> {
-    let cache_key = hidden_skill_cache_scope_key(state);
-    let cached_skills = hidden_skill_summaries_cache()
-        .lock()
-        .ok()
-        .and_then(|guard| guard.get(&cache_key).cloned());
-    match cached_skills {
+/// 某人格当前可用的 skill：助理空间全局 Skill + 当前会话项目 Skill（项目同名覆盖）。
+fn merged_available_skills(
+    state: &AppState,
+    conversation: &Conversation,
+    agent: &AgentProfile,
+) -> Vec<SkillSummaryItem> {
+    let global = match global_enabled_skills(state) {
         Some(skills) => filter_skills_for_agent(Some(agent), &skills),
         None => {
             runtime_log_warn(
-                "[技能工作区] 人格 skill 注入未命中结构化缓存，本次跳过注入；如需更新请显式刷新技能工作区。"
+                "[技能工作区] 人格 skill 注入未命中结构化缓存，本次跳过全局 skill；如需更新请显式刷新技能工作区。"
                     .to_string(),
             );
             Vec::new()
         }
-    }
+    };
+    let project = ensure_conversation_project_skills(state, conversation);
+    let project = filter_skills_for_agent(Some(agent), &project);
+    merge_skill_lists(global, project)
 }
 
 /// 常驻 skill 全文注入（结论 24）：把这些 SKILL.md 的正文整段拼进该人格系统提示词，模型无需读文件。
 /// skill 不在或未启用（或权限不允许）时直接跳过，不阻断装配。
-pub(crate) fn build_resident_skill_fulltext_block(state: &AppState, agent: &AgentProfile) -> String {
+pub(crate) fn build_resident_skill_fulltext_block(
+    state: &AppState,
+    conversation: &Conversation,
+    agent: &AgentProfile,
+) -> String {
     if agent.resident_skill_names.is_empty() {
         return String::new();
     }
-    let available = agent_available_skills(state, agent);
+    let available = merged_available_skills(state, conversation, agent);
     let mut sections = Vec::<String>::new();
     for name in &agent.resident_skill_names {
         let name = name.trim();
@@ -595,11 +772,15 @@ pub(crate) fn build_resident_skill_fulltext_block(state: &AppState, agent: &Agen
 }
 
 /// 可选 skill 只注入引用（结论 8）：给名字与 SKILL.md 路径，需要时模型自行读取。
-pub(crate) fn build_optional_skill_reference_block(state: &AppState, agent: &AgentProfile) -> String {
+pub(crate) fn build_optional_skill_reference_block(
+    state: &AppState,
+    conversation: &Conversation,
+    agent: &AgentProfile,
+) -> String {
     if agent.optional_skill_names.is_empty() {
         return String::new();
     }
-    let available = agent_available_skills(state, agent);
+    let available = merged_available_skills(state, conversation, agent);
     let mut lines = Vec::<String>::new();
     for name in &agent.optional_skill_names {
         let name = name.trim();

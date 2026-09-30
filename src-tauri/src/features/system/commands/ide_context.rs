@@ -715,6 +715,9 @@ mod ide_context_tests {
             remote_im_reply_delegate_semaphore: Arc::new(tokio::sync::Semaphore::new(8)),
             remote_im_channel_state_write_locks: Arc::new(Mutex::new(std::collections::HashMap::new())),
             hidden_skill_snapshot_cache: Arc::new(Mutex::new(String::new())),
+            conversation_project_skills_cache: Arc::new(Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             preferred_release_source: Arc::new(Mutex::new("github".to_string())),
             migration_preview_dirs: Arc::new(Mutex::new(std::collections::HashMap::new())),
             delegate_active_ids: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),

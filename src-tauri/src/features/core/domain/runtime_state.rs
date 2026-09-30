@@ -110,6 +110,10 @@ struct AppState {
     remote_im_channel_state_write_locks:
         Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<()>>>>>,
     hidden_skill_snapshot_cache: Arc<Mutex<String>>,
+    /// 按会话缓存的「项目专用 Skill」清单（来自会话绑定项目工作目录的 `.pai/skills/`）。
+    /// 键为 conversation_id，值为该会话上次扫描结果；应用启动时不扫描，首次装配提示词时懒加载。
+    conversation_project_skills_cache:
+        Arc<Mutex<std::collections::HashMap<String, ConversationProjectSkillsCacheEntry>>>,
     preferred_release_source: Arc<Mutex<String>>,
     migration_preview_dirs: Arc<Mutex<std::collections::HashMap<String, String>>>,
     /// 当前活跃的委托线程 conversation_id 集合。
@@ -347,6 +351,9 @@ impl AppState {
                 std::collections::HashMap::new(),
             )),
             hidden_skill_snapshot_cache: Arc::new(Mutex::new(String::new())),
+            conversation_project_skills_cache: Arc::new(Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             preferred_release_source: Arc::new(Mutex::new("github".to_string())),
             migration_preview_dirs: Arc::new(Mutex::new(std::collections::HashMap::new())),
             delegate_active_ids: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),

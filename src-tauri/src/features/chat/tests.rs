@@ -3920,6 +3920,9 @@
                 std::collections::HashMap::new(),
             )),
             hidden_skill_snapshot_cache: Arc::new(Mutex::new(String::new())),
+            conversation_project_skills_cache: Arc::new(Mutex::new(
+                std::collections::HashMap::new(),
+            )),
             preferred_release_source: Arc::new(Mutex::new("github".to_string())),
             migration_preview_dirs: Arc::new(Mutex::new(std::collections::HashMap::new())),
             delegate_active_ids: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
@@ -12960,9 +12963,13 @@
                 ],
             );
 
+        // 会话无项目工作目录绑定，项目 Skill 为空，仅合并助理空间 Skill。
+        let conversation =
+            test_chat_conversation("conversation-skill-injection", "active", "2026-01-01T00:00:00Z");
+
         // 常驻 skill 正文全文注入；清单里没有的名字直接跳过，不报错。
         let agent = test_agent_with_skill_lists(vec!["leader", "not-installed"], vec![], None, vec![]);
-        let block = build_resident_skill_fulltext_block(&state, &agent);
+        let block = build_resident_skill_fulltext_block(&state, &conversation, &agent);
         assert!(block.contains("正文：先给结论，再给依据。"), "got: {block}");
         assert!(block.contains("你的常驻技能"), "got: {block}");
         assert!(!block.contains("not-installed"), "got: {block}");
@@ -12970,7 +12977,7 @@
         // 可选 skill 只给引用：名字 + 描述 + 路径，不注入正文。
         let agent =
             test_agent_with_skill_lists(vec![], vec!["assistant-space-guide"], None, vec![]);
-        let block = build_optional_skill_reference_block(&state, &agent);
+        let block = build_optional_skill_reference_block(&state, &conversation, &agent);
         assert!(block.contains("/skills/assistant-space-guide/SKILL.md"), "got: {block}");
         assert!(!block.contains("空间正文"), "got: {block}");
 
@@ -12981,7 +12988,70 @@
             Some("whitelist"),
             vec!["other-skill"],
         );
-        assert!(build_resident_skill_fulltext_block(&state, &agent).is_empty());
+        assert!(build_resident_skill_fulltext_block(&state, &conversation, &agent).is_empty());
+    }
+
+    #[test]
+    fn project_skills_should_merge_and_override_assistant_skills() {
+        let state = test_chat_runtime_state();
+        // 助理空间全局 skill：为同名覆盖准备旧条目。
+        hidden_skill_summaries_cache()
+            .lock()
+            .expect("lock skill cache")
+            .insert(
+                hidden_skill_cache_scope_key(&state),
+                vec![test_skill_summary(
+                    "assistant-space-guide",
+                    "助理空间旧描述",
+                    "空间正文",
+                )],
+            );
+        // 项目 `.pai/skills`：新增 demo，并同名覆盖 assistant-space-guide。
+        let project_root = state
+            .llm_workspace_path
+            .parent()
+            .expect("workspace parent")
+            .join(format!("project-{}", Uuid::new_v4()));
+        let skills_dir = project_root.join(".pai").join("skills");
+        for (dir, name, description) in [
+            ("demo", "demo", "项目专用能力"),
+            ("assistant-space-guide", "assistant-space-guide", "项目覆盖描述"),
+        ] {
+            let skill_dir = skills_dir.join(dir);
+            std::fs::create_dir_all(&skill_dir).expect("create project skill dir");
+            std::fs::write(
+                skill_dir.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: {description}\n---\n\n正文\n"),
+            )
+            .expect("write project skill");
+        }
+        let mut conversation = test_chat_conversation(
+            "conversation-project-skills",
+            "active",
+            "2026-01-01T00:00:00Z",
+        );
+        conversation.shell_workspaces = vec![ShellWorkspaceConfig {
+            id: "project".to_string(),
+            name: "project".to_string(),
+            path: project_root.to_string_lossy().to_string(),
+            level: SHELL_WORKSPACE_LEVEL_MAIN.to_string(),
+            access: SHELL_WORKSPACE_ACCESS_FULL_ACCESS.to_string(),
+            built_in: false,
+        }];
+        let agent = test_agent_with_skill_lists(vec![], vec![], None, vec![]);
+        let block =
+            build_hidden_skill_snapshot_block_for_agent(&state, &conversation, Some(&agent));
+        assert!(block.contains("demo"), "应包含项目 Skill，got: {block}");
+        assert!(
+            block.contains("项目覆盖描述"),
+            "项目同名 Skill 应覆盖助理空间同名 Skill，got: {block}"
+        );
+        assert!(
+            !block.contains("助理空间旧描述"),
+            "被覆盖的助理空间同名 Skill 不应出现，got: {block}"
+        );
+
+        let _ = std::fs::remove_dir_all(&project_root);
     }
 
     #[test]
