@@ -24,16 +24,26 @@ pub(crate) struct ConversationProjectSkillsCacheEntry {
 /// 会话项目 Skill 缓存保留时长：3 天（按会话最后活动时间计算）。
 const CONVERSATION_PROJECT_SKILLS_TTL_SECS: u64 = 3 * 24 * 60 * 60;
 
-/// 会话绑定的项目 `.pai/skills` 目录。
+/// 会话绑定的项目 Skill 目录，按兼容来源优先级排列。
 /// 工作树会话仍取项目工作目录，不取工作树目录。
-fn conversation_project_skills_dir(conversation: &Conversation, state: &AppState) -> Option<PathBuf> {
-    conversation_user_main_workspace_root(conversation, state)
-        .map(|root| root.join(".pai").join("skills"))
+fn conversation_project_skill_dirs(
+    conversation: &Conversation,
+    state: &AppState,
+) -> Option<(PathBuf, Vec<PathBuf>)> {
+    let root = conversation_user_main_workspace_root(conversation, state)?;
+    let dirs = [".pai", ".claude", ".agents", ".codex"]
+        .into_iter()
+        .map(|folder| root.join(folder).join("skills"))
+        .collect::<Vec<_>>();
+    Some((root, dirs))
 }
 
 /// 扫描单个项目 skills 目录，解析出可选 Skill 清单。
 /// 项目 Skill 不使用助理空间的启用状态表，默认全部启用、非内置。
-fn load_project_skill_summaries_from_dir(skills_dir: &Path) -> Vec<SkillSummaryItem> {
+fn load_project_skill_summaries_from_dir(
+    skills_dir: &Path,
+    seen_names: &mut std::collections::HashSet<String>,
+) -> Vec<SkillSummaryItem> {
     let mut skills = Vec::<SkillSummaryItem>::new();
     let Ok(entries) = fs::read_dir(skills_dir) else {
         return skills;
@@ -51,6 +61,9 @@ fn load_project_skill_summaries_from_dir(skills_dir: &Path) -> Vec<SkillSummaryI
         let Ok((name, description, content)) = parse_skill_file(&skill_md) else {
             continue;
         };
+        if !seen_names.insert(name.trim().to_string()) {
+            continue;
+        }
         let additional_files = scan_skill_additional_files(&dir, &skill_md);
         skills.push(SkillSummaryItem {
             name,
@@ -76,7 +89,7 @@ fn log_project_skill_scan_result(skills_dir: &Path, skills: &[SkillSummaryItem])
 
 /// 懒加载当前会话的项目 Skill 清单：未初始化或项目目录变化时才重新扫描；
 /// 每次命中都会刷新最后活动时间，并清理超过 3 天未活动的会话缓存。
-fn ensure_conversation_project_skills(
+pub(crate) fn ensure_conversation_project_skills(
     state: &AppState,
     conversation: &Conversation,
 ) -> Vec<SkillSummaryItem> {
@@ -84,7 +97,8 @@ fn ensure_conversation_project_skills(
     if conversation_id.is_empty() {
         return Vec::new();
     }
-    let project_dir = conversation_project_skills_dir(conversation, state);
+    let project_sources = conversation_project_skill_dirs(conversation, state);
+    let project_dir = project_sources.as_ref().map(|(root, _)| root.clone());
     let now = std::time::SystemTime::now();
     let Ok(mut guard) = state.conversation_project_skills_cache.lock() else {
         runtime_log_warn(format!(
@@ -103,10 +117,15 @@ fn ensure_conversation_project_skills(
             return entry.skills.clone();
         }
     }
-    let skills = match project_dir.as_deref() {
-        Some(dir) => {
-            let skills = load_project_skill_summaries_from_dir(dir);
-            log_project_skill_scan_result(dir, &skills);
+    let skills = match project_sources.as_ref() {
+        Some((_, dirs)) => {
+            let mut seen_names = std::collections::HashSet::new();
+            let mut skills = Vec::new();
+            for dir in dirs {
+                let loaded = load_project_skill_summaries_from_dir(dir, &mut seen_names);
+                log_project_skill_scan_result(dir, &loaded);
+                skills.extend(loaded);
+            }
             skills
         }
         None => Vec::new(),

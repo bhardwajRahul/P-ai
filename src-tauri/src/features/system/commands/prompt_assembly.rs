@@ -331,18 +331,27 @@ fn build_workspace_agents_md_block(conversation: &Conversation, state: &AppState
     let Some(workspace_root) = conversation_user_main_workspace_root(conversation, state) else {
         return None;
     };
-    let agents_path = workspace_root.join("AGENTS.md");
-    if !agents_path.is_file() {
-        return None;
-    }
-    let agents_metadata = match std::fs::metadata(&agents_path) {
+    // AGENTS.md 优先；只有不存在时才兼容 CLAUDE.md，二者同时存在时不合并。
+    let (rules_path, rules_name) = {
+        let agents_path = workspace_root.join("AGENTS.md");
+        if agents_path.is_file() {
+            (agents_path, "AGENTS.md")
+        } else {
+            let claude_path = workspace_root.join("CLAUDE.md");
+            if !claude_path.is_file() {
+                return None;
+            }
+            (claude_path, "CLAUDE.md")
+        }
+    };
+    let rules_metadata = match std::fs::metadata(&rules_path) {
         Ok(metadata) => metadata,
         Err(_) => return None,
     };
-    if agents_metadata.len() > WORKSPACE_AGENTS_MD_MAX_BYTES {
+    if rules_metadata.len() > WORKSPACE_AGENTS_MD_MAX_BYTES {
         return None;
     }
-    match std::fs::read_to_string(&agents_path) {
+    match std::fs::read_to_string(&rules_path) {
         Ok(content) => {
             let trimmed = content.trim();
             if trimmed.is_empty() {
@@ -351,8 +360,11 @@ fn build_workspace_agents_md_block(conversation: &Conversation, state: &AppState
             Some(prompt_xml_block(
                 "workspace agents",
                 format!(
-                    "优先级：安全与硬边界 ＞ 用户指令 ＞ 当前工作目录的 AGENTS.md ＞ 预设系统提示词 ＞ 常识与默认习惯。\n\n当前工作目录的 AGENTS.md 视为该工作上下文的局部高优先级提示词，用于覆盖助理预设的通用系统提示词、默认流程与常规输出习惯；当用户指令未明确覆盖时，应优先遵守 AGENTS.md。\n\n以下内容来自当前主工作目录根下的 AGENTS.md，请将其视为该项目开发准则。\n\n路径：{}\n\n{}",
-                    agents_path.display(),
+                    "优先级：安全与硬边界 ＞ 用户指令 ＞ 当前工作目录的 {} ＞ 预设系统提示词 ＞ 常识与默认习惯。\n\n当前工作目录的 {} 视为该工作上下文的局部高优先级提示词，用于覆盖助理预设的通用系统提示词、默认流程与常规输出习惯；当用户指令未明确覆盖时，应优先遵守该文件。\n\n以下内容来自当前主工作目录根下的 {}，请将其视为该项目开发准则。\n\n路径：{}\n\n{}",
+                    rules_name,
+                    rules_name,
+                    rules_name,
+                    rules_path.display(),
                     trimmed
                 ),
             ))
@@ -723,6 +735,111 @@ mod prompt_assembly_tests {
         assert!(block.contains("当前主工作目录根下的 AGENTS.md"));
         assert!(block.contains("use pnpm"));
         assert!(block.contains("run tests"));
+    }
+
+    #[test]
+    fn project_skills_should_scan_compatible_dirs_and_keep_first_duplicate() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "easy-call-ai-prompt-assembly-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let llm_workspace_path = temp_root.join("llm-workspace");
+        let project_root = temp_root.join("project-skills");
+        fs::create_dir_all(&llm_workspace_path).expect("create llm workspace");
+        for folder in [".pai", ".claude", ".agents", ".codex"] {
+            fs::create_dir_all(project_root.join(folder).join("skills"))
+                .expect("create skill source");
+        }
+        for (folder, name, description) in [
+            (".pai", "pai-skill", "from pai"),
+            (".claude", "claude-skill", "from claude"),
+            (".agents", "agents-skill", "from agents"),
+            (".codex", "codex-skill", "from codex"),
+            (".claude", "duplicate-skill", "first wins"),
+            (".agents", "duplicate-skill", "second loses"),
+        ] {
+            let skill_dir = project_root.join(folder).join("skills").join(name);
+            fs::create_dir_all(&skill_dir).expect("create skill dir");
+            fs::write(
+                skill_dir.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: {description}\n---\n\nbody"),
+            )
+            .expect("write skill");
+        }
+        let state = build_test_state(llm_workspace_path);
+        let conversation = build_test_conversation(vec![ShellWorkspaceConfig {
+            id: "main-1".to_string(),
+            name: "project".to_string(),
+            path: terminal_path_for_user(&project_root),
+            level: SHELL_WORKSPACE_LEVEL_MAIN.to_string(),
+            access: SHELL_WORKSPACE_ACCESS_FULL_ACCESS.to_string(),
+            built_in: false,
+        }]);
+
+        let skills = workspace::ensure_conversation_project_skills(&state, &conversation);
+        let names = skills.iter().map(|skill| skill.name.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["pai-skill", "claude-skill", "duplicate-skill", "agents-skill", "codex-skill"]);
+        assert_eq!(skills.iter().find(|skill| skill.name == "duplicate-skill").map(|skill| skill.description.as_str()), Some("first wins"));
+    }
+
+    #[test]
+    fn build_workspace_agents_md_block_should_fallback_to_claude_md() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "easy-call-ai-prompt-assembly-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let llm_workspace_path = temp_root.join("llm-workspace");
+        let project_root = temp_root.join("project-claude-only");
+        fs::create_dir_all(&llm_workspace_path).expect("create llm workspace");
+        fs::create_dir_all(&project_root).expect("create project root");
+        fs::write(project_root.join("CLAUDE.md"), "# CLAUDE.md\n\n- use vitest")
+            .expect("write claude");
+        let state = build_test_state(llm_workspace_path);
+        let conversation = build_test_conversation(vec![ShellWorkspaceConfig {
+            id: "main-1".to_string(),
+            name: "project".to_string(),
+            path: terminal_path_for_user(&project_root),
+            level: SHELL_WORKSPACE_LEVEL_MAIN.to_string(),
+            access: SHELL_WORKSPACE_ACCESS_FULL_ACCESS.to_string(),
+            built_in: false,
+        }]);
+
+        let block = build_workspace_agents_md_block(&conversation, &state).expect("claude block");
+
+        assert!(block.contains("当前主工作目录根下的 CLAUDE.md"));
+        assert!(block.contains("use vitest"));
+    }
+
+    #[test]
+    fn build_workspace_agents_md_block_should_prefer_agents_md_over_claude_md() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "easy-call-ai-prompt-assembly-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let llm_workspace_path = temp_root.join("llm-workspace");
+        let project_root = temp_root.join("project-agents-preferred");
+        fs::create_dir_all(&llm_workspace_path).expect("create llm workspace");
+        fs::create_dir_all(&project_root).expect("create project root");
+        fs::write(project_root.join("AGENTS.md"), "# AGENTS.md\n\nagents-rule")
+            .expect("write agents");
+        fs::write(project_root.join("CLAUDE.md"), "# CLAUDE.md\n\nclaude-rule")
+            .expect("write claude");
+        let state = build_test_state(llm_workspace_path);
+        let conversation = build_test_conversation(vec![ShellWorkspaceConfig {
+            id: "main-1".to_string(),
+            name: "project".to_string(),
+            path: terminal_path_for_user(&project_root),
+            level: SHELL_WORKSPACE_LEVEL_MAIN.to_string(),
+            access: SHELL_WORKSPACE_ACCESS_FULL_ACCESS.to_string(),
+            built_in: false,
+        }]);
+
+        let block = build_workspace_agents_md_block(&conversation, &state).expect("agents block");
+
+        assert!(block.contains("当前主工作目录根下的 AGENTS.md"));
+        assert!(block.contains("agents-rule"));
+        assert!(!block.contains("claude-rule"));
     }
 
     #[test]
