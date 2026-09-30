@@ -8,6 +8,7 @@ const titles: ConversationSectionTitles = {
   other: "其他",
   defaultWorkspace: "默认工作区",
   currentProject: "当前项目",
+  unknownPersona: "未指定人格",
 };
 
 function item(overrides: Partial<ChatConversationOverviewItem> & { conversationId: string }): ChatConversationOverviewItem {
@@ -36,12 +37,14 @@ describe("buildConversationSections", () => {
     ];
     const sections = buildConversationSections(items, { tab: "local", titles, locale: "zh-CN" });
     const order = ids(sections);
-    expect(order[0]).toBe("pinned-old");
-    expect(order.slice(1)).toContain("new");
-    expect(order.slice(1)).toContain("old");
+    expect(order).toContain("new");
+    expect(order).toContain("old");
     expect(order).toContain("ws");
-    expect(sections.find((section) => section.key === "pinned")?.items.map((entry) => entry.conversationId)).toEqual(["pinned-old"]);
-    expect(sections.find((section) => section.key.startsWith("workspace:"))?.items.map((entry) => entry.conversationId)).toEqual(["ws"]);
+    // 置顶会话不再单列，留在所属工作区分组内并按置顶优先排序
+    expect(sections.some((section) => section.key === "pinned")).toBe(false);
+    expect(sections.find((section) => section.key === "workspace:__default__")?.items.map((entry) => entry.conversationId))
+      .toEqual(["pinned-old", "new", "old"]);
+    expect(sections.find((section) => section.key.startsWith("workspace:e:"))?.items.map((entry) => entry.conversationId)).toEqual(["ws"]);
   });
 
   it("contact 标签下只显示远程联系人会话", () => {
@@ -115,7 +118,7 @@ describe("buildConversationSections", () => {
 
     const currentProject = sections.find((section) => section.key === "current-project");
     expect(currentProject?.title).toBe("当前项目");
-    expect(currentProject?.items.map((entry) => entry.conversationId)).toEqual(["project-a", "project-b"]);
+    expect(currentProject?.items.map((entry) => entry.conversationId)).toEqual(["project-b", "project-a"]);
 
     const allOtherIds = new Set(
       sections
@@ -168,36 +171,6 @@ describe("buildConversationSections", () => {
     expect(sections.some((section) => section.key.startsWith("workspace:"))).toBe(true);
   });
 
-  it("精简模式下忽略置顶/当前项目/最近，全部会话只按工作区分组", () => {
-    const items = [
-      item({ conversationId: "pinned", isPinned: true, workspaceRootPath: "E:/work/proj", lastMessageAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }),
-      item({ conversationId: "cur", workspaceRootPath: "E:/work/proj", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
-      item({ conversationId: "other", workspaceRootPath: "E:/work/other", lastMessageAt: "2026-07-01T00:00:00Z", updatedAt: "2026-07-01T00:00:00Z" }),
-    ];
-    const sections = buildConversationSections(items, {
-      tab: "local",
-      titles,
-      locale: "zh-CN",
-      currentWorkspaceRootPath: "E:/work/proj",
-      compact: true,
-    });
-    expect(sections.every((section) => section.key.startsWith("workspace:"))).toBe(true);
-    expect(sections.some((section) => section.key === "pinned")).toBe(false);
-    expect(sections.some((section) => section.key === "recent")).toBe(false);
-    expect(sections.some((section) => section.key === "current-project")).toBe(false);
-    expect(ids(sections).sort()).toEqual(["cur", "other", "pinned"]);
-  });
-
-  it("精简模式下 contact 标签按渠道分组且不单列置顶", () => {
-    const items = [
-      item({ conversationId: "r1", kind: "remote_im_contact", channelName: "频道A", isPinned: true, lastMessageAt: "2026-08-02T00:00:00Z", updatedAt: "2026-08-02T00:00:00Z" }),
-      item({ conversationId: "r2", kind: "remote_im_contact", channelName: "频道A", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
-    ];
-    const sections = buildConversationSections(items, { tab: "contact", titles, locale: "zh-CN", compact: true });
-    expect(sections).toHaveLength(1);
-    expect(sections[0].items.map((entry) => entry.conversationId).sort()).toEqual(["r1", "r2"]);
-  });
-
   it("最近会话分组包含全部候选条目，可持续加载更多直到展开完毕", () => {
     const items = Array.from({ length: 12 }, (_, index) =>
       item({
@@ -209,6 +182,34 @@ describe("buildConversationSections", () => {
     const sections = buildConversationSections(items, { tab: "local", titles, locale: "zh-CN" });
     const recentSection = sections.find((section) => section.key === "recent");
     expect(recentSection?.items.length).toBe(12);
+  });
+
+  it("最近会话分组始终包含置顶会话（含落在当前项目里的置顶会话）", () => {
+    const items = [
+      item({ conversationId: "pinned", isPinned: true, lastMessageAt: "2026-08-05T00:00:00Z", updatedAt: "2026-08-05T00:00:00Z" }),
+      item({ conversationId: "pinned-current", isPinned: true, workspaceRootPath: "E:/work/proj", lastMessageAt: "2026-08-04T00:00:00Z", updatedAt: "2026-08-04T00:00:00Z" }),
+      item({ conversationId: "normal", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+    ];
+    const sections = buildConversationSections(items, {
+      tab: "local",
+      titles,
+      locale: "zh-CN",
+      currentWorkspaceRootPath: "E:/work/proj",
+    });
+    const recentIds = sections.find((section) => section.key === "recent")?.items.map((entry) => entry.conversationId) || [];
+    expect(recentIds).toContain("pinned");
+    expect(recentIds).toContain("pinned-current");
+    expect(recentIds).toContain("normal");
+  });
+
+  it("置顶区只放系统通知会话，普通置顶会话留在所属分组", () => {
+    const items = [
+      item({ conversationId: "sys", isSystemNotificationConversation: true, lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+      item({ conversationId: "pinned", isPinned: true, lastMessageAt: "2026-08-02T00:00:00Z", updatedAt: "2026-08-02T00:00:00Z", workspaceRootPath: "E:/work/proj" }),
+    ];
+    const sections = buildConversationSections(items, { tab: "local", titles, locale: "zh-CN" });
+    expect(sections.find((section) => section.key === "pinned")?.items.map((entry) => entry.conversationId)).toEqual(["sys"]);
+    expect(sections.find((section) => section.key.startsWith("workspace:e:"))?.items.map((entry) => entry.conversationId)).toEqual(["pinned"]);
   });
 
   it("host 为工作树路径时，仓库根与同仓库工作树会话均归入当前项目", () => {
@@ -394,5 +395,110 @@ describe("applyConversationSectionOrder", () => {
       "workspace:a",
     ]);
     expect(result.changed).toBe(true);
+  });
+});
+
+describe("人格分组模式", () => {
+  const personaNameMap = { "persona-nahida": "纳西妲", "persona-x": "空白" };
+
+  it("按 agentId 归入人格分组，组标题取人格名", () => {
+    const items = [
+      item({ conversationId: "a1", agentId: "persona-nahida", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+      item({ conversationId: "a2", agentId: "persona-nahida", lastMessageAt: "2026-08-02T00:00:00Z", updatedAt: "2026-08-02T00:00:00Z" }),
+      item({ conversationId: "b1", agentId: "persona-x", lastMessageAt: "2026-08-03T00:00:00Z", updatedAt: "2026-08-03T00:00:00Z" }),
+    ];
+    const sections = buildConversationSections(items, { tab: "local", titles, locale: "zh-CN", grouping: "persona", personaNameMap });
+    const byTitle = new Map(
+      sections
+        .filter((section) => section.key.startsWith("persona:"))
+        .map((section) => [section.title, section.items.map((entry) => entry.conversationId)]),
+    );
+    expect(byTitle.get("纳西妲")).toEqual(["a2", "a1"]);
+    expect(byTitle.get("空白")).toEqual(["b1"]);
+  });
+
+  it("无 agentId 的会话归入未指定人格分组", () => {
+    const items = [
+      item({ conversationId: "n1", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+    ];
+    const sections = buildConversationSections(items, { tab: "local", titles, locale: "zh-CN", grouping: "persona", personaNameMap });
+    const unknown = sections.find((section) => section.key === "persona:__unknown__");
+    expect(unknown?.title).toBe("未指定人格");
+    expect(unknown?.items.map((entry) => entry.conversationId)).toEqual(["n1"]);
+  });
+
+  it("人格模式不单列置顶分组，置顶会话留在所属人格分组内并排最前", () => {
+    const items = [
+      item({ conversationId: "pinned", isPinned: true, agentId: "persona-x", lastMessageAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }),
+      item({ conversationId: "cur", agentId: "persona-x", workspaceRootPath: "E:/work/proj", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+    ];
+    const sections = buildConversationSections(items, {
+      tab: "local",
+      titles,
+      locale: "zh-CN",
+      grouping: "persona",
+      personaNameMap,
+      currentWorkspaceRootPath: "E:/work/proj",
+    });
+    expect(sections.some((section) => section.key === "pinned")).toBe(false);
+    expect(sections.some((section) => section.key === "recent")).toBe(false);
+    expect(sections.some((section) => section.key === "current-project")).toBe(false);
+    const persona = sections.find((section) => section.key === "persona:persona-x");
+    expect(persona?.items.map((entry) => entry.conversationId)).toEqual(["pinned", "cur"]);
+  });
+
+  it("人格模式的置顶分组只保留系统通知会话", () => {
+    const items = [
+      item({ conversationId: "sys", isSystemNotificationConversation: true, lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+      item({ conversationId: "pinned", isPinned: true, agentId: "persona-x", lastMessageAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }),
+    ];
+    const sections = buildConversationSections(items, { tab: "local", titles, locale: "zh-CN", grouping: "persona", personaNameMap });
+    const pinned = sections.find((section) => section.key === "pinned");
+    expect(pinned?.items.map((entry) => entry.conversationId)).toEqual(["sys"]);
+    expect(sections.find((section) => section.key === "persona:persona-x")?.items.map((entry) => entry.conversationId)).toEqual(["pinned"]);
+  });
+
+  it("人格分组内非置顶会话按最近活跃时间倒序", () => {
+    const items = [
+      item({ conversationId: "old", agentId: "persona-x", lastMessageAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }),
+      item({ conversationId: "new", agentId: "persona-x", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+      item({ conversationId: "mid", agentId: "persona-x", lastMessageAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" }),
+    ];
+    const sections = buildConversationSections(items, { tab: "local", titles, locale: "zh-CN", grouping: "persona", personaNameMap });
+    expect(sections.find((section) => section.key === "persona:persona-x")?.items.map((entry) => entry.conversationId))
+      .toEqual(["new", "mid", "old"]);
+  });
+
+  it("人格模式保留当前打开的草稿会话，并入人格分组而非消失", () => {
+    const items = [
+      item({ conversationId: "draft-active", isDraft: true, agentId: "persona-x", lastMessageAt: "2026-08-05T00:00:00Z", updatedAt: "2026-08-05T00:00:00Z" }),
+    ];
+    const sections = buildConversationSections(items, {
+      tab: "local",
+      titles,
+      locale: "zh-CN",
+      grouping: "persona",
+      personaNameMap,
+      activeConversationId: "draft-active",
+    });
+    expect(ids(sections)).toContain("draft-active");
+    expect(sections.some((section) => section.key === "recent")).toBe(false);
+  });
+
+  it("联系人 tab 不套人格分组，仍按渠道分组", () => {
+    const items = [
+      item({ conversationId: "r1", kind: "remote_im_contact", channelName: "频道A", agentId: "persona-x", lastMessageAt: "2026-08-02T00:00:00Z", updatedAt: "2026-08-02T00:00:00Z" }),
+    ];
+    const sections = buildConversationSections(items, { tab: "contact", titles, locale: "zh-CN", grouping: "persona", personaNameMap });
+    expect(sections.some((section) => section.key.startsWith("persona:"))).toBe(false);
+    expect(sections.some((section) => section.key.startsWith("channel:"))).toBe(true);
+  });
+
+  it("默认 mixed 模式不产生人格分组", () => {
+    const items = [
+      item({ conversationId: "a1", agentId: "persona-nahida", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+    ];
+    const sections = buildConversationSections(items, { tab: "local", titles, locale: "zh-CN" });
+    expect(sections.some((section) => section.key.startsWith("persona:"))).toBe(false);
   });
 });

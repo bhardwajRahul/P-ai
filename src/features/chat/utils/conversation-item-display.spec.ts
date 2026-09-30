@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatConversationOverviewItem, ConversationPreviewMessage } from "../../../types/app";
 import {
-  conversationIndicatorClass,
   conversationRuntimeBusy,
-  conversationSimpleIndicatorClass,
-  conversationStatusIndicatorTone,
   conversationUnreadBadge,
   hasUnreadOrRecentActivity,
   simpleConversationItemLevel,
@@ -31,19 +28,27 @@ describe("simpleConversationItemLevel / hasUnreadOrRecentActivity", () => {
     expect(hasUnreadOrRecentActivity(item({ unreadCount: 3 }), NOW)).toBe(true);
   });
 
-  it("无未读但 7 天内有更新 → sim", () => {
-    const recent = item({ updatedAt: "2026-08-10T10:00:00+08:00", lastMessageAt: "2026-08-10T10:00:00+08:00" });
+  it("无未读但今天（凌晨 4 点起）有更新 → sim", () => {
+    const recent = item({ updatedAt: "2026-08-12T10:00:00+08:00", lastMessageAt: "2026-08-12T10:00:00+08:00" });
     expect(simpleConversationItemLevel(recent, NOW)).toBe("sim");
   });
 
-  it("7 天窗口边界：恰好 7 天 → sim；超过 → mini", () => {
-    const atBoundary = item({ updatedAt: new Date(NOW - 7 * 24 * 60 * 60 * 1000).toISOString() });
+  it("天起点边界：当天 4 点整 → sim；4 点前一毫秒 → mini", () => {
+    const atBoundary = item({ updatedAt: "2026-08-12T04:00:00+08:00" });
     expect(simpleConversationItemLevel(atBoundary, NOW)).toBe("sim");
-    const older = item({ updatedAt: new Date(NOW - 7 * 24 * 60 * 60 * 1000 - 1).toISOString() });
-    expect(simpleConversationItemLevel(older, NOW)).toBe("mini");
+    const beforeBoundary = item({ updatedAt: "2026-08-12T03:59:59.999+08:00" });
+    expect(simpleConversationItemLevel(beforeBoundary, NOW)).toBe("mini");
   });
 
-  it("无未读且 7 天外无更新 → mini（折叠一行）", () => {
+  it("当前时刻未到凌晨 4 点时，天起点回退到前一天 4 点", () => {
+    const beforeDawn = Date.parse("2026-08-12T02:00:00+08:00");
+    const yesterdayEvening = item({ updatedAt: "2026-08-11T22:00:00+08:00" });
+    expect(simpleConversationItemLevel(yesterdayEvening, beforeDawn)).toBe("sim");
+    const yesterdayMorning = item({ updatedAt: "2026-08-11T03:00:00+08:00" });
+    expect(simpleConversationItemLevel(yesterdayMorning, beforeDawn)).toBe("mini");
+  });
+
+  it("无未读且今天之前无更新 → mini（折叠一行）", () => {
     const old = item({ updatedAt: "2026-07-01T10:00:00+08:00", lastMessageAt: "2026-07-01T10:00:00+08:00" });
     expect(simpleConversationItemLevel(old, NOW)).toBe("mini");
     expect(hasUnreadOrRecentActivity(old, NOW)).toBe(false);
@@ -90,59 +95,3 @@ describe("conversationRuntimeBusy", () => {
   });
 });
 
-describe("conversationStatusIndicatorTone / conversationIndicatorClass", () => {
-  it("当前会话不显示指示点", () => {
-    expect(conversationStatusIndicatorTone("error", true)).toBe("");
-    expect(conversationStatusIndicatorTone("busy", true)).toBe("");
-    expect(conversationStatusIndicatorTone("success", true)).toBe("");
-  });
-
-  it("pipeline 状态映射：error→error、busy→info、success→success、其他→空", () => {
-    expect(conversationStatusIndicatorTone("error", false)).toBe("error");
-    expect(conversationStatusIndicatorTone("busy", false)).toBe("info");
-    expect(conversationStatusIndicatorTone("success", false)).toBe("success");
-    expect(conversationStatusIndicatorTone("", false)).toBe("");
-    expect(conversationStatusIndicatorTone("unknown", false)).toBe("");
-  });
-
-  it("tone 到颜色 class 映射", () => {
-    expect(conversationIndicatorClass("error")).toBe("bg-error");
-    expect(conversationIndicatorClass("info")).toBe("bg-warning");
-    expect(conversationIndicatorClass("success")).toBe("bg-success");
-    expect(conversationIndicatorClass("")).toBe("");
-  });
-});
-
-describe("conversationSimpleIndicatorClass", () => {
-  it("未读优先显示 error 色条", () => {
-    const result = conversationSimpleIndicatorClass(item({}), "3", [preview({ role: "assistant" })]);
-    expect(result).toBe("bg-error");
-  });
-
-  it("无预览消息 → success", () => {
-    expect(conversationSimpleIndicatorClass(item({}), "", [])).toBe("bg-success");
-  });
-
-  it("tool/system 消息 → warning", () => {
-    expect(conversationSimpleIndicatorClass(item({}), "", [preview({ role: "tool" })])).toBe("bg-warning");
-    expect(conversationSimpleIndicatorClass(item({}), "", [preview({ role: "system" })])).toBe("bg-warning");
-  });
-
-  it("用户消息：无 speakerId 或 user-persona → info，其他 agent → warning", () => {
-    expect(conversationSimpleIndicatorClass(item({}), "", [preview({ role: "user", speakerAgentId: "" })])).toBe("bg-info");
-    expect(conversationSimpleIndicatorClass(item({}), "", [preview({ role: "user", speakerAgentId: "user-persona" })])).toBe("bg-info");
-    expect(conversationSimpleIndicatorClass(item({}), "", [preview({ role: "user", speakerAgentId: "agent-x" })])).toBe("bg-warning");
-  });
-
-  it("助手消息 → success", () => {
-    expect(conversationSimpleIndicatorClass(item({}), "", [preview({ role: "assistant" })])).toBe("bg-success");
-  });
-
-  it("只取最后一条预览判定", () => {
-    const previews = [
-      preview({ role: "user", speakerAgentId: "agent-x" }),
-      preview({ role: "assistant" }),
-    ];
-    expect(conversationSimpleIndicatorClass(item({}), "", previews)).toBe("bg-success");
-  });
-});

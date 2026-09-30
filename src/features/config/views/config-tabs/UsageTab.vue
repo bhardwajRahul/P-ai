@@ -634,6 +634,7 @@ function displayConversationTitle(item: UsageConversationItem): string {
     {
       locale: currentLocale(),
       untitledLabel: t("chat.untitledConversation"),
+      systemNotificationLabel: t("chat.systemPersona"),
     },
   );
 }

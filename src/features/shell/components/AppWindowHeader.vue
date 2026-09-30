@@ -505,6 +505,7 @@ const currentConversationTitle = computed(() => {
   return resolveConversationDisplayTitle(item, {
     locale: locale.value,
     untitledLabel: t("chat.untitledConversation"),
+    systemNotificationLabel: t("chat.systemPersona"),
   });
 });
 

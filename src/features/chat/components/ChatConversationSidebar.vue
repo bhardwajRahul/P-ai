@@ -9,7 +9,7 @@
         surface-class="bg-base-300"
       />
     </div>
-    <ChatConversationFloatingScroll ref="conversationFloatingScrollRef" class="flex-1 min-h-0">
+    <ChatConversationFloatingScroll ref="conversationFloatingScrollRef" class="flex-1 min-h-0 p-1">
       <Transition :name="conversationTabTransitionName" mode="out-in" @after-enter="handleConversationTabTransitionSettled">
         <div :key="activeConversationTab" class="conversation-tab-panel">
           <ChatTaskSidebarPanel
@@ -20,13 +20,48 @@
             @layout-change="scheduleConversationListScrollbarUpdate"
           />
           <template v-else>
+            <template v-for="(section, sectionIndex) in displayedConversationSections" :key="section.key">
+            <div
+              v-if="sectionIndex === conversationGroupingHeaderIndex && conversationGroupingHeaderIndex >= 0"
+              class="mx-1 mb-0.5 mt-2"
+            >
+              <EcallDropdown
+                v-model="groupingMenuOpen"
+                teleport
+                :match-trigger-width="false"
+                panel-class="w-40 p-1"
+                placement="bottom"
+              >
+                <template #trigger="{ toggle: toggleGroupingMenu }">
+                  <button
+                    type="button"
+                    class="flex max-w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content"
+                    :title="conversationGroupingLabel"
+                    @click.stop="toggleGroupingMenu"
+                  >
+                    <span class="min-w-0 truncate">{{ conversationGroupingLabel }}</span>
+                    <ChevronDown class="h-3.5 w-3.5 shrink-0" />
+                  </button>
+                </template>
+                <template #default="{ close: closeGroupingMenu }">
+                  <ul class="menu w-full p-0">
+                    <li v-for="option in conversationGroupingOptions" :key="option.value">
+                      <button type="button" @click="selectConversationGrouping(option.value, closeGroupingMenu)">
+                        <component :is="option.icon" class="h-3.5 w-3.5" />
+                        <span>{{ option.label }}</span>
+                        <Check v-if="conversationGrouping === option.value" class="ml-auto h-3.5 w-3.5 text-primary" />
+                      </button>
+                    </li>
+                  </ul>
+                </template>
+              </EcallDropdown>
+            </div>
             <CollapsibleGroup
-              v-for="section in displayedConversationSections"
-              :key="section.key"
               :ref="(el) => setConversationSectionElement(section.key, el)"
               :title="section.title"
-              :count="isRecentConversationSection(section.key) ? section.visibleCount : section.totalItemCount"
               :model-value="isConversationSectionCollapsed(section.key)"
+              :icon="conversationSectionIcon(section)"
+              :avatar-url="conversationSectionAvatarUrl(section)"
               :draggable="isConversationSectionDraggable(section)"
               :drop-indicator="conversationSectionDragIndicator(section)"
               @update:model-value="toggleConversationSection(section.key)"
@@ -51,17 +86,32 @@
               </button>
             </template>
             <template v-for="item in section.visibleItems" :key="item.conversationId">
+              <div
+                v-if="section.recentDividers?.[String(item.conversationId || '').trim()]"
+                class="mx-1 pb-0.5 pt-1.5"
+              >
+                <button
+                  type="button"
+                  class="flex w-full items-center gap-2 px-1 text-left text-caption text-base-content/45 transition-colors hover:text-base-content/80"
+                  :title="t('chat.revealConversationSection')"
+                  @click.stop="revealRecentSourceSection(section.recentDividers[String(item.conversationId || '').trim()])"
+                >
+                  <span class="h-px min-w-2 flex-1 rounded-full bg-base-content/15" aria-hidden="true"></span>
+                  <span class="max-w-[70%] truncate">{{ section.recentDividers[String(item.conversationId || "").trim()].label }}</span>
+                  <span class="h-px min-w-2 flex-1 rounded-full bg-base-content/15" aria-hidden="true"></span>
+                </button>
+              </div>
               <ChatConversationItem
                 :item="item"
-                :level="compactConversationList ? simpleConversationItemLevel(item) : 'full'"
+                :level="isSimpleConversationRows ? simpleConversationItemLevel(item) : 'full'"
                 :active-conversation-id="props.activeConversationId"
                 :user-alias="props.userAlias"
                 :user-avatar-url="props.userAvatarUrl"
                 :persona-name-map="props.personaNameMap"
                 :persona-avatar-url-map="props.personaAvatarUrlMap"
                 :pipeline-status-by-id="conversationStatusById"
-                :show-source-badge="isRecentConversationSection(section.key)"
-                :compact-indicator="compactConversationList"
+                :show-source-badge="isRecentConversationSection(section.key) && isPersonaGrouping"
+                :compact-indicator="isSimpleConversationRows"
                 @select="(payload) => emit('select', payload)"
                 @rename="(payload) => emit('rename', payload)"
                 @toggle-pin-conversation="(conversationId) => emit('togglePinConversation', conversationId)"
@@ -91,21 +141,32 @@
                 />
               </template>
             </template>
-            <div v-if="section.hiddenItemCount > 0" class="mx-1 pb-1.5 pt-0.5">
+            <div
+              v-if="section.hiddenItemCount > 0 || conversationSectionHasExtraItems(section.key)"
+              class="mx-1 flex items-center gap-2 pb-1.5 pt-0.5"
+            >
               <button
+                v-if="section.hiddenItemCount > 0"
                 type="button"
-                class="group flex h-7.5 w-full items-center justify-center gap-1.5 rounded-lg px-2 text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
+                class="group flex h-7.5 items-center gap-2 rounded-lg pl-1 pr-2 text-left text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
                 :title="t('chat.loadMore')"
                 @click.stop="loadMoreConversationsInSection(section.key)"
               >
-                <ChevronDown class="h-3.5 w-3.5 opacity-60 transition-transform duration-200 group-hover:translate-y-0.5 group-hover:opacity-100" />
-                <span>{{ t("chat.loadMore") }}</span>
-                <span class="rounded-full bg-base-300/60 px-1.5 py-0.5 text-caption font-medium leading-tight tabular-nums text-base-content/50 group-hover:bg-base-content/10 group-hover:text-base-content/75">
-                  {{ section.hiddenItemCount }}
-                </span>
+                <span class="shrink-0" :style="conversationSectionLeadStyle"></span>
+                <span>{{ t("chat.loadMore") }}（{{ section.hiddenItemCount }}）</span>
+              </button>
+              <button
+                v-if="conversationSectionHasExtraItems(section.key)"
+                type="button"
+                class="flex flex-1 h-7.5 items-center rounded-lg px-2 text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
+                :title="t('chat.collapseSection')"
+                @click.stop="collapseConversationSection(section.key)"
+              >
+                {{ t("chat.collapseSection") }}
               </button>
             </div>
             </CollapsibleGroup>
+            </template>
             <div
               v-if="displayedConversationSections.length === 0"
               class="px-3 py-4 text-center text-sm text-base-content/60"
@@ -171,17 +232,6 @@
           >
             <Sun v-if="!darkMode" class="h-4 w-4" />
             <Moon v-else class="h-4 w-4" />
-          </button>
-          <button
-            v-if="activeConversationTab !== 'task'"
-            type="button"
-            class="btn btn-ghost btn-xs h-7 min-h-7 w-7 min-w-7 p-0"
-            :class="compactConversationList ? 'text-primary' : 'text-base-content/55'"
-            :title="compactConversationList ? t('chat.switchToCompositeView') : t('chat.switchToCompactView')"
-            @click="compactConversationList = !compactConversationList"
-          >
-            <List v-if="compactConversationList" class="h-4 w-4" />
-            <LayoutList v-else class="h-4 w-4" />
           </button>
           <button
             type="button"
@@ -318,9 +368,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 import { useI18n } from "vue-i18n";
-import { Archive, ChevronDown, LayoutList, List, Moon, Search, Settings, SquarePen, Sun } from "@lucide/vue";
+import { Archive, Check, ChevronDown, Folder, LayoutList, Moon, Search, Settings, SquarePen, Sun, UserRound } from "@lucide/vue";
 import CollapsibleGroup from "./CollapsibleGroup.vue";
 import ChatConversationItem from "./ChatConversationItem.vue";
 import type { ApiConfigItem, ChatConversationOverviewItem, ConversationPreviewMessage } from "../../../types/app";
@@ -334,15 +384,19 @@ import { formatConversationListTime } from "../utils/conversation-time";
 import {
   aggregateConversationItems,
   conversationLastUsedMs,
+  groupRecentItemsBySource,
+  type RecentSourceBlockDivider,
 } from "../utils/conversation-aggregation";
 import {
   applyConversationSectionOrder,
   buildConversationSections,
+  canonicalWorkspaceRootForComparison,
   conversationCountSinceDayStart,
   RECENT_CONVERSATION_SECTION_KEY,
   CURRENT_PROJECT_SECTION_KEY,
   workspaceNameFromPath,
   type ConversationSection,
+  type ConversationSectionGrouping,
   type ConversationSectionOrderState,
 } from "../utils/conversation-sections";
 import { resolveConversationDisplayTitle } from "../utils/conversation-title";
@@ -350,6 +404,7 @@ import { simpleConversationItemLevel } from "../utils/conversation-item-display"
 import ChatConversationFloatingScroll from "./ChatConversationFloatingScroll.vue";
 import ChatTaskSidebarPanel from "./ChatTaskSidebarPanel.vue";
 import SegmentedControl, { type SegmentedControlOption } from "../../config/components/SegmentedControl.vue";
+import EcallDropdown from "../../shared/components/EcallDropdown.vue";
 
 type ConversationSidebarTab = "local" | "contact" | "task";
 type DisplayConversationSection = ConversationSection & {
@@ -359,6 +414,8 @@ type DisplayConversationSection = ConversationSection & {
   visibleCount: number;
   hiddenItemCount: number;
   totalItemCount: number;
+  /** 最近会话按来源聚块的分割线，key 为该块第一个会话 id；仅非人格分组依据下存在 */
+  recentDividers?: Record<string, RecentSourceBlockDivider>;
 };
 type BatchArchiveConversationsOutput = {
   success: boolean;
@@ -371,12 +428,20 @@ const CONVERSATION_SECTION_UNUSED_DAYS = 7;
 const CONVERSATION_SECTION_MIN_VISIBLE = 5;
 const CONVERSATION_SECTION_LOAD_MORE_STEP = 10;
 const CONVERSATION_SECTION_RESET_DELAY_MS = 30_000;
-const COMPACT_CONVERSATION_VIEW_STORAGE_KEY = "easy-call.chat.conversation-compact-view.v1";
+const CONVERSATION_GROUPING_STORAGE_KEY = "easy-call.chat.conversation-grouping.v1";
+const LEGACY_COMPACT_VIEW_STORAGE_KEY = "easy-call.chat.conversation-compact-view.v1";
 
-/** 读「精简视图」偏好：无记录时默认综合视图 */
-function readCompactConversationViewPreference(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(COMPACT_CONVERSATION_VIEW_STORAGE_KEY) === "1";
+/** 读分组依据偏好：优先新键；无新键时迁移旧「精简视图」布尔键（1→工作目录，其余→混合） */
+function readConversationGroupingPreference(): ConversationSectionGrouping {
+  if (typeof window === "undefined") return "mixed";
+  try {
+    const stored = window.localStorage.getItem(CONVERSATION_GROUPING_STORAGE_KEY);
+    if (stored === "persona" || stored === "workspace" || stored === "mixed") return stored;
+    if (window.localStorage.getItem(LEGACY_COMPACT_VIEW_STORAGE_KEY) === "1") return "workspace";
+  } catch {
+    // 存储不可用（如隐私模式）时用默认值
+  }
+  return "mixed";
 }
 
 const props = defineProps<{
@@ -429,7 +494,42 @@ function handleOpenBatchArchive(event: MouseEvent) {
 
 const conversationSearchQuery = ref("");
 const showSearch = ref(false);
-const compactConversationList = ref(readCompactConversationViewPreference());
+const conversationGrouping = ref<ConversationSectionGrouping>(readConversationGroupingPreference());
+/** 人格 / 工作目录模式用简单行渲染；混合模式用富卡片 + 人格头像聚合 */
+const isSimpleConversationRows = computed(() => conversationGrouping.value !== "mixed");
+/** 人格分组依据：置顶会话留在所属人格分组内并排最前 */
+const isPersonaGrouping = computed(() => conversationGrouping.value === "persona");
+
+/** 分组依据下拉：EcallDropdown 自带点击外部关闭 */
+const groupingMenuOpen = ref(false);
+const conversationGroupingOptions = computed<Array<{
+  value: ConversationSectionGrouping;
+  label: string;
+  icon: Component;
+}>>(() => [
+  { value: "mixed", label: t("chat.groupingByMixed"), icon: LayoutList },
+  { value: "workspace", label: t("chat.groupingByWorkspace"), icon: Folder },
+  { value: "persona", label: t("chat.groupingByPersona"), icon: UserRound },
+]);
+const conversationGroupingLabel = computed(() =>
+  conversationGroupingOptions.value.find((option) => option.value === conversationGrouping.value)?.label || "",
+);
+
+/** 分类区插在第一个实体分组之前，统领下面的项目 / 人格列表；没有可分类的分组时返回 -1，整个分类区隐藏 */
+const conversationGroupingHeaderIndex = computed(() => {
+  const sections = displayedConversationSections.value;
+  return sections.findIndex((section) =>
+    section.key !== "pinned"
+      && section.key !== RECENT_CONVERSATION_SECTION_KEY
+      && section.key !== CURRENT_PROJECT_SECTION_KEY,
+  );
+});
+
+function selectConversationGrouping(value: ConversationSectionGrouping, closeMenu?: () => void) {
+  conversationGrouping.value = value;
+  groupingMenuOpen.value = false;
+  closeMenu?.();
+}
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const batchArchiveDialogRef = ref<HTMLDialogElement | null>(null);
 const batchArchiveCardOpen = ref(false);
@@ -484,15 +584,17 @@ const conversationSections = computed<ConversationSection[]>(() =>
     tab: activeConversationTab.value,
     titles: {
       recent: t("chat.recentConversations"),
-      pinned: t("chat.pinnedConversations"),
+      pinned: t("chat.systemNotifications"),
       other: t("chat.otherConversations"),
       defaultWorkspace: t("chat.defaultWorkspace"),
       currentProject: t("chat.currentProject"),
+      unknownPersona: t("chat.unknownPersona"),
     },
     locale: locale.value,
     currentWorkspaceRootPath: props.currentWorkspaceRootPath,
     activeConversationId: props.activeConversationId,
-    compact: compactConversationList.value,
+    grouping: conversationGrouping.value,
+    personaNameMap: props.personaNameMap,
   }),
 );
 
@@ -797,24 +899,55 @@ function conversationSectionLoadMoreKey(
   return `${tab}:${sectionKey}`;
 }
 
+/** 加载更多行的前导占位：与所在分组的会话行使用同一套兜底宽度，保证文字左缘对齐 */
+const conversationSectionLeadStyle = computed(() => {
+  const fallback = isSimpleConversationRows.value ? "1rem" : "2.5rem";
+  return { width: `max(var(--ecall-section-lead, ${fallback}), ${fallback})` };
+});
+
+/** 置顶 / 最近是会话集合而非目录，用箭头；其余分组用文件夹开合 */
+function conversationSectionIcon(section: ConversationSection): "chevron" | "folder" {
+  return section.key === "pinned" || section.key === RECENT_CONVERSATION_SECTION_KEY ? "chevron" : "folder";
+}
+
+/** 人格分组折叠头显示人格头像；其余分组仍用文件夹图标 */
+function conversationSectionAvatarUrl(section: ConversationSection): string | undefined {
+  const personaId = String(section.personaId || "").trim();
+  if (!personaId) return undefined;
+  return String(props.personaAvatarUrlMap?.[personaId] || "").trim() || undefined;
+}
+
 function buildDisplayedConversationSection(section: ConversationSection): DisplayConversationSection {
   const items = Array.isArray(section.items) ? section.items : [];
-  // 精简模式：不做 full 聚合，全部会话以简单条目平铺
-  if (compactConversationList.value) {
-    return {
-      ...section,
-      visibleItems: items,
-      simpleFollowers: {},
-      visibleCount: items.length,
-      hiddenItemCount: 0,
-      totalItemCount: items.length,
-    };
-  }
   const stateKey = conversationSectionLoadMoreKey(section.key);
   const baseVisibleCount = defaultVisibleConversationCount(section);
   const extraVisibleCount = Math.max(0, Number(conversationSectionLoadMoreCounts.value[stateKey] || 0));
   const visibleCount = Math.min(items.length, baseVisibleCount + extraVisibleCount);
-  const { reorderedItems, simpleFollowers } = aggregateConversationItems(items.slice(0, visibleCount), {
+  // 最近会话在非人格分组依据下不用头像徽章，改为按来源聚块 + 分割线；
+  // 搜索态保持原始顺序，不做聚块。
+  const useRecentDividers = section.key === RECENT_CONVERSATION_SECTION_KEY
+    && conversationGrouping.value !== "persona"
+    && !normalizedConversationSearchQuery.value;
+  const sliced = items.slice(0, visibleCount);
+  const { orderedItems, dividers } = useRecentDividers
+    ? groupRecentItemsBySource(sliced, { defaultLabel: t("chat.otherConversations") })
+    : { orderedItems: sliced, dividers: [] as RecentSourceBlockDivider[] };
+  const recentDividers = dividers.length > 0
+    ? Object.fromEntries(dividers.map((divider) => [divider.conversationId, divider]))
+    : undefined;
+  // 精简模式：不做 full 聚合，条目统一为简单行，但仍按同样规则截断并支持「加载更多」
+  if (isSimpleConversationRows.value) {
+    return {
+      ...section,
+      visibleItems: orderedItems,
+      simpleFollowers: {},
+      visibleCount: visibleCount,
+      hiddenItemCount: Math.max(0, items.length - visibleCount),
+      totalItemCount: items.length,
+      recentDividers,
+    };
+  }
+  const { reorderedItems, simpleFollowers } = aggregateConversationItems(orderedItems, {
     searchActive: !!normalizedConversationSearchQuery.value,
   });
   return {
@@ -824,6 +957,7 @@ function buildDisplayedConversationSection(section: ConversationSection): Displa
     visibleCount: visibleCount,
     hiddenItemCount: Math.max(0, items.length - visibleCount),
     totalItemCount: items.length,
+    recentDividers,
   };
 }
 
@@ -834,6 +968,22 @@ function loadMoreConversationsInSection(sectionKey: string) {
   conversationSectionLoadMoreCounts.value = {
     ...conversationSectionLoadMoreCounts.value,
     [stateKey]: Math.max(0, Number(conversationSectionLoadMoreCounts.value[stateKey] || 0)) + CONVERSATION_SECTION_LOAD_MORE_STEP,
+  };
+  scheduleConversationListScrollbarUpdate();
+}
+
+function conversationSectionHasExtraItems(sectionKey: string): boolean {
+  const stateKey = conversationSectionLoadMoreKey(String(sectionKey || "").trim());
+  return Number(conversationSectionLoadMoreCounts.value[stateKey] || 0) > 0;
+}
+
+function collapseConversationSection(sectionKey: string) {
+  const key = String(sectionKey || "").trim();
+  if (!key || !conversationSectionHasExtraItems(key)) return;
+  const stateKey = conversationSectionLoadMoreKey(key);
+  conversationSectionLoadMoreCounts.value = {
+    ...conversationSectionLoadMoreCounts.value,
+    [stateKey]: 0,
   };
   scheduleConversationListScrollbarUpdate();
 }
@@ -874,10 +1024,10 @@ watch(showSearch, async (visible) => {
   }
 });
 
-watch(compactConversationList, (enabled) => {
+watch(conversationGrouping, (grouping) => {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(COMPACT_CONVERSATION_VIEW_STORAGE_KEY, enabled ? "1" : "0");
+    window.localStorage.setItem(CONVERSATION_GROUPING_STORAGE_KEY, grouping);
   } catch {
     // 存储不可用（如隐私模式）时仅内存生效
   }
@@ -942,6 +1092,24 @@ function revealConversationSection(item: ChatConversationOverviewItem) {
     entry.key !== RECENT_CONVERSATION_SECTION_KEY
     && entry.items.some((candidate) => String(candidate.conversationId || "").trim() === conversationId),
   );
+  if (!section) return;
+  const wasCollapsed = isConversationSectionCollapsed(section.key);
+  expandConversationSection(section.key);
+  const element = conversationSectionElements.get(section.key);
+  window.setTimeout(() => {
+    if (element) conversationFloatingScrollRef.value?.scrollToElement(element);
+  }, wasCollapsed ? 220 : 0);
+}
+
+function revealRecentSourceSection(divider: RecentSourceBlockDivider) {
+  const targetPath = canonicalWorkspaceRootForComparison(divider.workspaceRootPath);
+  const section = conversationSections.value.find((entry) => {
+    if (entry.key === RECENT_CONVERSATION_SECTION_KEY || entry.key === "pinned") return false;
+    if (targetPath) {
+      return canonicalWorkspaceRootForComparison(String(entry.workspaceRootPath || "")) === targetPath;
+    }
+    return entry.key.startsWith("channel:") && entry.title === divider.label;
+  });
   if (!section) return;
   const wasCollapsed = isConversationSectionCollapsed(section.key);
   expandConversationSection(section.key);
@@ -1016,6 +1184,7 @@ function conversationDisplayTitle(item: ChatConversationOverviewItem): string {
   return resolveConversationDisplayTitle(item, {
     locale: locale.value,
     untitledLabel: t("chat.untitledConversation"),
+    systemNotificationLabel: t("chat.systemPersona"),
   });
 }
 

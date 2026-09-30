@@ -1,14 +1,13 @@
 <template>
-  <section>
+  <section :style="leadStyle">
     <div
       role="button"
       tabindex="0"
       :draggable="draggable"
-      class="group/section relative sticky top-0 z-20 mx-1 flex h-9 select-none items-center gap-2 rounded-lg bg-base-200/95 px-2 text-left text-xs font-semibold text-base-content backdrop-blur transition-colors hover:bg-base-300/70"
+      class="group/section relative sticky top-0 z-20 mx-1 flex min-h-9 select-none items-center gap-2 rounded-lg bg-base-200 p-1 text-left text-sm text-base-content/60 transition-colors hover:text-base-content"
       :title="title"
       @click="toggle"
       @contextmenu.stop.prevent="collapseAll"
-      @dblclick.stop.prevent="collapseAll"
       @keydown.enter.prevent="toggle"
       @keydown.space.prevent="toggle"
       @dragstart="onDragStart"
@@ -26,38 +25,65 @@
         class="pointer-events-none absolute left-2 right-2 bottom-0 translate-y-1/2 rounded-full bg-neutral h-[3px] shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-neutral)_28%,transparent)]"
         aria-hidden="true"
       ></div>
+      <span v-if="avatarUrl" class="avatar shrink-0">
+        <span class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-base-100">
+          <img :src="avatarUrl" :alt="title" class="h-full w-full object-cover" />
+        </span>
+      </span>
       <ChevronRight
+        v-else-if="icon === 'chevron'"
         class="h-4 w-4 shrink-0 transition-transform duration-200 ease-out"
-        :class="modelValue ? '' : 'rotate-90'"
+        :class="collapsed ? '' : 'rotate-90'"
+      />
+      <component
+        v-else
+        :is="collapsed ? Folder : FolderOpen"
+        class="h-4 w-4 shrink-0"
       />
       <span class="min-w-0 truncate">{{ title }}</span>
-      <span class="shrink-0 tabular-nums text-base-content/45">{{ count }}</span>
+      <span v-if="count !== undefined" class="shrink-0 tabular-nums text-base-content/45">{{ count }}</span>
+      <ChevronRight
+        v-if="avatarUrl"
+        class="ml-auto h-4 w-4 shrink-0 text-base-content/40 transition-transform duration-200 ease-out"
+        :class="collapsed ? '' : 'rotate-90'"
+      />
       <slot name="actions" />
     </div>
-    <Transition
-      :css="false"
-      @enter="animateEnter"
-      @leave="animateLeave"
-      @enter-cancelled="cleanupAnimation"
-      @leave-cancelled="cleanupAnimation"
+    <!--
+      展开 / 收起走 grid 行轨道过渡（与 daisyUI collapse 同款），由 CSS 负责动画：
+      快速连点只改变目标值，浏览器从当前计算值接着过渡，不会吞点击、也不会留下中间态。
+    -->
+    <div
+      ref="shellRef"
+      class="collapsible-group-shell"
+      :class="{ 'is-collapsed': collapsed }"
+      @transitionend="onShellTransitionEnd"
     >
-      <div v-if="!modelValue" class="collapsible-group-shell">
+      <div class="collapsible-group-inner">
         <slot />
       </div>
-    </Transition>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ChevronRight } from "@lucide/vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { ChevronRight, Folder, FolderOpen } from "@lucide/vue";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   title: string;
-  count: number;
+  count?: number;
+  /** 是否收起；true 表示收起，内容区高度归零 */
   modelValue: boolean;
+  /** 折叠指示图标：chevron=箭头（默认），folder=文件夹开合 */
+  icon?: "chevron" | "folder";
+  /** 分组头像地址；传了就优先显示头像，替代图标 */
+  avatarUrl?: string | null;
   draggable?: boolean;
   dropIndicator?: "before" | "after" | null;
-}>();
+}>(), {
+  icon: "chevron",
+});
 
 const emit = defineEmits<{
   "update:modelValue": [value: boolean];
@@ -70,9 +96,47 @@ const emit = defineEmits<{
   "dragend": [event: DragEvent];
 }>();
 
+const collapsed = computed(() => !!props.modelValue);
+
+const shellRef = ref<HTMLElement | null>(null);
+let settleTimer: number | undefined;
+
+/** 把前导图标/头像的宽度透传给插槽内的会话行，保证文字左缘对齐（头像 2rem、图标 1rem） */
+const leadStyle = computed(() => ({ "--ecall-section-lead": props.avatarUrl ? "2rem" : "1rem" }));
+
 function toggle() {
+  // 无动画守卫：动画期间的点击同样生效，状态与点击次数始终一致
   emit("update:modelValue", !props.modelValue);
 }
+
+function clearSettleTimer() {
+  if (settleTimer === undefined) return;
+  window.clearTimeout(settleTimer);
+  settleTimer = undefined;
+}
+
+/** 过渡收尾：通知外部重新测量布局 */
+function notifySettled() {
+  clearSettleTimer();
+  if (props.modelValue) {
+    emit("after-leave");
+  } else {
+    emit("after-enter");
+  }
+}
+
+function onShellTransitionEnd(event: TransitionEvent) {
+  if (event.target !== shellRef.value || event.propertyName !== "grid-template-rows") return;
+  notifySettled();
+}
+
+watch(() => props.modelValue, () => {
+  // 兜底：内容高度为 0、或系统关闭动效时 transitionend 不触发
+  clearSettleTimer();
+  settleTimer = window.setTimeout(notifySettled, 260);
+});
+
+onBeforeUnmount(clearSettleTimer);
 
 function collapseAll(event: MouseEvent) {
   const target = event.target;
@@ -103,96 +167,33 @@ function onDragEnd(event: DragEvent) {
   if (!props.draggable) return;
   emit("dragend", event);
 }
-
-function cleanupAnimation(element: Element) {
-  const el = element as HTMLElement;
-  el.style.height = "";
-  el.style.opacity = "";
-  el.style.transform = "";
-  el.style.overflow = "";
-  el.style.willChange = "";
-  el.style.transition = "";
-}
-
-function animateEnter(element: Element, done: () => void) {
-  const sectionElement = element as HTMLElement;
-  cleanupAnimation(sectionElement);
-  delete sectionElement.dataset.ecallCollapseFinished;
-  sectionElement.style.height = "0px";
-  sectionElement.style.opacity = "0";
-  sectionElement.style.transform = "translateY(-6px)";
-  sectionElement.style.overflow = "hidden";
-  sectionElement.style.willChange = "height, opacity, transform";
-  void sectionElement.offsetHeight;
-  const onTransitionEnd = (event: TransitionEvent) => {
-    if (event.target !== sectionElement || event.propertyName !== "height") return;
-    finishAnimation(sectionElement, onTransitionEnd, "after-enter", done);
-  };
-  sectionElement.addEventListener("transitionend", onTransitionEnd);
-  sectionElement.style.transition = [
-    "height 180ms cubic-bezier(0.22, 1, 0.36, 1)",
-    "opacity 140ms ease-out",
-    "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)",
-  ].join(", ");
-  requestAnimationFrame(() => {
-    sectionElement.style.height = `${sectionElement.scrollHeight}px`;
-    sectionElement.style.opacity = "1";
-    sectionElement.style.transform = "translateY(0)";
-  });
-  // 兜底：transitionend 可能因高度无变化等场景不触发，超时后强制清理，避免 overflow:hidden 残留裁剪内容
-  window.setTimeout(() => finishAnimation(sectionElement, onTransitionEnd, "after-enter", done), 400);
-}
-
-function animateLeave(element: Element, done: () => void) {
-  const sectionElement = element as HTMLElement;
-  cleanupAnimation(sectionElement);
-  delete sectionElement.dataset.ecallCollapseFinished;
-  sectionElement.style.height = `${sectionElement.scrollHeight}px`;
-  sectionElement.style.opacity = "1";
-  sectionElement.style.transform = "translateY(0)";
-  sectionElement.style.overflow = "hidden";
-  sectionElement.style.willChange = "height, opacity, transform";
-  void sectionElement.offsetHeight;
-  const onTransitionEnd = (event: TransitionEvent) => {
-    if (event.target !== sectionElement || event.propertyName !== "height") return;
-    finishAnimation(sectionElement, onTransitionEnd, "after-leave", done);
-  };
-  sectionElement.addEventListener("transitionend", onTransitionEnd);
-  sectionElement.style.transition = [
-    "height 180ms cubic-bezier(0.22, 1, 0.36, 1)",
-    "opacity 140ms ease-out",
-    "transform 180ms cubic-bezier(0.22, 1, 0.36, 1)",
-  ].join(", ");
-  requestAnimationFrame(() => {
-    sectionElement.style.height = "0px";
-    sectionElement.style.opacity = "0";
-    sectionElement.style.transform = "translateY(-6px)";
-  });
-  // 兜底：同 enter，防止 transitionend 不触发时样式残留
-  window.setTimeout(() => finishAnimation(sectionElement, onTransitionEnd, "after-leave", done), 400);
-}
-
-function finishAnimation(
-  sectionElement: HTMLElement,
-  onTransitionEnd: (event: TransitionEvent) => void,
-  eventName: "after-enter" | "after-leave",
-  done: () => void,
-) {
-  if (sectionElement.dataset.ecallCollapseFinished === "1") return;
-  sectionElement.dataset.ecallCollapseFinished = "1";
-  sectionElement.removeEventListener("transitionend", onTransitionEnd);
-  cleanupAnimation(sectionElement);
-  if (eventName === "after-enter") {
-    emit("after-enter");
-  } else {
-    emit("after-leave");
-  }
-  done();
-}
 </script>
 
 <style scoped>
 .collapsible-group-shell {
-  transform-origin: top;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.collapsible-group-shell.is-collapsed {
+  grid-template-rows: 0fr;
+}
+
+.collapsible-group-inner {
+  min-height: 0;
+  overflow: clip;
+  visibility: visible;
+  transition: visibility 180ms;
+}
+
+.collapsible-group-shell.is-collapsed .collapsible-group-inner {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collapsible-group-shell {
+    transition: none;
+  }
 }
 </style>

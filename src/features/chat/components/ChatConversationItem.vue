@@ -6,18 +6,11 @@
     @pointerup="handleCardPointerUp"
     @pointerleave="handleCardPointerLeave"
   >
-    <!-- 左侧选中指示：仅 full/sim 用主题色竖条，mini 由右侧竖线承担 -->
+    <!-- 会话项统一模板：level 决定差异（full 头像 / sim+mini 无左指示，full+sim 两行 / mini 一行） -->
     <div
-      v-if="level !== 'mini'"
-      class="pointer-events-none absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-primary transition-[transform,opacity] duration-200 ease-out origin-center"
-      :class="isActiveConversation ? 'scale-y-100 opacity-100' : 'scale-y-50 opacity-0'"
-      aria-hidden="true"
-    ></div>
-    <!-- 会话项统一模板：level 决定差异（full 头像 / sim+mini 指示灯，full+sim 两行 / mini 一行） -->
-    <div
-      class="flex items-center gap-2 rounded-lg px-2 py-1 text-left transition-[background-color,box-shadow,transform] duration-200 ease-out will-change-transform hover:bg-base-100/70"
+      class="flex items-center gap-2 rounded-lg p-1 text-left transition-[background-color,box-shadow,transform] duration-200 ease-out"
       :class="[
-        isActiveConversation ? 'bg-base-300 hover:bg-base-300 shadow-sm' : 'bg-transparent',
+        isActiveConversation ? 'bg-base-300' : 'bg-transparent hover:bg-base-300/60',
         isConversationVisuallyOccupied ? 'opacity-60' : '',
         isActiveConversation ? 'cursor-default' : 'cursor-pointer',
       ]"
@@ -28,52 +21,38 @@
       @keydown.enter.prevent="handleConversationCardClick"
       @keydown.space.prevent="handleConversationCardClick"
     >
-      <!-- 左侧：full 显示头像（含状态点/来源徽章），sim/mini 显示竖线指示灯 -->
+      <!-- 左侧：full 显示头像（含来源徽章），sim/mini 无左指示 -->
       <template v-if="level === 'full'">
-        <div class="shrink-0">
-          <div class="indicator">
-            <span
-              v-if="indicatorTone"
-              class="indicator-item indicator-top indicator-end z-10 h-2.5 w-2.5 translate-x-0.5 -translate-y-0.5 rounded-full"
-              :class="indicatorClass"
-              aria-hidden="true"
-            ></span>
-            <div class="avatar relative overflow-visible">
-              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-neutral text-neutral-content">
-                <img
-                  v-if="displaySpeakerAvatarUrl"
-                  :src="displaySpeakerAvatarUrl"
-                  :alt="displaySpeakerLabel"
-                  class="w-10 h-10 rounded-full object-cover"
-                />
-                <span v-else class="text-sm font-bold">{{ displaySpeakerInitial }}</span>
-              </div>
-              <span
-                v-if="showSourceBadge"
-                class="absolute bottom-0 left-1/2 z-20 inline-block max-w-10 -translate-x-1/2 translate-y-1/3 cursor-pointer truncate rounded-full bg-neutral px-1.5 py-[1px] text-micro font-normal leading-3 text-neutral-content shadow-sm transition-colors hover:bg-primary hover:text-primary-content"
-                :title="t('chat.revealConversationSection')"
-                role="button"
-                tabindex="0"
-                @click.stop="emit('revealSection')"
-                @keydown.enter.stop.prevent="emit('revealSection')"
-                @keydown.space.stop.prevent="emit('revealSection')"
-              >
-                {{ sourceBadgeLabel }}
-              </span>
+        <div class="shrink-0" :style="leadColumnStyle">
+          <div class="avatar relative overflow-visible">
+            <div class="flex h-10 w-10 items-center justify-center rounded-full bg-neutral text-neutral-content">
+              <img
+                v-if="displaySpeakerAvatarUrl"
+                :src="displaySpeakerAvatarUrl"
+                :alt="displaySpeakerLabel"
+                class="w-10 h-10 rounded-full object-cover"
+              />
+              <span v-else class="text-sm font-bold">{{ displaySpeakerInitial }}</span>
             </div>
+            <span
+              v-if="showSourceBadge"
+              class="absolute bottom-0 left-1/2 z-20 inline-block max-w-10 -translate-x-1/2 translate-y-1/3 cursor-pointer truncate rounded-full bg-neutral px-1.5 py-[1px] text-micro font-normal leading-3 text-neutral-content shadow-sm transition-colors hover:bg-primary hover:text-primary-content"
+              :title="t('chat.revealConversationSection')"
+              role="button"
+              tabindex="0"
+              @click.stop="emit('revealSection')"
+              @keydown.enter.stop.prevent="emit('revealSection')"
+              @keydown.space.stop.prevent="emit('revealSection')"
+            >
+              {{ sourceBadgeLabel }}
+            </span>
           </div>
         </div>
       </template>
-      <span v-else class="relative shrink-0 self-stretch" :class="compactIndicator ? 'w-4' : 'w-10'" aria-hidden="true">
-        <span
-          class="absolute right-0 top-1 bottom-1 w-1 rounded-full transition-colors"
-          :class="simpleIndicatorClass"
-        ></span>
-      </span>
-
+      <span v-else class="relative shrink-0 self-stretch" :style="leadColumnStyle" aria-hidden="true"></span>
       <!-- 右侧：第一行标题 + 时间，第二行摘要 + 状态区（full/sim 有，mini 无） -->
       <div class="min-w-0 flex-1">
-          <div class="flex items-start justify-between gap-1.5">
+          <div class="flex items-baseline justify-between gap-1.5">
             <div class="flex min-w-0 items-center gap-1.5">
               <input
                 v-if="editing"
@@ -87,20 +66,17 @@
                 @keydown.esc.prevent="cancelTitleEdit"
                 @blur="commitTitleEdit"
               />
-              <button
-                v-else-if="canRename"
-                type="button"
-                class="min-w-0 truncate rounded px-0.5 text-left text-sm font-medium hover:bg-base-300/70"
-                @click.stop="startTitleEdit"
-              >
-                {{ displayTitle }}
-              </button>
               <div v-else class="min-w-0 truncate text-sm font-medium">
                 {{ displayTitle }}
               </div>
             </div>
-            <div class="flex shrink-0 items-center gap-1">
-              <span class="conversation-time-label text-xs text-base-content/60">
+            <div class="flex shrink-0 items-center gap-1 pr-1">
+              <Pin
+                v-if="showPinIndicator"
+                class="h-3.5 w-3.5 text-base-content/40"
+                :aria-label="t('chat.pinnedConversations')"
+              />
+              <span v-else class="conversation-time-label text-xs text-base-content/60">
                 {{ formatTime(item.updatedAt) }}
               </span>
             </div>
@@ -206,10 +182,7 @@ import { formatConversationListTime } from "../utils/conversation-time";
 import { workspaceNameFromPath } from "../utils/conversation-sections";
 import { resolveConversationDisplayTitle } from "../utils/conversation-title";
 import {
-  conversationIndicatorClass,
   conversationRuntimeBusy,
-  conversationSimpleIndicatorClass,
-  conversationStatusIndicatorTone,
   conversationUnreadBadge,
   type ConversationItemLevel,
 } from "../utils/conversation-item-display";
@@ -227,7 +200,7 @@ const props = withDefaults(defineProps<{
   pipelineStatusById: Record<string, ConversationPipelineStatus>;
   /** recent 分组下显示来源徽章（仅 full 项） */
   showSourceBadge?: boolean;
-  /** 精简模式：小卡左侧不预留头像宽度，指示条贴左 */
+  /** 精简模式：小卡左侧占位收窄 */
   compactIndicator?: boolean;
 }>(), {
   showSourceBadge: false,
@@ -251,12 +224,22 @@ const isLocalConversation = computed(() => props.item.kind !== "remote_im_contac
 const isActiveConversation = computed(() => itemId.value === String(props.activeConversationId || "").trim());
 const isSystemNotification = computed(() => !!props.item.isSystemNotificationConversation);
 
+/** 时间位置显示图钉：置顶会话可见，系统通知会话不显示（它不参与分组置顶语义） */
+const showPinIndicator = computed(() => !!props.item.isPinned && !isSystemNotification.value);
+
 // ==================== 展示 ====================
+
+/** 前导列宽度：优先沿用所在分组折叠头透传的 CSS 变量，缺省时回到自身默认宽度 */
+const leadColumnStyle = computed(() => {
+  const fallback = props.compactIndicator ? "1rem" : "2.5rem";
+  return { width: `max(var(--ecall-section-lead, ${fallback}), ${fallback})` };
+});
 
 const displayTitle = computed(() =>
   resolveConversationDisplayTitle(props.item, {
     locale: locale.value,
     untitledLabel: t("chat.untitledConversation"),
+    systemNotificationLabel: t("chat.systemPersona"),
   }),
 );
 
@@ -341,7 +324,7 @@ function speakerLabel(preview: ConversationPreviewMessage): string {
 }
 
 function systemPersonaLabel(): string {
-  return props.personaNameMap?.[SYSTEM_PERSONA_ID] || "P-ai系统";
+  return props.personaNameMap?.[SYSTEM_PERSONA_ID] || t("chat.systemPersona");
 }
 
 function systemPersonaInitial(): string {
@@ -403,12 +386,6 @@ const displaySpeakerAvatarUrl = computed(() => {
   return assistantAvatarUrl() || lastSpeakerAvatarUrl();
 });
 
-const indicatorTone = computed(() =>
-  conversationStatusIndicatorTone(pipelineStatus.value, isActiveConversation.value),
-);
-
-const indicatorClass = computed(() => conversationIndicatorClass(indicatorTone.value));
-
 const isConversationVisuallyOccupied = computed(() => false);
 
 const sourceBadgeLabel = computed(() => {
@@ -426,12 +403,6 @@ const sourceBadgeLabel = computed(() => {
     || t("chat.defaultWorkspace"),
   ).trim();
 });
-
-// ==================== 简单项：指示条与摘要 ====================
-
-const simpleIndicatorClass = computed(() =>
-  conversationSimpleIndicatorClass(props.item, unreadBadge.value, normalizedPreviewMessages.value),
-);
 
 // ==================== 操作 ====================
 

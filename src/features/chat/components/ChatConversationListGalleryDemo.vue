@@ -93,7 +93,7 @@ const ACTIVE_CONVERSATION_ID = "demo-active";
 const USER_ALIAS = "红豆";
 const PERSONA_NAME_MAP: Record<string, string> = {
   "persona-nahida": "纳西妲",
-  "system-persona": "P-ai系统",
+  "system-persona": "系统通知",
 };
 const PERSONA_AVATAR_URL_MAP: Record<string, string> = {};
 const PIPELINE_STATUS_BY_ID: Record<string, ConversationPipelineStatus> = {
@@ -297,7 +297,7 @@ const allStateSections: DemoSection[] = [
           conversationId: "demo-system",
           title: "系统通知会话",
           isSystemNotificationConversation: true,
-          workspaceLabel: "P-ai系统",
+          workspaceLabel: "系统通知",
           updatedAt: minutesAgo(120),
           lastMessageAt: minutesAgo(120),
         }),

@@ -3791,10 +3791,11 @@ const conversationDisplaySections = computed<ConversationSection[]>(() => {
     tab: props.chatLeftPanelMode,
     titles: {
       recent: t("chat.recentConversations"),
-      pinned: t("chat.pinnedConversations"),
+      pinned: t("chat.systemNotifications"),
       other: t("chat.otherConversations"),
       defaultWorkspace: t("chat.defaultWorkspace"),
       currentProject: t("chat.currentProject"),
+      unknownPersona: t("chat.unknownPersona"),
     },
     locale: locale.value,
     currentWorkspaceRootPath: currentProjectWorkspaceRoot.value,

@@ -6,6 +6,8 @@ export type ConversationSection = {
   title: string;
   items: ChatConversationOverviewItem[];
   workspaceRootPath?: string;
+  /** 人格分组的 agentId，用于取人格头像；非人格分组为空 */
+  personaId?: string;
 };
 
 export type ConversationSectionOrderState = {
@@ -15,12 +17,16 @@ export type ConversationSectionOrderState = {
 
 export type ConversationSidebarTab = "local" | "contact" | "task";
 
+/** 侧边栏第三个父节点的分组依据：人格 / 工作目录 / 混合（= 工作目录 + 富卡片渲染） */
+export type ConversationSectionGrouping = "persona" | "workspace" | "mixed";
+
 export type ConversationSectionTitles = {
   recent: string;
   pinned: string;
   other: string;
   defaultWorkspace: string;
   currentProject: string;
+  unknownPersona: string;
 };
 
 export function buildConversationSections(
@@ -31,11 +37,15 @@ export function buildConversationSections(
     locale?: string | string[];
     currentWorkspaceRootPath?: string;
     activeConversationId?: string;
-    /** 精简模式：忽略置顶 / 当前项目 / 最近，全部会话统一按工作区（本地）或渠道（联系人）分组 */
-    compact?: boolean;
+    /** 第三个父节点的分组依据，默认 mixed（= 工作目录 + 富卡片渲染） */
+    grouping?: ConversationSectionGrouping;
+    /** 人格名映射（agentId -> 展示名），人格模式用于取父节点标题 */
+    personaNameMap?: Record<string, string>;
   },
 ): ConversationSection[] {
   const { tab, titles, locale } = options;
+  const grouping = options.grouping ?? "mixed";
+  const isPersonaGrouping = grouping === "persona";
   const normalizedActiveId = String(options.activeConversationId || "").trim();
   const visibleItems = items.filter((item) => {
     const kind = String(item.kind || "local_unarchived").trim();
@@ -50,23 +60,12 @@ export function buildConversationSections(
     }
     return true;
   });
-  // 精简模式：忽略置顶 / 当前项目 / 最近，全部会话统一按工作区（本地）或渠道（联系人）分组
-  if (options.compact) {
-    if (tab === "contact") {
-      return buildRemoteConversationSections(visibleItems, {
-        fallbackTitle: titles.other,
-        locale,
-      });
-    }
-    return buildWorkspaceConversationSections(visibleItems, {
-      defaultWorkspaceTitle: titles.defaultWorkspace,
-      locale,
-    });
-  }
   const draftActiveItems = visibleItems.filter((item) => !!item.isDraft);
   const regularItems = visibleItems.filter((item) => !item.isDraft);
-  const pinned = regularItems.filter((item) => !!item.isPinned || !!item.isSystemNotificationConversation);
-  const others = regularItems.filter((item) => !item.isPinned && !item.isSystemNotificationConversation);
+  // 「置顶 / 系统通知」区不参与分组：只把系统通知会话单独列出（不折叠、不带置顶图标），
+  // 其余置顶会话留在所属项目 / 人格 / 渠道分组内，组内置顶优先展示。
+  const pinned = regularItems.filter((item) => !!item.isSystemNotificationConversation);
+  const others = regularItems.filter((item) => !item.isSystemNotificationConversation);
 
   // 「当前项目」分组：把属于当前工作区路径的会话单独列出，
   // 并从最近会话与其他工作区分组中剔除，避免重复显示。
@@ -76,10 +75,15 @@ export function buildConversationSections(
   const isCurrentProjectItem = (item: ChatConversationOverviewItem) =>
     !!normalizedCurrentWorkspacePath
     && canonicalWorkspaceRootForComparison(String(item.workspaceRootPath || "").trim()) === normalizedCurrentWorkspacePath;
-  const currentProjectItems = others.filter(isCurrentProjectItem);
-  const restOthers = others.filter((item) => !isCurrentProjectItem(item));
+  // 人格模式以人格为父节点，不引入工作区概念，因而没有「当前项目」分组
+  const currentProjectItems = isPersonaGrouping ? [] : others.filter(isCurrentProjectItem);
+  const restOthers = isPersonaGrouping ? others : others.filter((item) => !isCurrentProjectItem(item));
 
-  const recentSection = buildRecentConversationSection([...draftActiveItems, ...restOthers], titles.recent);
+  // 最近会话始终包含置顶会话（含落在「当前项目」里的置顶会话），保证置顶项永远能从最近区找到
+  const recentSection = buildRecentConversationSection(
+    [...draftActiveItems, ...restOthers, ...others.filter((item) => !!item.isPinned)],
+    titles.recent,
+  );
   const sections: ConversationSection[] = [];
   if (pinned.length > 0) {
     sections.push({
@@ -88,16 +92,27 @@ export function buildConversationSections(
       items: pinned,
     });
   }
-  if (!!normalizedCurrentWorkspacePath) {
+  if (!isPersonaGrouping && !!normalizedCurrentWorkspacePath) {
     sections.push({
       key: CURRENT_PROJECT_SECTION_KEY,
       title: titles.currentProject,
       workspaceRootPath: currentWorkspacePath,
-      items: currentProjectItems,
+      items: sortConversationItemsPinnedFirst(currentProjectItems),
     });
   }
-  if (recentSection) {
+  if (recentSection && !isPersonaGrouping) {
     sections.push(recentSection);
+  }
+  // 人格模式下没有「最近会话」，草稿会话并入人格分组，避免新建会话从列表消失
+  if (isPersonaGrouping && tab !== "contact") {
+    return [
+      ...sections,
+      ...buildPersonaConversationSections([...draftActiveItems, ...restOthers], {
+        fallbackTitle: titles.unknownPersona,
+        personaNameMap: options.personaNameMap,
+        locale,
+      }),
+    ];
   }
   if (tab === "contact") {
     return [
@@ -105,6 +120,7 @@ export function buildConversationSections(
       ...buildRemoteConversationSections(restOthers, {
         fallbackTitle: titles.other,
         locale,
+        pinnedFirst: true,
       }),
     ];
   }
@@ -113,6 +129,7 @@ export function buildConversationSections(
     ...buildWorkspaceConversationSections(restOthers, {
       defaultWorkspaceTitle: titles.defaultWorkspace,
       locale,
+      pinnedFirst: true,
     }),
   ];
 }
@@ -141,14 +158,27 @@ function buildRecentConversationSection(
   };
 }
 
+/** 组内置顶优先，其余按最近活跃时间倒序 */
+function sortConversationItemsPinnedFirst(items: ChatConversationOverviewItem[]): ChatConversationOverviewItem[] {
+  return [...items].sort((left, right) => {
+    const leftPinned = left.isPinned ? 1 : 0;
+    const rightPinned = right.isPinned ? 1 : 0;
+    if (leftPinned !== rightPinned) return rightPinned - leftPinned;
+    return conversationRecencyMs(right) - conversationRecencyMs(left);
+  });
+}
+
 type BuildWorkspaceConversationSectionsOptions = {
   defaultWorkspaceTitle: string;
   locale?: string | string[];
+  /** 项目模式：置顶会话留在组内，需置顶优先排序 */
+  pinnedFirst?: boolean;
 };
 
 type BuildRemoteConversationSectionsOptions = {
   fallbackTitle: string;
   locale?: string | string[];
+  pinnedFirst?: boolean;
 };
 
 function normalizeWorkspaceSectionPath(path: string): string {
@@ -329,6 +359,11 @@ export function buildWorkspaceConversationSections(
     byWorkspace.set(key, section);
     sections.push(section);
   }
+  if (options.pinnedFirst) {
+    for (const section of sections) {
+      section.items = sortConversationItemsPinnedFirst(section.items);
+    }
+  }
   return sections.sort((left, right) => {
     const leftPath = normalizeWorkspaceSectionPath(left.workspaceRootPath || "");
     const rightPath = normalizeWorkspaceSectionPath(right.workspaceRootPath || "");
@@ -380,5 +415,38 @@ export function buildRemoteConversationSections(
       return compareWorkspaceSectionText(left.sortTitle, right.sortTitle, options.locale)
         || compareWorkspaceSectionText(left.sortKey, right.sortKey, options.locale);
     })
-    .map((entry) => entry.section);
+    .map((entry) => entry.section)
+    .map((section) => (options.pinnedFirst ? { ...section, items: sortConversationItemsPinnedFirst(section.items) } : section));
+}
+
+type BuildPersonaConversationSectionsOptions = {
+  fallbackTitle: string;
+  personaNameMap?: Record<string, string>;
+  locale?: string | string[];
+};
+
+/** 人格分组：以会话的 agentId 作为父节点，标题取人格名（缺名时回退 agentId，再无则回退 fallbackTitle） */
+export function buildPersonaConversationSections(
+  items: ChatConversationOverviewItem[],
+  options: BuildPersonaConversationSectionsOptions,
+): ConversationSection[] {
+  const byPersona = new Map<string, ConversationSection>();
+  for (const item of items) {
+    const agentId = String(item.agentId || "").trim();
+    const title = String(options.personaNameMap?.[agentId] || "").trim() || agentId || options.fallbackTitle;
+    const key = `persona:${agentId || "__unknown__"}`;
+    const existing = byPersona.get(key);
+    if (existing) {
+      existing.items.push(item);
+      continue;
+    }
+    byPersona.set(key, { key, title, items: [item], personaId: agentId || undefined });
+  }
+  // 组内置顶优先，其余按最近活跃时间倒序
+  for (const section of byPersona.values()) {
+    section.items = sortConversationItemsPinnedFirst(section.items);
+  }
+  return Array.from(byPersona.values())
+    .sort((left, right) => compareWorkspaceSectionText(left.title, right.title, options.locale)
+      || compareWorkspaceSectionText(left.key, right.key, options.locale));
 }

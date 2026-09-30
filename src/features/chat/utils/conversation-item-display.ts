@@ -4,10 +4,20 @@ import type { ChatConversationOverviewItem, ConversationPreviewMessage } from ".
 
 export type ConversationItemLevel = "full" | "sim" | "mini";
 
-/** 简单条目摘要的默认展开窗口：7 天内有更新的会话 */
-export const SIMPLE_ITEM_RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * 天起点：凌晨 4 点。当前时刻未到 4 点时，天起点回退到前一天 4 点。
+ * 与「最近会话」计数使用同一套「凌晨 4 点区分天」的口径。
+ */
+export function activityDayStartMs(now: number = Date.now()): number {
+  const dayStart = new Date(now);
+  dayStart.setHours(4, 0, 0, 0);
+  if (dayStart.getTime() > now) {
+    dayStart.setDate(dayStart.getDate() - 1);
+  }
+  return dayStart.getTime();
+}
 
-/** 未读或 7 天内有更新 → sim（摘要常显）；否则 → mini（摘要折叠、hover 展开） */
+/** 未读，或今天（凌晨 4 点起）有过活动 → sim（摘要常显）；否则 → mini（摘要折叠、hover 展开） */
 export function simpleConversationItemLevel(
   item: ChatConversationOverviewItem,
   now: number = Date.now(),
@@ -24,7 +34,7 @@ export function hasUnreadOrRecentActivity(
   if (!raw) return false;
   const time = Date.parse(raw);
   if (!Number.isFinite(time)) return false;
-  return now - time <= SIMPLE_ITEM_RECENT_WINDOW_MS;
+  return time >= activityDayStartMs(now);
 }
 
 /** 未读角标：当前会话不显示；0 不显示；超过 99 显示 99+ */
@@ -48,43 +58,3 @@ export function conversationRuntimeBusy(runtimeState?: ChatConversationOverviewI
     || runtimeState === "compacting";
 }
 
-export type ConversationIndicatorTone = "error" | "info" | "success" | "";
-
-/** 完整项状态指示点：当前会话不显示；pipeline error/busy/success 映射为 error/info/success */
-export function conversationStatusIndicatorTone(
-  pipelineStatus: string,
-  isActiveConversation: boolean,
-): ConversationIndicatorTone {
-  if (isActiveConversation) return "";
-  if (pipelineStatus === "error") return "error";
-  if (pipelineStatus === "busy") return "info";
-  if (pipelineStatus === "success") return "success";
-  return "";
-}
-
-export function conversationIndicatorClass(tone: ConversationIndicatorTone): string {
-  if (tone === "error") return "bg-error";
-  if (tone === "info") return "bg-warning";
-  if (tone === "success") return "bg-success";
-  return "";
-}
-
-/** 简单项左侧指示条：未读优先 error；tool/system 消息 warning；用户消息按 speaker 区分；其余 success */
-export function conversationSimpleIndicatorClass(
-  item: ChatConversationOverviewItem,
-  unreadBadge: string,
-  previews: ConversationPreviewMessage[],
-): string {
-  if (unreadBadge) return "bg-error";
-  const last = previews[previews.length - 1];
-  if (!last) return "bg-success";
-  const role = last.role || "";
-  const speakerId = String(last.speakerAgentId || "").trim();
-  if (role === "tool" || role === "system") return "bg-warning";
-  if (role === "user") {
-    // 系统提醒/压缩摘要等系统消息的 role 也是 user，须用 agentId 区分用户与系统
-    if (!speakerId || speakerId === "user-persona") return "bg-info";
-    return "bg-warning";
-  }
-  return "bg-success";
-}

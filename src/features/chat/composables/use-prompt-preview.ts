@@ -64,6 +64,7 @@ export function usePromptPreview(options: UsePromptPreviewOptions) {
               },
               {
                 untitledLabel: options.t("chat.untitledConversation"),
+                systemNotificationLabel: options.t("chat.systemPersona"),
               },
             )
             : "",

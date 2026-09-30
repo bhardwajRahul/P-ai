@@ -8,6 +8,8 @@ type ConversationTitleLike = Pick<
 type ResolveConversationDisplayTitleOptions = {
   locale?: string;
   untitledLabel: string;
+  /** 系统通知会话的标题；缺省时回退到中文常量，用于没有 i18n 上下文的调用方 */
+  systemNotificationLabel?: string;
 };
 
 function normalizedTitlePart(value?: string, conversationId?: string): string {
@@ -18,7 +20,7 @@ function normalizedTitlePart(value?: string, conversationId?: string): string {
   return title;
 }
 
-export const SYSTEM_NOTIFICATION_DISPLAY_TITLE = "P-ai系统";
+export const SYSTEM_NOTIFICATION_DISPLAY_TITLE = "系统通知";
 
 export function formatConversationFallbackTitle(value?: string, locale?: string): string {
   const rawValue = normalizedTitlePart(value);
@@ -49,7 +51,7 @@ export function resolveConversationDisplayTitle(
   options: ResolveConversationDisplayTitleOptions,
 ): string {
   if (item.isSystemNotificationConversation) {
-    return SYSTEM_NOTIFICATION_DISPLAY_TITLE;
+    return String(options.systemNotificationLabel || "").trim() || SYSTEM_NOTIFICATION_DISPLAY_TITLE;
   }
   if (item.kind === "remote_im_contact") {
     return normalizedTitlePart(item.remoteContactDisplayName)

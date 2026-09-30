@@ -184,6 +184,7 @@ const selectionDeliverTargetOptions = computed(() => {
       title: resolveConversationDisplayTitle(item, {
         locale: locale.value,
         untitledLabel: t("chat.untitledConversation"),
+        systemNotificationLabel: t("chat.systemPersona"),
       }),
       runtimeState: item.runtimeState,
     }))

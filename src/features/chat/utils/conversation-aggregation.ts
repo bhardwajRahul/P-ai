@@ -1,6 +1,7 @@
 import type { ChatConversationOverviewItem } from "../../../types/app";
+import { canonicalWorkspaceRootForComparison, workspaceNameFromPath } from "./conversation-sections";
 
-// ==================== 聚合会话列表：同人格会话相邻 ====================
+// ==================== 最近会话按来源聚块 ====================
 
 export type AggregatedConversationItems = {
   /** 重新排序后的展示序列：每个聚合块的最新会话在前，未聚合会话按原位置保留 */
@@ -14,6 +15,61 @@ export function conversationLastUsedMs(item: ChatConversationOverviewItem): numb
   if (!raw) return 0;
   const timestamp = Date.parse(raw);
   return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+export type RecentSourceBlockDivider = {
+  /** 该块的第一个会话 id，渲染时据此插入分割线 */
+  conversationId: string;
+  /** 分割线文案：本地会话取工作区名，远程联系人取频道名 */
+  label: string;
+  /** 本地会话的工作区路径，用于点击后跳转到对应项目分组；远程联系人为空 */
+  workspaceRootPath: string;
+};
+
+/**
+ * 最近会话按来源（工作区 / 频道）聚块：块内按最近使用倒序，块之间按各自最新会话的最近使用倒序。
+ * 仅用于「最近会话」分组在非人格分组依据下的展示，时间顺序让位于来源聚块。
+ */
+export function groupRecentItemsBySource(
+  items: ChatConversationOverviewItem[],
+  options: { defaultLabel: string },
+): { orderedItems: ChatConversationOverviewItem[]; dividers: RecentSourceBlockDivider[] } {
+  if (items.length === 0) return { orderedItems: [], dividers: [] };
+  const blocks = new Map<string, { label: string; workspaceRootPath: string; items: ChatConversationOverviewItem[] }>();
+  for (const item of items) {
+    const isRemote = item.kind === "remote_im_contact";
+    const workspacePath = String(item.workspaceRootPath || "").trim();
+    const label = (isRemote
+      ? String(item.channelName || item.remoteContactDisplayName || options.defaultLabel).trim()
+      : String(item.workspaceLabel || workspaceNameFromPath(workspacePath) || options.defaultLabel).trim()
+    ) || options.defaultLabel;
+    const key = isRemote
+      ? `channel:${label}`
+      : `workspace:${canonicalWorkspaceRootForComparison(workspacePath) || "__default__"}`;
+    const existing = blocks.get(key);
+    if (existing) existing.items.push(item);
+    else blocks.set(key, { label, workspaceRootPath: isRemote ? "" : workspacePath, items: [item] });
+  }
+
+  const orderedBlocks = Array.from(blocks.values())
+    .map((block) => ({
+      ...block,
+      sortedItems: [...block.items].sort((left, right) => conversationLastUsedMs(right) - conversationLastUsedMs(left)),
+      recency: block.items.reduce((max, item) => Math.max(max, conversationLastUsedMs(item)), 0),
+    }))
+    .sort((left, right) => right.recency - left.recency);
+
+  const orderedItems: ChatConversationOverviewItem[] = [];
+  const dividers: RecentSourceBlockDivider[] = [];
+  for (const block of orderedBlocks) {
+    const first = block.sortedItems[0];
+    const conversationId = String(first?.conversationId || "").trim();
+    if (conversationId) {
+      dividers.push({ conversationId, label: block.label, workspaceRootPath: block.workspaceRootPath });
+    }
+    orderedItems.push(...block.sortedItems);
+  }
+  return { orderedItems, dividers };
 }
 
 /**

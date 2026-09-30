@@ -84,6 +84,7 @@ const conversationTitleById = computed(() => {
     map.set(conversationId, resolveConversationDisplayTitle(item, {
       locale: locale.value,
       untitledLabel: t("chat.untitledConversation"),
+      systemNotificationLabel: t("chat.systemPersona"),
     }));
   }
   return map;
