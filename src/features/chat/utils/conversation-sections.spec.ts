@@ -485,13 +485,17 @@ describe("人格分组模式", () => {
     expect(sections.some((section) => section.key === "recent")).toBe(false);
   });
 
-  it("联系人 tab 不套人格分组，仍按渠道分组", () => {
+  it("联系人 tab 只按渠道分组，不生成项目、人格或最近会话", () => {
     const items = [
-      item({ conversationId: "r1", kind: "remote_im_contact", channelName: "频道A", agentId: "persona-x", lastMessageAt: "2026-08-02T00:00:00Z", updatedAt: "2026-08-02T00:00:00Z" }),
+      item({ conversationId: "r1", kind: "remote_im_contact", channelName: "频道A", agentId: "persona-x", workspaceRootPath: "E:/work/proj", lastMessageAt: "2026-08-02T00:00:00Z", updatedAt: "2026-08-02T00:00:00Z" }),
+      item({ conversationId: "r2", kind: "remote_im_contact", channelName: "频道A", isSystemNotificationConversation: true, lastMessageAt: "2026-08-03T00:00:00Z", updatedAt: "2026-08-03T00:00:00Z" }),
+      item({ conversationId: "r3", kind: "remote_im_contact", channelName: "频道B", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
     ];
-    const sections = buildConversationSections(items, { tab: "contact", titles, locale: "zh-CN", grouping: "persona", personaNameMap });
-    expect(sections.some((section) => section.key.startsWith("persona:"))).toBe(false);
-    expect(sections.some((section) => section.key.startsWith("channel:"))).toBe(true);
+    const sections = buildConversationSections(items, { tab: "contact", titles, locale: "zh-CN", grouping: "persona", personaNameMap, currentWorkspaceRootPath: "E:/work/proj" });
+    expect(sections.map((section) => section.key)).toEqual(["channel:频道A", "channel:频道B"]);
+    expect(sections.every((section) => section.key.startsWith("channel:"))).toBe(true);
+    expect(sections.some((section) => section.key === "recent" || section.key === "current-project")).toBe(false);
+    expect(sections.find((section) => section.key === "channel:频道A")?.items.map((entry) => entry.conversationId)).toEqual(["r2", "r1"]);
   });
 
   it("默认 mixed 模式不产生人格分组", () => {

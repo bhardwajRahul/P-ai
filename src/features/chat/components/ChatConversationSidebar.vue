@@ -517,6 +517,7 @@ const conversationGroupingLabel = computed(() =>
 
 /** 分类区插在第一个实体分组之前，统领下面的项目 / 人格列表；没有可分类的分组时返回 -1，整个分类区隐藏 */
 const conversationGroupingHeaderIndex = computed(() => {
+  if (activeConversationTab.value === "contact") return -1;
   const sections = displayedConversationSections.value;
   return sections.findIndex((section) =>
     section.key !== "pinned"
@@ -907,6 +908,7 @@ const conversationSectionLeadStyle = computed(() => {
 
 /** 置顶 / 最近是会话集合而非目录，用箭头；其余分组用文件夹开合 */
 function conversationSectionIcon(section: ConversationSection): "chevron" | "folder" {
+  if (activeConversationTab.value === "contact") return "chevron";
   return section.key === "pinned" || section.key === RECENT_CONVERSATION_SECTION_KEY ? "chevron" : "folder";
 }
 

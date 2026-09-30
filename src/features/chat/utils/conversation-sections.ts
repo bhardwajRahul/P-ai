@@ -60,6 +60,14 @@ export function buildConversationSections(
     }
     return true;
   });
+  if (tab === "contact") {
+    return buildRemoteConversationSections(visibleItems, {
+      fallbackTitle: titles.other,
+      locale,
+      pinnedFirst: true,
+    });
+  }
+
   const draftActiveItems = visibleItems.filter((item) => !!item.isDraft);
   const regularItems = visibleItems.filter((item) => !item.isDraft);
   // 「置顶 / 系统通知」区不参与分组：只把系统通知会话单独列出（不折叠、不带置顶图标），
@@ -104,23 +112,13 @@ export function buildConversationSections(
     sections.push(recentSection);
   }
   // 人格模式下没有「最近会话」，草稿会话并入人格分组，避免新建会话从列表消失
-  if (isPersonaGrouping && tab !== "contact") {
+  if (isPersonaGrouping) {
     return [
       ...sections,
       ...buildPersonaConversationSections([...draftActiveItems, ...restOthers], {
         fallbackTitle: titles.unknownPersona,
         personaNameMap: options.personaNameMap,
         locale,
-      }),
-    ];
-  }
-  if (tab === "contact") {
-    return [
-      ...sections,
-      ...buildRemoteConversationSections(restOthers, {
-        fallbackTitle: titles.other,
-        locale,
-        pinnedFirst: true,
       }),
     ];
   }
