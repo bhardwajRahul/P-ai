@@ -252,6 +252,7 @@
       <template v-if="!isOwnMessage(block)">
         <div
           v-if="!showAssistantPreStreamingDots(block)"
+          ref="assistantBubbleRef"
           class="assistant-markdown ecall-assistant-bubble max-w-full"
           :class="{ 'ecall-assistant-bubble-wide': blockNeedsWideBubble(block) }"
           :data-bubble-background="assistantBubbleBackgroundEnabled ? 'on' : 'off'"
@@ -260,6 +261,8 @@
           <div v-if="block.text">
             <div
               v-if="plainMarkdownDebugEnabled"
+              :ref="(el) => { activeStreamingSegmentEl = (el as HTMLElement) || null; }"
+              :style="props.block.isStreaming ? streamingBubbleStyle : undefined"
               @click="emit('assistantLinkClick', $event)"
             >
               <PlainMarkdownRenderer :text="assistantRenderedText" />
@@ -269,7 +272,9 @@
                 <div
                   v-for="(piece, pieceIndex) in assistantMarkdownPieces"
                   :key="piece.key"
+                  :ref="(el) => setStreamingSegmentRef(el, pieceIndex)"
                   class="ecall-assistant-segment ecall-assistant-segment-text"
+                  :style="isStreamingPiece(pieceIndex) ? streamingBubbleStyle : undefined"
                 >
                   <AppMarkdownRenderer
                     class="ecall-markdown-content max-w-none"
@@ -533,7 +538,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect, watchPostEffect } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect, watchPostEffect, type StyleValue } from "vue";
 import { useI18n } from "vue-i18n";
 import { Braces, ChevronDown, Copy, FileText, ImageIcon, ListCheck, Split, Undo2 } from "@lucide/vue";
 import { invokeTauri, openTransportWorkspaceFile, readTransportChatImage } from "../../../services/tauri-api";
@@ -548,7 +553,6 @@ import { formatIsoToLocalDateTime } from "../../../utils/time";
 import { useChatMessageAppearance } from "../../shell/composables/use-chat-message-appearance";
 import { AppMarkdownRenderer, initKatex, parseMarkdownBlocks, type MarkdownBlock } from "../markdown";
 import InlineMarkdownText from "../markdown/InlineMarkdownText.vue";
-import { hideIncompleteInlineMath } from "../markdown/streaming-math";
 import { normalizeLocalLinkHref } from "../utils/local-link";
 import { textContentSignature } from "../utils/text-signature";
 import { createToolCallPresentation } from "../utils/tool-call-presentation";
@@ -671,6 +675,134 @@ const assistantMarkdownPieces = computed<Array<{ key: string; blocks: MarkdownBl
   });
   return result;
 });
+// ==================== 流式气泡尺寸防抖（单调非减尺寸锁定） ====================
+// 在流式生成期间，只允许气泡变大，禁止变小或回缩，消除未闭合结构/语法重构时的抽搐
+const assistantBubbleRef = ref<HTMLElement | null>(null);
+const activeStreamingSegmentEl = ref<HTMLElement | null>(null);
+const streamingTargetEl = computed(() => activeStreamingSegmentEl.value || assistantBubbleRef.value);
+const streamingMinHeight = ref<number | null>(null);
+const streamingMinWidth = ref<number | null>(null);
+let maxObservedHeight = 0;
+let maxObservedWidth = 0;
+let streamingResizeObserver: ResizeObserver | null = null;
+let releaseStreamingLockTimer: ReturnType<typeof setTimeout> | null = null;
+
+function isStreamingPiece(pieceIndex: number): boolean {
+  return !!props.block.isStreaming && pieceIndex === assistantMarkdownPieces.value.length - 1;
+}
+
+function setStreamingSegmentRef(el: unknown, pieceIndex: number) {
+  if (isStreamingPiece(pieceIndex)) {
+    activeStreamingSegmentEl.value = (el as HTMLElement) || null;
+  }
+}
+
+const streamingBubbleStyle = computed<StyleValue | undefined>(() => {
+  const styles: Record<string, string> = {};
+  if (streamingMinHeight.value !== null && streamingMinHeight.value > 0) {
+    styles.minHeight = `${streamingMinHeight.value}px`;
+  }
+  if (streamingMinWidth.value !== null && streamingMinWidth.value > 0) {
+    // 限制在当前可用容器宽度内（最大 100%），窗口缩窄时可自然收缩不溢出
+    styles.minWidth = `min(${streamingMinWidth.value}px, 100%)`;
+  }
+  return Object.keys(styles).length > 0 ? styles : undefined;
+});
+
+let streamingSizeRafId = 0;
+
+function teardownStreamingObserver() {
+  if (streamingSizeRafId) {
+    window.cancelAnimationFrame(streamingSizeRafId);
+    streamingSizeRafId = 0;
+  }
+  if (streamingResizeObserver) {
+    streamingResizeObserver.disconnect();
+    streamingResizeObserver = null;
+  }
+}
+
+function clearStreamingReleaseTimer() {
+  if (releaseStreamingLockTimer) {
+    clearTimeout(releaseStreamingLockTimer);
+    releaseStreamingLockTimer = null;
+  }
+}
+
+function setupStreamingObserver(el: HTMLElement | null) {
+  teardownStreamingObserver();
+  if (!el || typeof ResizeObserver === "undefined") return;
+  streamingResizeObserver = new ResizeObserver((entries) => {
+    if (!props.block.isStreaming) return;
+    if (streamingSizeRafId) return;
+    streamingSizeRafId = window.requestAnimationFrame(() => {
+      streamingSizeRafId = 0;
+      if (!props.block.isStreaming) return;
+      for (const entry of entries) {
+        const target = entry.target as HTMLElement;
+        const currentHeight = Math.ceil(target.offsetHeight || entry.contentRect.height);
+        const currentWidth = Math.ceil(target.offsetWidth || entry.contentRect.width);
+        if (currentHeight > maxObservedHeight) {
+          maxObservedHeight = currentHeight;
+          streamingMinHeight.value = maxObservedHeight;
+        }
+        const parentWidth = target.parentElement ? target.parentElement.clientWidth : 0;
+        if (parentWidth > 0 && maxObservedWidth > parentWidth) {
+          maxObservedWidth = parentWidth;
+        }
+        if (currentWidth > maxObservedWidth) {
+          maxObservedWidth = parentWidth > 0 ? Math.min(currentWidth, parentWidth) : currentWidth;
+        }
+        if (maxObservedWidth > 0) {
+          streamingMinWidth.value = maxObservedWidth;
+        }
+      }
+    });
+  });
+  streamingResizeObserver.observe(el);
+}
+
+watch(
+  () => [props.block.id, props.block.isStreaming, streamingTargetEl.value] as const,
+  ([messageId, isStreaming, el], prev) => {
+    const prevMessageId = prev?.[0];
+    const prevStreaming = prev?.[1];
+    if (prevMessageId !== undefined && messageId !== prevMessageId) {
+      maxObservedHeight = 0;
+      maxObservedWidth = 0;
+      streamingMinHeight.value = null;
+      streamingMinWidth.value = null;
+      clearStreamingReleaseTimer();
+    }
+    if (isStreaming) {
+      clearStreamingReleaseTimer();
+      if (!prevStreaming) {
+        maxObservedHeight = el ? Math.ceil(el.offsetHeight) : 0;
+        const parentWidth = el?.parentElement ? el.parentElement.clientWidth : 0;
+        const initialWidth = el ? Math.ceil(el.offsetWidth) : 0;
+        maxObservedWidth = parentWidth > 0 ? Math.min(initialWidth, parentWidth) : initialWidth;
+        if (maxObservedHeight > 0) streamingMinHeight.value = maxObservedHeight;
+        if (maxObservedWidth > 0) streamingMinWidth.value = maxObservedWidth;
+      }
+      if (el) {
+        setupStreamingObserver(el);
+      }
+    } else {
+      teardownStreamingObserver();
+      clearStreamingReleaseTimer();
+      // 流式结束，留出短暂缓冲让最终渲染稳定后再平滑释放锁定
+      releaseStreamingLockTimer = setTimeout(() => {
+        streamingMinHeight.value = null;
+        streamingMinWidth.value = null;
+        maxObservedHeight = 0;
+        maxObservedWidth = 0;
+        releaseStreamingLockTimer = null;
+      }, 120);
+    }
+  },
+  { immediate: true, flush: "post" },
+);
+
 const teleportTheme = computed(() => {
   const documentTheme = typeof document === "undefined" ? "" : document.documentElement.getAttribute("data-theme");
   return String(props.currentTheme || documentTheme || "light").trim() || "light";
@@ -1619,56 +1751,10 @@ function formatThinkAsMarkdown(raw: string): string {
 }
 
 function formatAssistantStreamingText(block: ChatMessageBlock): string {
-  const rendered = formatThinkAsMarkdown(String(block.text || ""));
-  if (!block.isStreaming || isOwnMessage(block)) return rendered;
-  return hideIncompleteInlineMath(hideIncompleteDisplayMath(rendered));
+  return formatThinkAsMarkdown(String(block.text || ""));
 }
 
-function hideIncompleteDisplayMath(text: string): string {
-  if (!text.includes("$$")) return text;
 
-  const lines = text.split("\n");
-  let inCodeFence = false;
-  let offset = 0;
-  let openMathStart = -1;
-
-  for (const line of lines) {
-    if (/^\s*```/.test(line)) {
-      inCodeFence = !inCodeFence;
-      offset += line.length + 1;
-      continue;
-    }
-    if (!inCodeFence) {
-      let searchFrom = 0;
-      while (searchFrom < line.length) {
-        const delimiterIndex = findUnescapedDoubleDollar(line, searchFrom);
-        if (delimiterIndex < 0) break;
-        const absoluteIndex = offset + delimiterIndex;
-        openMathStart = openMathStart >= 0 ? -1 : absoluteIndex;
-        searchFrom = delimiterIndex + 2;
-      }
-    }
-    offset += line.length + 1;
-  }
-
-  if (openMathStart < 0) return text;
-  return text.slice(0, openMathStart);
-}
-
-function findUnescapedDoubleDollar(text: string, from: number): number {
-  let cursor = Math.max(0, from);
-  while (cursor < text.length) {
-    const index = text.indexOf("$$", cursor);
-    if (index < 0) return -1;
-    let backslashCount = 0;
-    for (let i = index - 1; i >= 0 && text[i] === "\\"; i -= 1) {
-      backslashCount += 1;
-    }
-    if (backslashCount % 2 === 0) return index;
-    cursor = index + 2;
-  }
-  return -1;
-}
 
 function normalizeRenderedLocalLinks() {
   const container = markdownContainerRef.value;
@@ -1695,8 +1781,14 @@ function blockHasCodeFence(block: ChatMessageBlock): boolean {
   return /```[\w-]*\s*[\r\n]/i.test(blockWideContentText(block));
 }
 
+function blockHasTable(block: ChatMessageBlock): boolean {
+  const text = blockWideContentText(block);
+  return /\|[^\n\r]+\|\s*[\r\n]\s*\|(?:\s*:?-+:?\s*\|)+/m.test(text)
+    || /^\s*\|.+?\|.+?\|/m.test(text);
+}
+
 function blockNeedsWideBubble(block: ChatMessageBlock): boolean {
-  return blockHasMermaid(block) || blockHasCodeFence(block);
+  return blockHasMermaid(block) || blockHasCodeFence(block) || blockHasTable(block);
 }
 
 function isImageMime(mime: string): boolean {
@@ -1803,6 +1895,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  teardownStreamingObserver();
+  clearStreamingReleaseTimer();
   closeContextMenu();
   if (relativeTimeNowTimer) {
     window.clearInterval(relativeTimeNowTimer);

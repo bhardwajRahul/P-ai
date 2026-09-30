@@ -421,4 +421,24 @@ describe("parseMarkdownBlocks", () => {
       },
     ]);
   });
+
+  it("retains unfinished streaming table row inside table instead of breaking out as paragraph", () => {
+    const text = [
+      "| 任务 | 触发 | 作用 |",
+      "|---|---|---|",
+      "| StartCN | 登录 | 主体 |",
+      "| StartCNBM | 定时",
+    ].join("\n");
+
+    const blocks = stripKeys(parseMarkdownBlocks(text, true));
+    expect(blocks.length).toBe(1);
+    expect(blocks[0]).toMatchObject({
+      type: "table",
+      headers: ["任务", "触发", "作用"],
+      rows: [
+        ["StartCN", "登录", "主体"],
+        ["StartCNBM", "定时"],
+      ],
+    });
+  });
 });

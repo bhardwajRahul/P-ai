@@ -803,8 +803,9 @@ const BlockRenderer = defineComponent({
     const isLastBlock = (idx: number) => idx === blockProps.blocks.length - 1;
 
     const renderBlock = (block: MarkdownBlock, index: number): VNodeChild => {
+      const blockKey = `${block.type}-${block.key}`;
       if (block.type === "heading") {
-        return h(headingTag(block.level), { key: `${block.type}-${index}-${block.key}`, class: "ecall-md-heading" }, [
+        return h(headingTag(block.level), { key: blockKey, class: "ecall-md-heading" }, [
           h(InlineRenderer, {
             segments: cachedParseInlineSegments(block.text),
             localImageBasePath: blockProps.localImageBasePath,
@@ -817,7 +818,7 @@ const BlockRenderer = defineComponent({
         const isCurrentLast = isLastBlock(index);
         const nestedStreaming = blockProps.streaming && isCurrentLast;
         const nestedBlocks = nestedMarkdownBlocks(block.text, nestedStreaming, block.key);
-        return h("blockquote", { key: `${block.type}-${index}-${block.key}`, class: "ecall-md-quote" }, [
+        return h("blockquote", { key: blockKey, class: "ecall-md-quote" }, [
           h(BlockRenderer, {
             blocks: nestedBlocks,
             isDark: blockProps.isDark,
@@ -831,10 +832,10 @@ const BlockRenderer = defineComponent({
       if (block.type === "list") {
         const tag = block.ordered ? "ol" : "ul";
         return h(tag, {
-          key: `${block.type}-${index}-${block.key}`,
+          key: blockKey,
           class: block.ordered ? "ecall-md-list ecall-md-list-ordered" : "ecall-md-list",
         }, block.items.map((item, itemIndex) => h("li", {
-          key: `${index}-${itemIndex}`,
+          key: `${block.key}-${itemIndex}`,
           value: block.ordered && item.value ? item.value : undefined,
         }, [
           h(InlineRenderer, {
@@ -846,10 +847,10 @@ const BlockRenderer = defineComponent({
         ])));
       }
       if (block.type === "table") {
-        return h("div", { key: `${block.type}-${index}-${block.key}`, class: "ecall-md-table-wrap" }, [
+        return h("div", { key: blockKey, class: "ecall-md-table-wrap" }, [
           h("table", { class: "ecall-md-table" }, [
             h("thead", [
-              h("tr", block.headers.map((cell, ci) => h("th", { key: `${index}-h-${ci}` }, [
+              h("tr", block.headers.map((cell, ci) => h("th", { key: `${block.key}-h-${ci}` }, [
                 h(InlineRenderer, {
                   segments: cachedParseInlineSegments(cell),
                   localImageBasePath: blockProps.localImageBasePath,
@@ -858,7 +859,7 @@ const BlockRenderer = defineComponent({
                 }),
               ]))),
             ]),
-            h("tbody", block.rows.map((row, ri) => h("tr", { key: `${index}-r-${ri}` }, normalizedTableRow(row, block.headers.length).map((cell, ci) => h("td", { key: `${index}-r-${ri}-c-${ci}` }, [
+            h("tbody", block.rows.map((row, ri) => h("tr", { key: `${block.key}-r-${ri}` }, normalizedTableRow(row, block.headers.length).map((cell, ci) => h("td", { key: `${block.key}-r-${ri}-c-${ci}` }, [
               h(InlineRenderer, {
                 segments: cachedParseInlineSegments(cell),
                 localImageBasePath: blockProps.localImageBasePath,
@@ -871,14 +872,14 @@ const BlockRenderer = defineComponent({
       }
       if (block.type === "embed") {
         return h(AgentEmbedSandbox, {
-          key: `${block.type}-${index}-${block.key}`,
+          key: blockKey,
           src: block.src,
           isDark: blockProps.isDark,
         });
       }
       if (block.type === "code") {
         return h(CodeBlock, {
-          key: `${block.type}-${index}-${block.key}`,
+          key: blockKey,
           lang: block.lang,
           code: block.text,
           blockKey: block.key,
@@ -892,7 +893,7 @@ const BlockRenderer = defineComponent({
       }
       if (block.type === "math") {
         return h(MathBlock, {
-          key: `${block.type}-${index}-${block.key}`,
+          key: blockKey,
           text: block.text,
           raw: block.raw,
           blockKey: block.key,
@@ -904,7 +905,7 @@ const BlockRenderer = defineComponent({
         const nestedStreaming = blockProps.streaming && isCurrentLast;
         const nestedBlocks = nestedMarkdownBlocks(block.body, nestedStreaming, `${block.key}::body`);
         return h("details", {
-          key: `${block.type}-${index}-${block.key}`,
+          key: blockKey,
           class: "ecall-md-details",
           open: block.open || undefined,
         }, [
@@ -931,10 +932,10 @@ const BlockRenderer = defineComponent({
         ]);
       }
       if (block.type === "footnotes") {
-        return h("section", { key: `${block.type}-${index}-${block.key}`, class: "ecall-md-footnotes" }, [
+        return h("section", { key: blockKey, class: "ecall-md-footnotes" }, [
           h("ol", { class: "ecall-md-footnote-list" }, block.items.map((item) => h("li", {
             id: footnoteDomId(item.id),
-            key: `${index}-${item.id}`,
+            key: `${block.key}-${item.id}`,
             class: ["ecall-md-footnote-item", activeFootnoteId.value === item.id ? "ecall-md-footnote-active" : ""],
           }, [
             h(InlineRenderer, {
@@ -947,9 +948,9 @@ const BlockRenderer = defineComponent({
         ]);
       }
       if (block.type === "hr") {
-        return h("hr", { key: `${block.type}-${index}-${block.key}`, class: "ecall-md-hr" });
+        return h("hr", { key: blockKey, class: "ecall-md-hr" });
       }
-      return h("p", { key: `${block.type}-${index}-${block.key}`, class: "ecall-md-paragraph" }, [
+      return h("p", { key: blockKey, class: "ecall-md-paragraph" }, [
         h(InlineRenderer, {
           segments: cachedParseInlineSegments(block.text),
           localImageBasePath: blockProps.localImageBasePath,
@@ -1567,6 +1568,8 @@ ul.ecall-md-list {
   padding: 0.32rem 0.48rem;
   text-align: left;
   vertical-align: top;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .ecall-md-table th {

@@ -100,4 +100,17 @@ describe("AppMarkdownRenderer", () => {
     const html = await renderMarkdown('<agent-embed src="demo.html"></agent-embed>');
     expect(html).toContain("ecall-agent-embed");
   });
+
+  it("renders unfinished math blocks during streaming without discarding content", async () => {
+    const app = createSSRApp({
+      render: () => h(AppMarkdownRenderer, {
+        text: "前文说明\n\n$$\nE = mc^2",
+        streaming: true,
+      }),
+    });
+    app.use(i18n);
+    const html = await renderToString(app);
+    expect(html).toContain("前文说明");
+    expect(html).toContain("E = mc^2");
+  });
 });

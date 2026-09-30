@@ -414,10 +414,21 @@ export function parseMarkdownBlocks(input: string, streaming = false): MarkdownB
       lineIndex += 2;
       const rows: string[][] = [];
       while (lineIndex < lines.length) {
-        const row = parseTableRow(lines[lineIndex]);
-        if (!row) break;
-        rows.push(row);
-        lineIndex += 1;
+        const rawLine = lines[lineIndex];
+        const row = parseTableRow(rawLine);
+        if (row) {
+          rows.push(row);
+          lineIndex += 1;
+          continue;
+        }
+        if (streaming && lineIndex === lines.length - 1 && rawLine && rawLine.trim().startsWith("|")) {
+          const trimmed = rawLine.trim().replace(/^\|/, "").replace(/\|$/, "");
+          const pendingCells = splitTableCells(trimmed).map((cell) => cell.trim());
+          rows.push(pendingCells.length > 0 ? pendingCells : [""]);
+          lineIndex += 1;
+          break;
+        }
+        break;
       }
       lineIndex -= 1;
       tableHeader.forEach(recordFootnoteRefs);
@@ -500,9 +511,8 @@ export function parseMarkdownBlocks(input: string, streaming = false): MarkdownB
     });
   }
   if (inMathBlock) {
-    if (!streaming) {
-      result.push(mathBlock(mathRawLines.join("\n"), mathLines.join("\n"), `math-${result.length}`));
-    }
+    // 流式和非流式都输出未闭合的数学公式块（乐观渲染，展示已打出的公式内容）
+    result.push(mathBlock(mathRawLines.join("\n"), mathLines.join("\n"), `math-${result.length}`));
   }
   flushParagraph();
   const footnoteItems = referencedFootnoteIds

@@ -3339,6 +3339,8 @@ let contentResizeObserver: ResizeObserver | null = null;
 // 此时视口停在上方，若照样下拉会把用户从历史位置直接拽到最底。
 // 容差取自实测：跟随状态下距底距离基本为 0，偶发瞬态最大 54px。
 const PIN_TO_BOTTOM_TOLERANCE_PX = 64;
+let pinToBottomRafId = 0;
+
 function pinChatToBottomWhileFollowing() {
   if (!followBottom.value) return;
   const el = scrollContainer.value;
@@ -3358,17 +3360,34 @@ function pinChatToBottomWhileFollowing() {
   chatScrollbarRef.value?.updateThumb();
 }
 
+function schedulePinChatToBottomWhileFollowing() {
+  if (!followBottom.value) return;
+  if (pinToBottomRafId) return;
+  pinToBottomRafId = window.requestAnimationFrame(() => {
+    pinToBottomRafId = 0;
+    pinChatToBottomWhileFollowing();
+  });
+}
+
 watch(chatContentRoot, (el, _prev, onCleanup) => {
   contentResizeObserver?.disconnect();
   contentResizeObserver = null;
+  if (pinToBottomRafId) {
+    window.cancelAnimationFrame(pinToBottomRafId);
+    pinToBottomRafId = 0;
+  }
   if (!el || typeof ResizeObserver === "undefined") return;
   contentResizeObserver = new ResizeObserver(() => {
-    pinChatToBottomWhileFollowing();
+    schedulePinChatToBottomWhileFollowing();
   });
   contentResizeObserver.observe(el);
   onCleanup(() => {
     contentResizeObserver?.disconnect();
     contentResizeObserver = null;
+    if (pinToBottomRafId) {
+      window.cancelAnimationFrame(pinToBottomRafId);
+      pinToBottomRafId = 0;
+    }
   });
 });
 
