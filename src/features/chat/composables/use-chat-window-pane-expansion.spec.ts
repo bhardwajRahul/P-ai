@@ -15,6 +15,6 @@ describe("chat window pane expansion sizing", () => {
 
   it("uses the same left pane width limits as the rendered layout", () => {
     expect(normalizeExternalPaneCssWidth("left", 100)).toBe(200);
-    expect(normalizeExternalPaneCssWidth("left", 500)).toBe(360);
+    expect(normalizeExternalPaneCssWidth("left", 500)).toBe(320);
   });
 });
