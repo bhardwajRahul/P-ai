@@ -374,7 +374,7 @@ import { Archive, Check, ChevronDown, Folder, LayoutList, Moon, Search, Settings
 import CollapsibleGroup from "./CollapsibleGroup.vue";
 import ChatConversationItem from "./ChatConversationItem.vue";
 import type { ApiConfigItem, ChatConversationOverviewItem, ConversationPreviewMessage } from "../../../types/app";
-import { stripToolcallMarkers } from "../../../utils/chat-message-semantics";
+import { stripPreviewMarkdown, stripToolcallMarkers } from "../../../utils/chat-message-semantics";
 import type { TaskEntry } from "../../config/views/config-tabs/task-editor";
 import { invokeTauri } from "../../../services/tauri-api";
 import { usePipelineStatus } from "../../shell/composables/use-pipeline-status";
@@ -1289,7 +1289,7 @@ function conversationWorkspaceLabel(item: ChatConversationOverviewItem): string 
 }
 
 function previewText(preview: ConversationPreviewMessage): string {
-  const text = stripToolcallMarkers(preview.textPreview || "");
+  const text = stripPreviewMarkdown(stripToolcallMarkers(preview.textPreview || ""));
   if (text) return text;
   if (preview.hasPdf) return t("chat.previewPdf");
   if (preview.hasImage) return t("chat.previewImage");

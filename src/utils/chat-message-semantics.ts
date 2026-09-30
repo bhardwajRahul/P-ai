@@ -389,6 +389,38 @@ export function stripToolcallMarkers(text: string): string {
 }
 
 /**
+ * 会话列表摘要预览用的 markdown 去样式：把常见标记剥成纯文本，
+ * 避免反引号、星号、井号等原样露在单行摘要里。
+ * 只处理成对标记与行首标记；单下划线斜体不处理，否则会误伤 snake_case 标识符。
+ */
+export function stripPreviewMarkdown(text: string): string {
+  return String(text || "")
+    // 围栏代码标记：只去围栏本身，保留内部文本
+    .replace(/^\s*(?:```|~~~)[^\n]*$/gm, "")
+    .replace(/```|~~~/g, "")
+    // 行内代码
+    .replace(/`+([^`]*)`+/g, "$1")
+    // 图片 / 链接：只保留可见文字
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    // 加粗（** / __）
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    // 删除线
+    .replace(/~~(?=\S)([\s\S]*?\S)~~/g, "$1")
+    // 斜体星号：不做防误伤判断，算式里的 `2*3...*5` 会被一起吃掉落为 `2 3...5`
+    .replace(/\*([^*\n]+)\*/g, "$1")
+    // 行首标记：标题 / 引用 / 列表 / 水平线
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/\s+#{1,6}\s*$/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "")
+    .replace(/^\s{0,3}\d+\.\s+/gm, "")
+    .replace(/^\s{0,3}(?:[-*_]\s*){3,}$/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * 把旧协议（后端 streamCache 快照）里「工具标记后正文边界」的真实换行
  * 归一化为分段占位符。本地流式追加与正式消息投影已直接写占位符，
  * 只有刷新恢复路径的 streamBlocks 仍是 `\n\n`，渲染层无法据此分段。

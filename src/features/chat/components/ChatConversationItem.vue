@@ -177,7 +177,7 @@ import { Archive, PencilLine, Pin, PinOff, Trash2, Upload } from "@lucide/vue";
 import FloatingConversationMenu from "./FloatingConversationMenu.vue";
 import type { ChatConversationOverviewItem, ConversationPreviewMessage } from "../../../types/app";
 import type { ConversationPipelineStatus } from "../../shell/composables/use-pipeline-status";
-import { stripToolcallMarkers } from "../../../utils/chat-message-semantics";
+import { stripPreviewMarkdown, stripToolcallMarkers } from "../../../utils/chat-message-semantics";
 import { formatConversationListTime } from "../utils/conversation-time";
 import { workspaceNameFromPath } from "../utils/conversation-sections";
 import { resolveConversationDisplayTitle } from "../utils/conversation-title";
@@ -256,7 +256,7 @@ const normalizedPreviewMessages = computed<ConversationPreviewMessage[]>(() =>
 );
 
 function previewText(preview: ConversationPreviewMessage): string {
-  const text = stripToolcallMarkers(preview.textPreview || "");
+  const text = stripPreviewMarkdown(stripToolcallMarkers(preview.textPreview || ""));
   if (text) return text;
   if (preview.hasPdf) return t("chat.previewPdf");
   if (preview.hasImage) return t("chat.previewImage");
