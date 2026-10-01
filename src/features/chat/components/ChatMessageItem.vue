@@ -362,6 +362,7 @@
           :class="{ 'ecall-assistant-bubble-wide': blockNeedsWideBubble(block) }"
           :data-bubble-background="assistantBubbleBackgroundEnabled ? 'on' : 'off'"
           :data-segmented-markdown="segmentedMarkdownEnabled ? 'on' : 'off'"
+          :data-process-folded="processSegmentsFolded ? 'on' : 'off'"
         >
           <div v-if="block.text">
             <div
@@ -374,18 +375,31 @@
             </div>
             <div v-else ref="markdownContainerRef">
               <div class="ecall-assistant-segment-list">
+                <button
+                  v-if="collapsibleProcessPieceCount > 0"
+                  type="button"
+                  class="ecall-process-fold"
+                  @click.stop="processSegmentsExpanded = !processSegmentsExpanded"
+                >
+                  <MessagesSquare v-if="assistantBubbleBackgroundEnabled" class="h-3.5 w-3.5 shrink-0" />
+                  <span>{{ processSegmentsExpanded ? t("common.collapse") : t("chat.previousProcessMessages", { count: collapsibleProcessPieceCount }) }}</span>
+                  <ChevronRight
+                    class="h-3.5 w-3.5 shrink-0 transition-transform duration-200"
+                    :class="processSegmentsExpanded ? 'rotate-90' : ''"
+                  />
+                </button>
                 <div
-                  v-for="(piece, pieceIndex) in assistantMarkdownPieces"
+                  v-for="piece in visibleAssistantPieces"
                   :key="piece.key"
-                  :ref="(el) => setStreamingSegmentRef(el, pieceIndex)"
+                  :ref="(el) => setStreamingSegmentRef(el, piece.index)"
                   class="ecall-assistant-segment ecall-assistant-segment-text"
-                  :style="isStreamingPiece(pieceIndex) ? streamingBubbleStyle : undefined"
+                  :style="isStreamingPiece(piece.index) ? streamingBubbleStyle : undefined"
                 >
                   <AppMarkdownRenderer
                     class="ecall-markdown-content max-w-none"
                     :blocks="piece.blocks"
                     :is-dark="markdownIsDark"
-                    :streaming="!!block.isStreaming && pieceIndex === assistantMarkdownPieces.length - 1"
+                    :streaming="!!block.isStreaming && piece.index === assistantMarkdownPieces.length - 1"
                     :local-image-base-path="currentWorkspaceRootPath"
                     :toolcall-preview-map="toolcallPreviewMap"
                     @math-context-menu="openMathContextMenu"
@@ -645,7 +659,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect, watchPostEffect, type Ref, type StyleValue } from "vue";
 import { useI18n } from "vue-i18n";
-import { Braces, ChevronDown, Copy, FileText, ImageIcon, ListCheck, Split, Undo2 } from "@lucide/vue";
+import { Braces, ChevronDown, ChevronRight, Copy, FileText, ImageIcon, ListCheck, MessagesSquare, Split, Undo2 } from "@lucide/vue";
 import { invokeTauri, openTransportWorkspaceFile, readTransportChatImage } from "../../../services/tauri-api";
 import type { ChatActivityItem, ChatMessageBlock } from "../../../types/app";
 import {
@@ -780,6 +794,18 @@ const assistantMarkdownPieces = computed<Array<{ key: string; blocks: MarkdownBl
     });
   });
   return result;
+});
+/** 过程段默认收起，只留最后一段。正在流式输出的最后一段不算已完成，不参与折叠。 */
+const processSegmentsExpanded = ref(false);
+watch(() => props.block.id, () => {
+  processSegmentsExpanded.value = false;
+});
+const collapsibleProcessPieceCount = computed(() => Math.max(0, assistantMarkdownPieces.value.length - 1));
+const processSegmentsFolded = computed(() => collapsibleProcessPieceCount.value > 0 && !processSegmentsExpanded.value);
+const visibleAssistantPieces = computed(() => {
+  const pieces = assistantMarkdownPieces.value.map((piece, index) => ({ ...piece, index }));
+  if (!processSegmentsFolded.value) return pieces;
+  return pieces.slice(-1);
 });
 // ==================== 流式气泡尺寸防抖（单调非减尺寸锁定） ====================
 // 在流式生成期间，只允许气泡变大，禁止变小或回缩，消除未闭合结构/语法重构时的抽搐
@@ -2494,6 +2520,39 @@ function openAttachmentPath(path: string) {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.ecall-process-fold {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0;
+  border: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--color-base-content) 45%, transparent);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  cursor: pointer;
+}
+
+.ecall-process-fold:hover {
+  color: var(--color-base-content);
+}
+
+.ecall-assistant-bubble[data-bubble-background="on"] .ecall-process-fold {
+  gap: 0.375rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: var(--radius-box, 1rem);
+  background: var(--color-base-100);
+}
+
+.ecall-assistant-bubble[data-bubble-background="off"]:not([data-process-folded="on"]) .ecall-process-fold + .ecall-assistant-segment::before {
+  display: none;
+}
+
+.ecall-assistant-bubble[data-bubble-background="off"][data-process-folded="on"] .ecall-process-fold + .ecall-assistant-segment::before {
+  top: -0.75rem;
 }
 
 /* 无气泡模式：没有气泡边界，段间距拉开一倍，让断开先靠留白读出来 */
