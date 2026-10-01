@@ -90,7 +90,7 @@
           >
             <div
               v-if="showActivityPanel(block) && activityPanelOpen(block)"
-              class="px-0 pb-1 pt-2 text-xs text-base-content/70"
+              class="px-0 pb-1 pt-2 text-xs text-base-content"
             >
               <div class="flex flex-col">
                 <TransitionGroup name="ecall-activity-item" tag="ul" class="ecall-activity-timeline" :appear="false">
@@ -207,6 +207,12 @@
                             >-{{ activityItemDisplay(item).removes }}</span>
                           </span>
                         </div>
+                        <div v-else-if="item.kind === 'content'" class="flex px-1 py-1">
+                          <PlainMarkdownRenderer
+                            class="min-w-0 flex-1 whitespace-pre-wrap wrap-break-word text-xs leading-relaxed text-base-content"
+                            :text="activityItemText(item)"
+                          />
+                        </div>
                         <div v-else class="flex px-1 py-1">
                           <ExpandableText
                             class="min-w-0 flex-1"
@@ -220,14 +226,9 @@
                           >
                             <template #default="{ text }">
                               <!-- 思维链是推理段落：InlineMarkdownText 行内渲染（粗体/斜体/代码/kbd），
-                                   不生成块级元素，标题行剥成加粗——紧凑、不与外层按钮冲突。
-                                   正文可能含列表/代码块等结构：PlainMarkdownRenderer 完整渲染。 -->
+                                   不生成块级元素，标题行剥成加粗——紧凑、不与外层按钮冲突。 -->
                               <InlineMarkdownText
                                 v-if="item.kind === 'reasoning'"
-                                :text="text"
-                              />
-                              <PlainMarkdownRenderer
-                                v-else-if="item.kind === 'content'"
                                 :text="text"
                               />
                               <template v-else>{{ text }}</template>
@@ -1395,7 +1396,7 @@ function activityItemDetailClass(item: ChatActivityItem): string {
   if (item.kind === "reasoning") {
     return props.markdownIsDark ? "ecall-activity-reasoning-dark" : "ecall-activity-reasoning";
   }
-  if (item.kind === "content") return "text-base-content/80";
+  if (item.kind === "content") return "text-base-content";
   return props.markdownIsDark ? "ecall-activity-tool-dark" : "ecall-activity-tool";
 }
 
@@ -2000,6 +2001,11 @@ function openAttachmentPath(path: string) {
 
 :deep(.ecall-activity-timeline .ecall-plain-markdown-markdown > :first-child) {
   margin-top: 0 !important;
+}
+
+:deep(.ecall-activity-timeline .ecall-plain-markdown-markdown),
+:deep(.ecall-activity-timeline .ecall-plain-markdown-markdown p) {
+  color: var(--color-base-content) !important;
 }
 
 .ecall-chat-message-row {
