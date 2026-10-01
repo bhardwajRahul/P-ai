@@ -177,6 +177,7 @@
                         @toggle-audio-playback="toggleAudioPlayback($event.id, $event.audio)"
                         @assistant-link-click="handleAssistantLinkClick"
                         @activity-toggle="handleActivityToggle"
+                        @reasoning-stuck-change="handleReasoningStuckChange"
                       />
                     </div>
                   </div>
@@ -835,7 +836,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, toRef, watch, type Ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, toRef, watch, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { isDarkAppTheme, isVscodeHost } from "../../shell/composables/use-app-theme";
 import {
@@ -1680,6 +1681,7 @@ function clearFileReaderContextReferences(paths?: string[]) {
 watch(() => props.activeConversationId, () => {
   fileReaderVisibleContextReference.value = null;
   fileReaderSelectionContextReference.value = null;
+  activeStuckReasoningKeySet.value = new Set();
 });
 
 // ==================== selection state shared between virtual list & selection mode ====================
@@ -1797,6 +1799,55 @@ const {
   onReachedBottom: () => emit("reachedBottom"),
   focusComposerInput: (options) => composerPanelRef.value?.focusInput(options),
 });
+
+// ==================== 智能首行容器物理宽度自适应（单例 ResizeObserver + 100ms 防抖） ====================
+const reasoningSummaryAvailableWidth = ref(480);
+let scrollContainerWidthResizeObserver: ResizeObserver | null = null;
+let scrollContainerWidthResizeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function updateReasoningSummaryAvailableWidth(width: number) {
+  if (width <= 0) return;
+  // 气泡内边距、时间线节点及吸顶栏左右留白与展开按钮约 60px
+  const usableWidth = Math.max(160, Math.round(width - 60));
+  if (reasoningSummaryAvailableWidth.value !== usableWidth) {
+    reasoningSummaryAvailableWidth.value = usableWidth;
+  }
+}
+
+watch(scrollContainer, (el, _prev, onCleanup) => {
+  scrollContainerWidthResizeObserver?.disconnect();
+  scrollContainerWidthResizeObserver = null;
+  if (scrollContainerWidthResizeTimer) {
+    clearTimeout(scrollContainerWidthResizeTimer);
+    scrollContainerWidthResizeTimer = null;
+  }
+  if (!el || typeof ResizeObserver === "undefined") return;
+
+  updateReasoningSummaryAvailableWidth(el.clientWidth);
+
+  scrollContainerWidthResizeObserver = new ResizeObserver((entries) => {
+    const entry = entries[0];
+    const width = entry?.contentRect?.width || el.clientWidth;
+    if (scrollContainerWidthResizeTimer) clearTimeout(scrollContainerWidthResizeTimer);
+    scrollContainerWidthResizeTimer = setTimeout(() => {
+      scrollContainerWidthResizeTimer = null;
+      updateReasoningSummaryAvailableWidth(width);
+    }, 100);
+  });
+
+  scrollContainerWidthResizeObserver.observe(el);
+
+  onCleanup(() => {
+    if (scrollContainerWidthResizeTimer) {
+      clearTimeout(scrollContainerWidthResizeTimer);
+      scrollContainerWidthResizeTimer = null;
+    }
+    scrollContainerWidthResizeObserver?.disconnect();
+    scrollContainerWidthResizeObserver = null;
+  });
+});
+
+provide("reasoningSummaryAvailableWidth", reasoningSummaryAvailableWidth);
 
 // ==================== virtual scroll (virtua) ====================
 
@@ -2663,7 +2714,21 @@ onBeforeUnmount(() => {
 // 上下两排不会同时出现（贴底出下排、离底出上排），不需要为上排预留下排的高度；
 // 上排时间线按钮靠 sessionTopColumnOffset 与下排操作条里的那个对齐。
 
+const activeStuckReasoningKeySet = ref<Set<string>>(new Set());
+
+function handleReasoningStuckChange(payload: { key: string; stuck: boolean }): void {
+  const next = new Set(activeStuckReasoningKeySet.value);
+  if (payload.stuck) {
+    next.add(payload.key);
+  } else {
+    next.delete(payload.key);
+  }
+  activeStuckReasoningKeySet.value = next;
+}
+
 const showConversationTodoBar = computed(() => {
+  // 思维链在顶端吸附时，主动隐藏顶部的 TodoBar 避免视觉重叠
+  if (activeStuckReasoningKeySet.value.size > 0) return false;
   const hasActiveOrPending = normalizedConversationTodos.value.some((item) => item.status === "pending" || item.status === "in_progress");
   if (!hasActiveOrPending) return false;
   return atConversationBottom.value;

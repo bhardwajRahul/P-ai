@@ -94,20 +94,106 @@
             >
               <div class="flex flex-col">
                 <TransitionGroup name="ecall-activity-item" tag="ul" class="ecall-activity-timeline" :appear="false">
-                  <li v-for="(item, itemIndex) in resolvedActivityItems(block)" :key="`${block.id}-activity-${activityItemKey(item)}`" class="flex gap-1.5" :class="activityItemNodeClass(item)">
+                  <li
+                    v-for="(item, itemIndex) in resolvedActivityItems(block)"
+                    :key="`${block.id}-activity-${activityItemKey(item)}`"
+                    :class="[
+                      activityItemNodeClass(item),
+                      item.kind === 'reasoning' ? 'ecall-activity-reasoning-item relative flex flex-col min-w-0' : 'flex gap-1.5',
+                    ]"
+                  >
+                    <!-- ========== 思维链节点：整行吸顶架构（Icon + 首行标题 + 折叠箭头 一体化吸顶） ========== -->
+                    <template v-if="item.kind === 'reasoning'">
+                      <!-- 展开态吸顶检测哨兵（贴在 Header 正上方） -->
+                      <div
+                        v-if="activityItemExpanded(item) && activityItemCanExpand(item)"
+                        :ref="(el) => bindStickySentinel(activityItemKey(item), el as HTMLElement | null)"
+                        class="ecall-reasoning-sticky-sentinel pointer-events-none h-px w-full -mb-px"
+                      />
+
+                      <!-- 标题行：展开时才吸顶（sticky -top-3 z-10 抵消容器 py-3，紧贴视口最顶端），未展开时不吸顶随文档滚动 -->
+                      <div
+                        class="ecall-reasoning-sticky-header flex min-h-6 items-center gap-1.5 bg-base-200 py-1"
+                        :class="[
+                          activityItemExpanded(item) ? 'sticky -top-3 z-10' : '',
+                          props.selectionModeEnabled || !activityItemCanExpand(item) ? '' : 'cursor-pointer select-none',
+                          isReasoningItemStuck(item) ? 'ecall-reasoning-stuck' : '',
+                        ]"
+                        @click="onReasoningHeaderClick(item, $event)"
+                      >
+                        <!-- 左侧思考 Icon（吸顶时不丢失） -->
+                        <div class="flex w-4 shrink-0 items-center justify-center">
+                          <svg viewBox="0 0 24 24" class="h-4 w-4">
+                            <circle cx="12" cy="12" r="10" fill="currentColor" />
+                            <path d="M12 4Q13 11 20 12Q13 13 12 20Q11 13 4 12Q11 11 12 4Z" class="text-base-200" fill="currentColor" />
+                          </svg>
+                        </div>
+
+                        <!-- 中间：首行标题摘要 -->
+                        <span class="ecall-activity-item-summary min-w-0 flex-1" :class="activityItemTitleClass(item)">
+                          <InlineMarkdownText :text="activityItemTitle(item)" />
+                        </span>
+
+                        <!-- 右侧：折叠箭头（有可展开内容时显示） -->
+                        <button
+                          v-if="activityItemCanExpand(item)"
+                          type="button"
+                          class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-base-content/45 hover:bg-base-300/50 hover:text-base-content/80 transition-colors"
+                          :title="activityItemExpanded(item) ? t('common.collapse') : t('common.expand')"
+                          data-selection-ignore="true"
+                          @click.stop="toggleReasoningItemExpanded(item)"
+                        >
+                          <ChevronDown
+                            class="h-3.5 w-3.5 transition-transform duration-150"
+                            :class="{ 'rotate-180': activityItemExpanded(item) }"
+                          />
+                        </button>
+
+                        <!-- 底沿平滑淡出渐变遮罩：仅在展开且真正吸顶时才显现，未吸顶时不遮挡首行文字 -->
+                        <div
+                          v-if="activityItemExpanded(item) && activityItemCanExpand(item)"
+                          class="ecall-reasoning-sticky-fade absolute top-full inset-x-0 h-3 pointer-events-none transition-opacity duration-150"
+                          :class="isReasoningItemStuck(item) ? 'opacity-100' : 'opacity-0'"
+                        />
+                      </div>
+
+                      <!-- 正文区：左侧引导坚线 + 右侧内容（折叠态展示 4 行预览 + 底部 base-200 淡出；展开态完整展示且由 Header 吸顶） -->
+                      <div
+                        v-if="activityItemCanExpand(item)"
+                        class="flex gap-1.5 min-w-0 flex-1 pl-0 pb-1.5"
+                      >
+                        <!-- 左侧引导坚线 -->
+                        <div class="flex w-4 shrink-0 justify-center">
+                          <span class="w-px bg-current opacity-30" />
+                        </div>
+
+                        <!-- 右侧正文外壳：折叠态限高约 4 行预览并加底部 base-200 淡出；展开态全量平铺 -->
+                        <div
+                          class="ecall-reasoning-body-shell relative min-w-0 flex-1 whitespace-pre-wrap wrap-break-word text-xs leading-relaxed"
+                          :class="[
+                            activityItemDetailClass(item),
+                            activityItemExpanded(item) ? 'ecall-reasoning-body--expanded' : 'ecall-reasoning-body--clamped cursor-pointer',
+                          ]"
+                          @click="onReasoningClampedBodyClick(item)"
+                        >
+                          <InlineMarkdownText :text="activityItemRemainingText(item)" />
+
+                          <!-- 折叠态底部 base-200 淡出遮罩 -->
+                          <div
+                            v-if="!activityItemExpanded(item)"
+                            class="ecall-reasoning-clamped-fade absolute inset-x-0 bottom-0 h-7 pointer-events-none"
+                          />
+                        </div>
+                      </div>
+                    </template>
+
+                    <!-- ========== 工具与正文节点：原有双列时间线结构 ========== -->
+                    <template v-else>
                       <div class="flex w-4 shrink-0 flex-col items-center pt-1">
                         <span
                           v-if="item.kind === 'tool' && item.status === 'doing'"
                           class="loading loading-spinner loading-xs text-primary"
                         ></span>
-                        <svg
-                          v-else-if="item.kind === 'reasoning'"
-                          viewBox="0 0 24 24"
-                          class="h-4 w-4"
-                        >
-                          <circle cx="12" cy="12" r="10" fill="currentColor" />
-                          <path d="M12 4Q13 11 20 12Q13 13 12 20Q11 13 4 12Q11 11 12 4Z" class="text-base-100" fill="currentColor" />
-                        </svg>
                         <svg
                           v-else-if="item.kind === 'content'"
                           viewBox="0 0 24 24"
@@ -213,30 +299,9 @@
                             :text="activityItemText(item)"
                           />
                         </div>
-                        <div v-else class="flex px-1 py-1">
-                          <ExpandableText
-                            class="min-w-0 flex-1"
-                            :text="activityItemText(item)"
-                            :text-class="activityItemDetailClass(item)"
-                            :expanded="activityItemExpanded(item)"
-                            :follow="activityItemFollowsStream(item)"
-                            :preview-lines="4"
-                            :clickable-header="!props.selectionModeEnabled"
-                            @update:expanded="onActivityItemExpandedChange(item, $event)"
-                          >
-                            <template #default="{ text }">
-                              <!-- 思维链是推理段落：InlineMarkdownText 行内渲染（粗体/斜体/代码/kbd），
-                                   不生成块级元素，标题行剥成加粗——紧凑、不与外层按钮冲突。 -->
-                              <InlineMarkdownText
-                                v-if="item.kind === 'reasoning'"
-                                :text="text"
-                              />
-                              <template v-else>{{ text }}</template>
-                            </template>
-                          </ExpandableText>
-                        </div>
                       </div>
-                    </li>
+                    </template>
+                  </li>
                 </TransitionGroup>
                 <button
                   type="button"
@@ -542,7 +607,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect, watchPostEffect, type StyleValue } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect, watchPostEffect, type Ref, type StyleValue } from "vue";
 import { useI18n } from "vue-i18n";
 import { Braces, ChevronDown, Copy, FileText, ImageIcon, ListCheck, Split, Undo2 } from "@lucide/vue";
 import { invokeTauri, openTransportWorkspaceFile, readTransportChatImage } from "../../../services/tauri-api";
@@ -559,6 +624,7 @@ import { AppMarkdownRenderer, initKatex, parseMarkdownBlocks, type MarkdownBlock
 import InlineMarkdownText from "../markdown/InlineMarkdownText.vue";
 import { normalizeLocalLinkHref } from "../utils/local-link";
 import { textContentSignature } from "../utils/text-signature";
+import { sliceNaturalSentencePrefix } from "../utils/text-slicing";
 import { createToolCallPresentation } from "../utils/tool-call-presentation";
 import { buildToolcallPreviewMap, parseToolCallResultStatus } from "../utils/toolcall-preview";
 import { generateShareFromMessageIds } from "../utils/share-generator";
@@ -570,7 +636,6 @@ import ChatBubbleShell from "./ChatBubbleShell.vue";
 import ChatAttachmentItem from "./ChatAttachmentItem.vue";
 import PlainMarkdownRenderer from "./PlainMarkdownRenderer.vue";
 import AnimatedCountText from "./AnimatedCountText.vue";
-import ExpandableText from "../../shared/components/ExpandableText.vue";
 
 initKatex();
 
@@ -1300,43 +1365,114 @@ function onActivityItemExpandedChange(item: ChatActivityItem, expanded: boolean)
   };
 }
 
+function toggleReasoningItemExpanded(item: ChatActivityItem): void {
+  const current = activityItemExpanded(item);
+  onActivityItemExpandedChange(item, !current);
+}
+
+function onReasoningHeaderClick(item: ChatActivityItem, event: MouseEvent): void {
+  if (props.selectionModeEnabled || !activityItemCanExpand(item)) return;
+  if (window.getSelection()?.toString().trim()) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('button, a, input, textarea, select, [data-selection-ignore="true"]')) {
+    return;
+  }
+  toggleReasoningItemExpanded(item);
+}
+
+function onReasoningClampedBodyClick(item: ChatActivityItem): void {
+  if (props.selectionModeEnabled || activityItemExpanded(item)) return;
+  if (window.getSelection()?.toString().trim()) return;
+  toggleReasoningItemExpanded(item);
+}
+
+const reasoningItemStuckKeys = ref<Set<string>>(new Set());
+
+function isReasoningItemStuck(item: ChatActivityItem): boolean {
+  return reasoningItemStuckKeys.value.has(activityItemKey(item));
+}
+
+const stickySentinelObservers = new Map<string, IntersectionObserver>();
+
+function findScrollContainer(element: HTMLElement | null): HTMLElement | null {
+  if (!element) return null;
+  // 严格在自身祖先树中寻找主聊天滚动容器，若未挂载则在所属 document 中回退查找
+  return (
+    (element.closest(".ecall-chat-scroll-container") as HTMLElement | null) ||
+    (element.ownerDocument?.querySelector(".ecall-chat-scroll-container") as HTMLElement | null)
+  );
+}
+
+function bindStickySentinel(key: string, el: HTMLElement | null): void {
+  const existing = stickySentinelObservers.get(key);
+  if (existing) {
+    existing.disconnect();
+    stickySentinelObservers.delete(key);
+  }
+  if (!el) {
+    if (reasoningItemStuckKeys.value.has(key)) {
+      const next = new Set(reasoningItemStuckKeys.value);
+      next.delete(key);
+      reasoningItemStuckKeys.value = next;
+    }
+    return;
+  }
+
+  if (typeof IntersectionObserver === "undefined") return;
+  // 严格向上查找自身所属的局部滚动容器，未找到时自动回退为 null (顶层浏览器视口)
+  const scrollRoot = findScrollContainer(el);
+
+  const observer = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        const rootTop = entry.rootBounds ? entry.rootBounds.top : 0;
+        const stuck = !entry.isIntersecting && entry.boundingClientRect.top <= rootTop;
+        const currentHas = reasoningItemStuckKeys.value.has(key);
+        if (stuck !== currentHas) {
+          const next = new Set(reasoningItemStuckKeys.value);
+          if (stuck) next.add(key);
+          else next.delete(key);
+          reasoningItemStuckKeys.value = next;
+        }
+      }
+    },
+    {
+      root: scrollRoot,
+      rootMargin: "12px 0px 0px 0px",
+      threshold: 0,
+    },
+  );
+
+  observer.observe(el);
+  stickySentinelObservers.set(key, observer);
+}
+
 function activityItemText(item: ChatActivityItem): string {
   if (item.kind === "content") return stripToolcallMarkers(item.text);
   if (item.kind === "reasoning") return String(item.text || "");
   return "";
 }
 
+const reasoningSummaryAvailableWidth = inject<Ref<number>>(
+  "reasoningSummaryAvailableWidth",
+  ref(480)
+);
+
+const activityTextPartsCache = new WeakMap<
+  ChatActivityItem,
+  { text: string; availableWidth: number; parts: { summary: string; remaining: string } }
+>();
+
 function activityItemTextParts(item: ChatActivityItem): { summary: string; remaining: string } {
   const text = activityItemText(item);
-  const lineBreakIndex = text.search(/\r\n|\n|\r/);
-  if (lineBreakIndex >= 0) {
-    const lineBreakLength = text.startsWith("\r\n", lineBreakIndex) ? 2 : 1;
-    return {
-      summary: text.slice(0, lineBreakIndex),
-      remaining: text.slice(lineBreakIndex + lineBreakLength),
-    };
+  const availableWidth = reasoningSummaryAvailableWidth.value;
+  const cached = activityTextPartsCache.get(item);
+  if (cached && cached.text === text && cached.availableWidth === availableWidth) {
+    return cached.parts;
   }
-  if (text.length <= 60) {
-    return { summary: text, remaining: "" };
-  }
-  const punctuationRegex = /[。！？；.!?;]/g;
-  let match: RegExpExecArray | null = null;
-  let splitIndex = -1;
-  while ((match = punctuationRegex.exec(text)) !== null) {
-    if (match.index >= 20 && match.index <= 60) {
-      splitIndex = match.index + 1;
-    } else if (match.index > 60) {
-      if (splitIndex < 0) splitIndex = match.index + 1;
-      break;
-    }
-  }
-  if (splitIndex < 0) {
-    splitIndex = 60;
-  }
-  return {
-    summary: text.slice(0, splitIndex),
-    remaining: text.slice(splitIndex),
-  };
+  const parts = sliceNaturalSentencePrefix(text, { availableWidth });
+  activityTextPartsCache.set(item, { text, availableWidth, parts });
+  return parts;
 }
 
 function activityItemRemainingText(item: ChatActivityItem): string {
@@ -1344,7 +1480,9 @@ function activityItemRemainingText(item: ChatActivityItem): string {
 }
 
 function activityItemCanExpand(item: ChatActivityItem): boolean {
-  return item.kind === "tool" && !!activityToolArgsText(item);
+  if (item.kind === "tool") return !!activityToolArgsText(item);
+  if (item.kind === "reasoning") return !!activityItemRemainingText(item).trim();
+  return false;
 }
 
 function stripToolcallMarkers(text: string): string {
@@ -1925,6 +2063,9 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  stickySentinelObservers.forEach((obs) => obs.disconnect());
+  stickySentinelObservers.clear();
+  reasoningItemStuckKeys.value = new Set();
   teardownStreamingObserver();
   clearStreamingReleaseTimer();
   closeContextMenu();
@@ -1997,6 +2138,29 @@ function openAttachmentPath(path: string) {
 /* 条目 details 原生开合：chevron 旋转由 details[open] 驱动，不进 Vue 状态 */
 .ecall-activity-timeline details[open] .ecall-activity-chevron {
   transform: rotate(180deg);
+}
+
+.ecall-reasoning-sticky-fade {
+  background: linear-gradient(to bottom, var(--color-base-200) 0%, transparent 100%);
+}
+
+.ecall-reasoning-body--clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+  position: relative;
+  /* 双保底：基于 line-height: 1.625 (leading-relaxed) 随字号缩放，绝不在文字中间切断 */
+  max-height: calc(4 * 1.625em);
+}
+
+.ecall-reasoning-body--expanded {
+  max-height: none;
+  overflow: visible;
+}
+
+.ecall-reasoning-clamped-fade {
+  background: linear-gradient(to bottom, transparent 0%, var(--color-base-200) 100%);
 }
 
 :deep(.ecall-activity-timeline .ecall-plain-markdown-markdown > :first-child) {
