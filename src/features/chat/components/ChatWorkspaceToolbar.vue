@@ -148,17 +148,6 @@
               </li>
               <li>
                 <label class="flex cursor-pointer items-center justify-between gap-3 px-2 py-1.5">
-                  <span class="text-sm">{{ t("appearance.chatBubbleSegmentedMarkdown") }}</span>
-                  <input
-                    :checked="segmentedMarkdownEnabled"
-                    type="checkbox"
-                    class="toggle toggle-sm"
-                    @change="setSegmentedMarkdownEnabled(($event.target as HTMLInputElement).checked)"
-                  />
-                </label>
-              </li>
-              <li>
-                <label class="flex cursor-pointer items-center justify-between gap-3 px-2 py-1.5">
                   <span class="text-sm">{{ t("appearance.chatBubbleFullTime") }}</span>
                   <input
                     :checked="chatTimeDisplayMode === 'absolute'"
@@ -320,11 +309,9 @@ const { t } = useI18n();
 const { ideBridgeFileTagsEnabled, setIdeBridgeFileTagsEnabled } = useChatComposerAppearance();
 const {
   assistantBubbleBackgroundEnabled,
-  segmentedMarkdownEnabled,
   chatTimeDisplayMode,
   markdownLayout,
   setAssistantBubbleBackgroundEnabled,
-  setSegmentedMarkdownEnabled,
   setChatTimeDisplayMode,
   setChatMarkdownLayout,
 } = useChatMessageAppearance();

@@ -21,7 +21,8 @@ type ChatMessageAppearancePayload = {
 };
 
 const assistantBubbleBackgroundEnabled = ref(readBooleanPreferenceDefault(CHAT_BUBBLE_BACKGROUND_STORAGE_KEY, true));
-const segmentedMarkdownEnabled = ref(readBooleanPreferenceDefault(CHAT_SEGMENTED_MARKDOWN_STORAGE_KEY, true));
+/** 分段入口已隐藏，运行时固定开启；关闭路径仍保留在渲染层 */
+const segmentedMarkdownEnabled = ref(true);
 const chatTimeDisplayMode = ref<ChatTimeDisplayMode>(readChatTimeDisplayModePreference());
 const markdownLayout = ref<ChatMarkdownLayout>(readMarkdownLayoutPreference());
 let initialized = false;
@@ -78,9 +79,8 @@ function applyPayload(payload: ChatMessageAppearancePayload | undefined) {
   if (typeof payload?.assistantBubbleBackgroundEnabled === "boolean") {
     assistantBubbleBackgroundEnabled.value = payload.assistantBubbleBackgroundEnabled;
   }
-  if (typeof payload?.segmentedMarkdownEnabled === "boolean") {
-    segmentedMarkdownEnabled.value = payload.segmentedMarkdownEnabled;
-  }
+  // 忽略外部传入的关闭值，避免旧窗口把分段关掉
+  segmentedMarkdownEnabled.value = true;
   if (payload?.chatTimeDisplayMode === "absolute" || payload?.chatTimeDisplayMode === "relative") {
     chatTimeDisplayMode.value = payload.chatTimeDisplayMode;
   }
@@ -92,7 +92,8 @@ function applyPayload(payload: ChatMessageAppearancePayload | undefined) {
 
 function restoreFromStorage() {
   assistantBubbleBackgroundEnabled.value = readBooleanPreferenceDefault(CHAT_BUBBLE_BACKGROUND_STORAGE_KEY, true);
-  segmentedMarkdownEnabled.value = readBooleanPreferenceDefault(CHAT_SEGMENTED_MARKDOWN_STORAGE_KEY, true);
+  segmentedMarkdownEnabled.value = true;
+  persistBooleanPreference(CHAT_SEGMENTED_MARKDOWN_STORAGE_KEY, true);
   chatTimeDisplayMode.value = readChatTimeDisplayModePreference();
   markdownLayout.value = readMarkdownLayoutPreference();
   applyMarkdownLayoutClass(markdownLayout.value);
@@ -140,9 +141,9 @@ export function useChatMessageAppearance() {
     emitAppearanceChanged();
   }
 
-  function setSegmentedMarkdownEnabled(enabled: boolean) {
-    segmentedMarkdownEnabled.value = enabled;
-    persistBooleanPreference(CHAT_SEGMENTED_MARKDOWN_STORAGE_KEY, enabled);
+  function setSegmentedMarkdownEnabled(_enabled: boolean) {
+    segmentedMarkdownEnabled.value = true;
+    persistBooleanPreference(CHAT_SEGMENTED_MARKDOWN_STORAGE_KEY, true);
     emitAppearanceChanged();
   }
 

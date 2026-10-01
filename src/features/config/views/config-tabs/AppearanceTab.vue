@@ -63,17 +63,6 @@
         />
       </label>
     </template>
-    <template #row-chat-bubble-markdown>
-      <label class="flex min-w-0 cursor-pointer items-center justify-between gap-4">
-        <span class="text-sm">{{ t("appearance.chatBubbleSegmentedMarkdown") }}</span>
-        <input
-          :checked="segmentedMarkdownEnabled"
-          type="checkbox"
-          class="toggle toggle-sm toggle-primary shrink-0"
-          @change="setSegmentedMarkdownEnabled(($event.target as HTMLInputElement).checked)"
-        />
-      </label>
-    </template>
     <template #row-chat-bubble-time>
       <label class="flex min-w-0 cursor-pointer items-center justify-between gap-4">
         <span class="text-sm">{{ t("appearance.chatBubbleFullTime") }}</span>
@@ -308,7 +297,6 @@ const templateGroups = computed<ConfigTemplateGroup[]>(() => [
     title: t("appearance.chatBubble"),
     rows: [
       { key: "chat-bubble-background", items: [] },
-      { key: "chat-bubble-markdown", items: [] },
       { key: "chat-bubble-time", items: [] },
       { key: "chat-bubble-markdown-layout", items: [] },
     ],
@@ -359,11 +347,9 @@ const {
 } = useMarkdownAppearance();
 const {
   assistantBubbleBackgroundEnabled,
-  segmentedMarkdownEnabled,
   chatTimeDisplayMode,
   markdownLayout,
   setAssistantBubbleBackgroundEnabled,
-  setSegmentedMarkdownEnabled,
   setChatTimeDisplayMode,
   setChatMarkdownLayout,
 } = useChatMessageAppearance();
