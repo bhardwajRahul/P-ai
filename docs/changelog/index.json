@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-10-01T00:58:38.435Z",
-  "latestVersion": "v0.96.0",
+  "generatedAt": "2026-10-01T03:43:17.820Z",
+  "latestVersion": "v0.96.1",
   "releases": [
+    {
+      "version": "v0.96.1",
+      "path": "docs/changelog/releases/v0.96.1.md",
+      "summary": "**修复在追问输入框、搜索框、弹窗输入框里粘贴文本会被写进主对话框的问题**：此前只有在主对话框输入框里粘贴才正常，在其它输入框粘贴文字会被误判、落到主对话框；现在焦点在哪个输入框，粘贴就落在哪个输入框。"
+    },
     {
       "version": "v0.96.0",
       "path": "docs/changelog/releases/v0.96.0.md",
