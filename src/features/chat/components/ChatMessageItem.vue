@@ -214,6 +214,8 @@
                             :text-class="activityItemDetailClass(item)"
                             :expanded="activityItemExpanded(item)"
                             :follow="activityItemFollowsStream(item)"
+                            :preview-lines="4"
+                            :clickable-header="!props.selectionModeEnabled"
                             @update:expanded="onActivityItemExpandedChange(item, $event)"
                           >
                             <template #default="{ text }">
@@ -1305,12 +1307,38 @@ function activityItemText(item: ChatActivityItem): string {
 function activityItemTextParts(item: ChatActivityItem): { summary: string; remaining: string } {
   const text = activityItemText(item);
   const lineBreakIndex = text.search(/\r\n|\n|\r/);
-  if (lineBreakIndex < 0) return { summary: text, remaining: "" };
-  const lineBreakLength = text.startsWith("\r\n", lineBreakIndex) ? 2 : 1;
+  if (lineBreakIndex >= 0) {
+    const lineBreakLength = text.startsWith("\r\n", lineBreakIndex) ? 2 : 1;
+    return {
+      summary: text.slice(0, lineBreakIndex),
+      remaining: text.slice(lineBreakIndex + lineBreakLength),
+    };
+  }
+  if (text.length <= 60) {
+    return { summary: text, remaining: "" };
+  }
+  const punctuationRegex = /[。！？；.!?;]/g;
+  let match: RegExpExecArray | null = null;
+  let splitIndex = -1;
+  while ((match = punctuationRegex.exec(text)) !== null) {
+    if (match.index >= 20 && match.index <= 60) {
+      splitIndex = match.index + 1;
+    } else if (match.index > 60) {
+      if (splitIndex < 0) splitIndex = match.index + 1;
+      break;
+    }
+  }
+  if (splitIndex < 0) {
+    splitIndex = 60;
+  }
   return {
-    summary: text.slice(0, lineBreakIndex),
-    remaining: text.slice(lineBreakIndex + lineBreakLength),
+    summary: text.slice(0, splitIndex),
+    remaining: text.slice(splitIndex),
   };
+}
+
+function activityItemRemainingText(item: ChatActivityItem): string {
+  return activityItemTextParts(item).remaining;
 }
 
 function activityItemCanExpand(item: ChatActivityItem): boolean {
