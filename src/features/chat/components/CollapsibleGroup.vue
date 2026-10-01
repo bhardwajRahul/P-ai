@@ -4,7 +4,7 @@
       role="button"
       tabindex="0"
       :draggable="draggable"
-      class="group/section relative sticky top-0 z-20 mx-1 flex min-h-9 select-none items-center gap-2 rounded-lg bg-base-200 px-2.5 py-1 text-left text-sm text-base-content/60 transition-colors hover:text-base-content"
+      class="group/section relative sticky top-0 z-20 mx-1 flex min-h-9 select-none items-center gap-2 rounded-lg bg-base-200 px-2.5 py-1 text-left text-sm text-base-content/80 transition-colors hover:text-base-content"
       :title="title"
       @click="toggle"
       @contextmenu.stop.prevent="collapseAll"
@@ -41,10 +41,10 @@
         class="h-4 w-4 shrink-0"
       />
       <span class="min-w-0 truncate">{{ title }}</span>
-      <span v-if="count !== undefined" class="shrink-0 tabular-nums text-base-content/45">{{ count }}</span>
+      <span v-if="count !== undefined" class="shrink-0 tabular-nums text-base-content/80">{{ count }}</span>
       <ChevronRight
         v-if="avatarUrl"
-        class="ml-auto h-4 w-4 shrink-0 text-base-content/40 transition-transform duration-200 ease-out"
+        class="ml-auto h-4 w-4 shrink-0 text-base-content/80 transition-transform duration-200 ease-out"
         :class="collapsed ? '' : 'rotate-90'"
       />
       <slot name="actions" />
