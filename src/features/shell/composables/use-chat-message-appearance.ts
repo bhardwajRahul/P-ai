@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { emitTransportEvent, onTransportNotification } from "../../../services/tauri-api";
 
 const CHAT_BUBBLE_BACKGROUND_STORAGE_KEY = "easy-call.chat.bubble-background.v1";
+const CHAT_PROCESS_MESSAGES_FOLDED_STORAGE_KEY = "easy-call.chat.process-messages-folded.v1";
 const CHAT_SEGMENTED_MARKDOWN_STORAGE_KEY = "easy-call.chat.segmented-markdown.v1";
 const CHAT_TIME_DISPLAY_MODE_STORAGE_KEY = "easy-call.chat.time-display-mode.v1";
 const CHAT_MARKDOWN_LAYOUT_STORAGE_KEY = "easy-call.chat.markdown-layout.v1";
@@ -15,12 +16,14 @@ const CHAT_MARKDOWN_LAYOUT_CLASSES: ChatMarkdownLayout[] = ["compact", "comforta
 
 type ChatMessageAppearancePayload = {
   assistantBubbleBackgroundEnabled?: boolean;
+  processMessagesFolded?: boolean;
   segmentedMarkdownEnabled?: boolean;
   chatTimeDisplayMode?: ChatTimeDisplayMode;
   markdownLayout?: ChatMarkdownLayout;
 };
 
 const assistantBubbleBackgroundEnabled = ref(readBooleanPreferenceDefault(CHAT_BUBBLE_BACKGROUND_STORAGE_KEY, true));
+const processMessagesFolded = ref(readBooleanPreferenceDefault(CHAT_PROCESS_MESSAGES_FOLDED_STORAGE_KEY, true));
 /** 分段入口已隐藏，运行时固定开启；关闭路径仍保留在渲染层 */
 const segmentedMarkdownEnabled = ref(true);
 const chatTimeDisplayMode = ref<ChatTimeDisplayMode>(readChatTimeDisplayModePreference());
@@ -79,6 +82,9 @@ function applyPayload(payload: ChatMessageAppearancePayload | undefined) {
   if (typeof payload?.assistantBubbleBackgroundEnabled === "boolean") {
     assistantBubbleBackgroundEnabled.value = payload.assistantBubbleBackgroundEnabled;
   }
+  if (typeof payload?.processMessagesFolded === "boolean") {
+    processMessagesFolded.value = payload.processMessagesFolded;
+  }
   // 忽略外部传入的关闭值，避免旧窗口把分段关掉
   segmentedMarkdownEnabled.value = true;
   if (payload?.chatTimeDisplayMode === "absolute" || payload?.chatTimeDisplayMode === "relative") {
@@ -92,6 +98,7 @@ function applyPayload(payload: ChatMessageAppearancePayload | undefined) {
 
 function restoreFromStorage() {
   assistantBubbleBackgroundEnabled.value = readBooleanPreferenceDefault(CHAT_BUBBLE_BACKGROUND_STORAGE_KEY, true);
+  processMessagesFolded.value = readBooleanPreferenceDefault(CHAT_PROCESS_MESSAGES_FOLDED_STORAGE_KEY, true);
   segmentedMarkdownEnabled.value = true;
   persistBooleanPreference(CHAT_SEGMENTED_MARKDOWN_STORAGE_KEY, true);
   chatTimeDisplayMode.value = readChatTimeDisplayModePreference();
@@ -102,6 +109,7 @@ function restoreFromStorage() {
 function handleStorageEvent(event: StorageEvent) {
   if (
     event.key !== CHAT_BUBBLE_BACKGROUND_STORAGE_KEY
+    && event.key !== CHAT_PROCESS_MESSAGES_FOLDED_STORAGE_KEY
     && event.key !== CHAT_SEGMENTED_MARKDOWN_STORAGE_KEY
     && event.key !== CHAT_TIME_DISPLAY_MODE_STORAGE_KEY
     && event.key !== CHAT_MARKDOWN_LAYOUT_STORAGE_KEY
@@ -124,6 +132,7 @@ export function initChatMessageAppearance() {
 function emitAppearanceChanged() {
   void emitTransportEvent("chatMessageAppearance.changed", {
     assistantBubbleBackgroundEnabled: assistantBubbleBackgroundEnabled.value,
+    processMessagesFolded: processMessagesFolded.value,
     segmentedMarkdownEnabled: segmentedMarkdownEnabled.value,
     chatTimeDisplayMode: chatTimeDisplayMode.value,
     markdownLayout: markdownLayout.value,
@@ -138,6 +147,12 @@ export function useChatMessageAppearance() {
   function setAssistantBubbleBackgroundEnabled(enabled: boolean) {
     assistantBubbleBackgroundEnabled.value = enabled;
     persistBooleanPreference(CHAT_BUBBLE_BACKGROUND_STORAGE_KEY, enabled);
+    emitAppearanceChanged();
+  }
+
+  function setProcessMessagesFolded(enabled: boolean) {
+    processMessagesFolded.value = enabled;
+    persistBooleanPreference(CHAT_PROCESS_MESSAGES_FOLDED_STORAGE_KEY, enabled);
     emitAppearanceChanged();
   }
 
@@ -162,10 +177,12 @@ export function useChatMessageAppearance() {
 
   return {
     assistantBubbleBackgroundEnabled,
+    processMessagesFolded,
     segmentedMarkdownEnabled,
     chatTimeDisplayMode,
     markdownLayout,
     setAssistantBubbleBackgroundEnabled,
+    setProcessMessagesFolded,
     setSegmentedMarkdownEnabled,
     setChatTimeDisplayMode,
     setChatMarkdownLayout,

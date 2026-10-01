@@ -2715,6 +2715,7 @@
     "markdownFontScaleHeavy": "Bold",
     "chatBubble": "Bubble",
     "chatBubbleBackground": "Background",
+    "chatProcessMessagesFolded": "Fold process messages",
     "chatBubbleSegmentedMarkdown": "Segmented",
     "chatBubbleFullTime": "Full time",
     "chatBubbleMarkdownLayout": "Markdown layout",

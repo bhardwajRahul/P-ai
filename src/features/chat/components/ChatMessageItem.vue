@@ -741,6 +741,7 @@ const { t } = useI18n();
 const { animateEnter, animateLeave, cleanupAnimation } = useCollapseTransition();
 const {
   assistantBubbleBackgroundEnabled,
+  processMessagesFolded,
   segmentedMarkdownEnabled,
   chatTimeDisplayMode,
 } = useChatMessageAppearance();
@@ -800,7 +801,9 @@ const processSegmentsExpanded = ref(false);
 watch(() => props.block.id, () => {
   processSegmentsExpanded.value = false;
 });
-const collapsibleProcessPieceCount = computed(() => Math.max(0, assistantMarkdownPieces.value.length - 1));
+const collapsibleProcessPieceCount = computed(() =>
+  processMessagesFolded.value ? Math.max(0, assistantMarkdownPieces.value.length - 1) : 0,
+);
 const processSegmentsFolded = computed(() => collapsibleProcessPieceCount.value > 0 && !processSegmentsExpanded.value);
 const visibleAssistantPieces = computed(() => {
   const pieces = assistantMarkdownPieces.value.map((piece, index) => ({ ...piece, index }));

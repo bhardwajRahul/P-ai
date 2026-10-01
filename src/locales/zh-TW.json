@@ -2715,6 +2715,7 @@
     "markdownFontScaleHeavy": "粗體",
     "chatBubble": "氣泡",
     "chatBubbleBackground": "背景",
+    "chatProcessMessagesFolded": "摺疊過程訊息",
     "chatBubbleSegmentedMarkdown": "分段",
     "chatBubbleFullTime": "完整時間",
     "chatBubbleMarkdownLayout": "Markdown 版面",
