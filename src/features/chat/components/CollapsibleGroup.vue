@@ -4,7 +4,7 @@
       role="button"
       tabindex="0"
       :draggable="draggable"
-      class="group/section relative sticky top-0 z-20 mx-1 flex min-h-9 select-none items-center gap-2 rounded-lg bg-base-200 p-1 text-left text-sm text-base-content/60 transition-colors hover:text-base-content"
+      class="group/section relative sticky top-0 z-20 mx-1 flex min-h-9 select-none items-center gap-2 rounded-lg bg-base-200 px-2.5 py-1 text-left text-sm text-base-content/60 transition-colors hover:text-base-content"
       :title="title"
       @click="toggle"
       @contextmenu.stop.prevent="collapseAll"

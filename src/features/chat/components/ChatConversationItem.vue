@@ -8,7 +8,7 @@
   >
     <!-- 会话项统一模板：level 决定差异（full 头像 / sim+mini 无左指示，full+sim 两行 / mini 一行） -->
     <div
-      class="flex items-center gap-2 rounded-lg p-1 text-left transition-[background-color,box-shadow,transform] duration-200 ease-out"
+      class="group/item flex items-center gap-2 rounded-lg px-2.5 py-1 text-left transition-[background-color,box-shadow,transform] duration-200 ease-out"
       :class="[
         isActiveConversation ? 'bg-base-300' : 'bg-transparent hover:bg-base-300/60',
         isConversationVisuallyOccupied ? 'opacity-60' : '',
@@ -66,7 +66,11 @@
                 @keydown.esc.prevent="cancelTitleEdit"
                 @blur="commitTitleEdit"
               />
-              <div v-else class="min-w-0 truncate text-sm font-medium">
+              <div
+                v-else
+                class="min-w-0 truncate text-sm font-medium group-hover/item:text-base-content"
+                :class="isActiveConversation ? 'text-base-content' : 'text-base-content/80'"
+              >
                 {{ displayTitle }}
               </div>
             </div>

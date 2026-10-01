@@ -20,6 +20,19 @@
             @layout-change="scheduleConversationListScrollbarUpdate"
           />
           <template v-else>
+            <button
+              v-if="activeConversationTab === 'local'"
+              type="button"
+              class="mx-1 mb-1 flex min-h-9 w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-2.5 py-1 text-left text-sm transition-colors"
+              :class="activeConversationIsDraft
+                ? 'bg-base-300 text-base-content'
+                : 'text-base-content hover:bg-base-300/70 active:bg-base-300'"
+              :title="t('chat.newConversation')"
+              @click="createConversationFromSidebar"
+            >
+              <SquarePen class="h-4 w-4" />
+              <span>{{ t("chat.newConversation") }}</span>
+            </button>
             <template v-for="(section, sectionIndex) in displayedConversationSections" :key="section.key">
             <div
               v-if="sectionIndex === conversationGroupingHeaderIndex && conversationGroupingHeaderIndex >= 0"
@@ -88,17 +101,17 @@
             <template v-for="item in section.visibleItems" :key="item.conversationId">
               <div
                 v-if="section.recentDividers?.[String(item.conversationId || '').trim()]"
-                class="mx-1 pb-0.5 pt-1.5"
+                class="px-4 pb-0.5 pt-2"
               >
                 <button
                   type="button"
-                  class="flex w-full items-center gap-2 px-1 text-left text-caption text-base-content/45 transition-colors hover:text-base-content/80"
+                  class="group flex w-full items-center gap-2 text-left text-caption text-base-content/40 transition-colors hover:text-base-content/75"
                   :title="t('chat.revealConversationSection')"
                   @click.stop="revealRecentSourceSection(section.recentDividers[String(item.conversationId || '').trim()])"
                 >
-                  <span class="h-px min-w-2 flex-1 rounded-full bg-base-content/15" aria-hidden="true"></span>
-                  <span class="max-w-[70%] truncate">{{ section.recentDividers[String(item.conversationId || "").trim()].label }}</span>
-                  <span class="h-px min-w-2 flex-1 rounded-full bg-base-content/15" aria-hidden="true"></span>
+                  <span class="h-px min-w-2 flex-1 rounded-full bg-linear-to-r from-transparent to-base-content/15" aria-hidden="true"></span>
+                  <span class="shrink-0 font-medium">{{ section.recentDividers[String(item.conversationId || "").trim()].label }}</span>
+                  <span class="h-px min-w-2 flex-1 rounded-full bg-linear-to-r from-base-content/15 to-transparent" aria-hidden="true"></span>
                 </button>
               </div>
               <ChatConversationItem
@@ -148,7 +161,7 @@
               <button
                 v-if="section.hiddenItemCount > 0"
                 type="button"
-                class="group flex h-7.5 items-center gap-2 rounded-lg pl-1 pr-2 text-left text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
+                class="group flex h-7.5 items-center gap-2 rounded-lg px-2.5 text-left text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
                 :title="t('chat.loadMore')"
                 @click.stop="loadMoreConversationsInSection(section.key)"
               >
@@ -241,6 +254,19 @@
             @click="showSearch = !showSearch"
           >
             <Search class="h-4 w-4" />
+          </button>
+          <button
+            v-for="item in systemNotificationItems"
+            :key="`system-notification-${item.conversationId}`"
+            type="button"
+            class="btn btn-ghost btn-xs h-7 min-h-7 w-7 min-w-7 p-0"
+            :class="isActiveSystemNotificationConversation(item)
+              ? 'bg-base-100 text-base-content'
+              : 'text-base-content/55'"
+            :title="conversationDisplayTitle(item)"
+            @click="selectSystemNotificationConversation(item)"
+          >
+            <Bell class="h-4 w-4" />
           </button>
         </div>
       </div>
@@ -370,7 +396,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 import { useI18n } from "vue-i18n";
-import { Archive, Check, ChevronDown, Folder, LayoutList, Moon, Search, Settings, SquarePen, Sun, UserRound } from "@lucide/vue";
+import { Archive, Bell, Check, ChevronDown, Folder, LayoutList, Moon, Search, Settings, SquarePen, Sun, UserRound } from "@lucide/vue";
 import CollapsibleGroup from "./CollapsibleGroup.vue";
 import ChatConversationItem from "./ChatConversationItem.vue";
 import type { ApiConfigItem, ChatConversationOverviewItem, ConversationPreviewMessage } from "../../../types/app";
@@ -710,8 +736,39 @@ const filteredConversationSections = computed(() => {
     .filter((section) => section.items.length > 0);
 });
 
+/** 系统通知会话不再作为可折叠分组，改为右下角操作栏的铃铛图标按钮。
+ *  直接取原始会话列表，不依赖当前标签的分组结果——远程标签下不会生成 pinned 分组。 */
+const systemNotificationItems = computed(() => {
+  const query = normalizedConversationSearchQuery.value;
+  return props.items.filter((item) => {
+    if (!item.isSystemNotificationConversation) return false;
+    return query ? conversationMatchesSearch(item, query) : true;
+  });
+});
+
+/** 当前打开的是会话草稿时，高亮「新建会话」按钮 */
+const activeConversationIsDraft = computed(() => {
+  const activeId = String(props.activeConversationId || "").trim();
+  if (!activeId) return false;
+  return props.items.some((item) => String(item.conversationId || "").trim() === activeId && !!item.isDraft);
+});
+
+function isActiveSystemNotificationConversation(item: ChatConversationOverviewItem): boolean {
+  const itemId = String(item.conversationId || "").trim();
+  return !!itemId && itemId === String(props.activeConversationId || "").trim();
+}
+
+/** 草稿会话不在侧栏列表中显示，只通过顶部「新建会话」按钮表达 */
+const visibleConversationSections = computed(() =>
+  filteredConversationSections.value
+    .map((section) => ({ ...section, items: section.items.filter((item) => !item.isDraft) }))
+    .filter((section) => section.items.length > 0),
+);
+
 const displayedConversationSections = computed<DisplayConversationSection[]>(() =>
-  filteredConversationSections.value.map((section) => buildDisplayedConversationSection(section)),
+  visibleConversationSections.value
+    .filter((section) => section.key !== "pinned")
+    .map((section) => buildDisplayedConversationSection(section)),
 );
 
 watch(
@@ -1152,6 +1209,20 @@ function scheduleConversationListScrollbarUpdate() {
 
 function handleConversationTabTransitionSettled() {
   scheduleConversationListScrollbarUpdate();
+}
+
+function createConversationFromSidebar() {
+  window.dispatchEvent(new CustomEvent("easy-call:open-draft-conversation"));
+}
+
+function selectSystemNotificationConversation(item: ChatConversationOverviewItem) {
+  const conversationId = String(item.conversationId || "").trim();
+  if (!conversationId) return;
+  emit("select", {
+    conversationId,
+    kind: item.kind,
+    remoteContactId: String(item.remoteContactId || "").trim() || undefined,
+  });
 }
 
 function createConversationInSection(section: ConversationSection) {
