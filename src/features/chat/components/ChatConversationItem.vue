@@ -69,7 +69,7 @@
               <div
                 v-else
                 class="min-w-0 truncate text-sm font-medium group-hover/item:text-base-content"
-                :class="isActiveConversation ? 'text-base-content' : 'text-base-content/80'"
+                :class="isActiveConversation ? 'text-base-content' : 'text-base-content/100'"
               >
                 {{ displayTitle }}
               </div>
