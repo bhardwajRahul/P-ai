@@ -60,15 +60,15 @@
               :class="showActivityPanel(block) ? 'hover:bg-base-200 cursor-pointer' : 'cursor-default'"
             >
               <span class="flex min-w-0 flex-1 items-center gap-1.5">
-                <span class="shrink-0">
-                  <template v-if="showActivityPanel(block)">
-                    {{ activityStatusText(block) }}<AnimatedCountText :target="block.activityReasoningCharCount || 0" />
-                  </template>
-                  <template v-else>{{ t("chat.messageItem.notThought") }}</template>
+                <span v-if="hasActivityReasoning(block)" class="shrink-0">
+                  {{ t("chat.messageItem.thought") }} <AnimatedCountText :target="block.activityReasoningCharCount || 0" />
                 </span>
-                <span v-if="showActivityPanel(block) && activityToolCountsLabel(block)" class="inline-flex h-3 items-center text-base-content/40">·</span>
+                <span v-else-if="!activityToolCountsLabel(block)" class="shrink-0">
+                  {{ t("chat.messageItem.notThought") }}
+                </span>
+                <span v-if="hasActivityReasoning(block) && activityToolCountsLabel(block)" class="inline-flex h-3 items-center text-base-content/40">·</span>
                 <span
-                  v-if="showActivityPanel(block) && activityToolCountsLabel(block)"
+                  v-if="activityToolCountsLabel(block)"
                   v-memo="[activityToolCountsLabel(block)]"
                   class="min-w-0 truncate text-base-content/55"
                 >
@@ -1308,14 +1308,17 @@ function closeActivityDetails(): void {
   emit("activityToggle", { blockId: String(props.block.id || ""), open: false });
 }
 
+function hasActivityReasoning(block: ChatMessageBlock): boolean {
+  return Number(block.activityReasoningCharCount || 0) > 0;
+}
+
 function activityReasoningCountLabel(block: ChatMessageBlock): string {
   const count = Number(block.activityReasoningCharCount || 0);
-  return count > 0 ? `(${count.toLocaleString("zh-CN")})` : "";
+  return count > 0 ? `（${count.toLocaleString("zh-CN")}）` : "";
 }
 
 function activityStatusText(block: ChatMessageBlock): string {
-  void block;
-  return t('chat.messageItem.thinkingAndTools');
+  return hasActivityReasoning(block) ? t("chat.messageItem.thought") : "";
 }
 
 function activityToolCountsLabel(block: ChatMessageBlock): string {

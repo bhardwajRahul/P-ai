@@ -263,9 +263,9 @@ const surfaceStyle = computed<StyleValue | undefined>(() => {
 .ecall-chat-bubble-name {
   min-width: 0;
   overflow: hidden;
-  color: color-mix(in srgb, var(--color-base-content) 86%, transparent);
+  color: color-mix(in srgb, var(--color-base-content) 80%, transparent);
   font-size: var(--app-text-xs-size);
-  font-weight: 560;
+  font-weight: 400;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
