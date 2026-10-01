@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-09-29T04:26:43.231Z",
-  "latestVersion": "v0.95.2",
+  "generatedAt": "2026-10-01T00:58:38.435Z",
+  "latestVersion": "v0.96.0",
   "releases": [
+    {
+      "version": "v0.96.0",
+      "path": "docs/changelog/releases/v0.96.0.md",
+      "summary": "**重做会话侧边栏：新增分组逻辑、重新设计界面**：分组依据改为可切换的「综合 / 项目 / 人格」三种；最近会话按来源（项目 / 频道）聚成块、块间插入可点击跳转的分割线；列表顶部新增「开启新对话」入口；系统通知会话从分组里拿出，收进右下角铃铛按钮；折叠动画重做，快速连点不再状态错乱；列表摘要不再露出反引号、星号、井号等 markdown 标记。"
+    },
     {
       "version": "v0.95.2",
       "path": "docs/changelog/releases/v0.95.2.md",
