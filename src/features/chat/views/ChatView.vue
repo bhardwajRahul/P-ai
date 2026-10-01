@@ -1240,8 +1240,8 @@ const chatStatusBanner = computed(() => {
   return baseChatStatusBanner.value;
 });
 const requestErrorTitle = computed(() => {
-  const title = t("chat.errorTitleRequest");
-  return title === "chat.errorTitleRequest" ? "请求发生错误" : title;
+  const title = t("status.errorTitleRequest");
+  return title === "status.errorTitleRequest" ? "请求发生错误" : title;
 });
 const conversationInteractionBusy = computed(() =>
   props.conversationBusy || isOrganizingContextBusy.value,

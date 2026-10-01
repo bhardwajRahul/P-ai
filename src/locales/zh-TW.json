@@ -166,6 +166,8 @@
       "holdToRecord": "按住开始录音",
       "holdRecordButton": "按住录音",
       "playRecord": "播放录音",
+      "sendMode": "發送快捷鍵",
+      "sendModeHint": "切換聊天輸入框的發送方式：Enter 或 Ctrl+Enter。",
       "builtinTabInstruction": "快捷指令",
       "builtinTabInstructionHint": "開啟快捷指令面板，快速選擇指令。",
       "builtinEscStopReplying": "打斷目前回覆",
@@ -211,6 +213,8 @@
       "emptyModelNotAllowed": "存在未填模型名的模型卡，請先填寫模型名或刪除該模型卡後再儲存。",
       "editDisplayName": "點擊修改顯示名稱",
       "displayNamePlaceholder": "輸入你想要的模型顯示名稱",
+      "renameDisplayNameTitle": "修改顯示名稱",
+      "renameDisplayNameHint": "你修改的只是顯示名稱，並不會改變你調用的模型 ID。模型 ID 變更時，顯示名稱會自動重置為新的模型 ID。",
       "expandModelCard": "展開模型卡",
       "collapseModelCard": "摺疊模型卡",
       "modelInfoTitle": "模型資訊",
@@ -650,7 +654,8 @@
       "migrateWorkspaceStageDeleting": "清理舊目錄",
       "migrateWorkspaceStageCompleted": "遷移完成",
       "migrateWorkspaceStageFailed": "遷移失敗",
-      "workspaceAlreadyExists": "同名目錄已存在，請換一個名稱"
+      "workspaceAlreadyExists": "同名目錄已存在，請換一個名稱",
+      "delete": "刪除"
     },
     "skill": {
       "title": "技能",
@@ -1901,6 +1906,8 @@
     "dropImageOrPdf": "拖放檔案（圖片/PDF 可直接多模態）",
     "attach": "新增附件",
     "send": "發送",
+    "sendModeEnter": "按 Enter 鍵發送訊息",
+    "sendModeCtrlEnter": "按 Ctrl + Enter 鍵發送訊息",
     "sendModeMenu": "切換發送快捷鍵",
     "sendModeAltS": "Alt + S 隨時可發送",
     "newConversation": "開啟新對話",
@@ -1908,6 +1915,7 @@
     "conversationList": "會話列表",
     "untitledConversation": "未命名會話",
     "mainConversationPinned": "系統通知會話始終置頂",
+    "defaultDepartment": "預設部門",
     "recentConversations": "最近會話",
     "revealConversationSection": "展開所在分組",
     "pinnedConversations": "置頂",
@@ -2192,6 +2200,7 @@
       "requestTitle": "所有目前委託累計請求步數",
       "tokenTitle": "所有目前委託累計詞元",
       "requestCountLabel": "{count}步",
+      "tokenCountLabel": "{value} 詞元",
       "emptyTitle": "目前沒有執行中的監控項目",
       "viewRunningTitle": "查看執行中：{summary}"
     },

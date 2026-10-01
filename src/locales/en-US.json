@@ -654,7 +654,8 @@
       "migrateWorkspaceStageDeleting": "Cleaning source directory",
       "migrateWorkspaceStageCompleted": "Migration completed",
       "migrateWorkspaceStageFailed": "Migration failed",
-      "workspaceAlreadyExists": "A workspace with this name already exists. Please choose a different name."
+      "workspaceAlreadyExists": "A workspace with this name already exists. Please choose a different name.",
+      "delete": "Delete"
     },
     "skill": {
       "title": "Skills",
@@ -1784,6 +1785,7 @@
     "conversationList": "Conversation List",
     "untitledConversation": "Untitled",
     "mainConversationPinned": "System notification conversation is always pinned",
+    "defaultDepartment": "Default Department",
     "recentConversations": "Recent",
     "revealConversationSection": "Reveal group",
     "pinnedConversations": "Pinned",
@@ -2208,6 +2210,7 @@
       "requestTitle": "Total request steps of current delegates",
       "tokenTitle": "Total tokens of current delegates",
       "requestCountLabel": "{count} steps",
+      "tokenCountLabel": "{value} tokens",
       "emptyTitle": "No running monitor items",
       "viewRunningTitle": "View running: {summary}"
     },

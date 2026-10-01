@@ -654,7 +654,8 @@
       "migrateWorkspaceStageDeleting": "清理旧目录",
       "migrateWorkspaceStageCompleted": "迁移完成",
       "migrateWorkspaceStageFailed": "迁移失败",
-      "workspaceAlreadyExists": "同名目录已存在，请换一个名称"
+      "workspaceAlreadyExists": "同名目录已存在，请换一个名称",
+      "delete": "删除"
     },
     "skill": {
       "title": "技能",
@@ -1915,6 +1916,7 @@
     "conversationList": "会话列表",
     "untitledConversation": "未命名会话",
     "mainConversationPinned": "系统通知会话始终置顶",
+    "defaultDepartment": "默认部门",
     "recentConversations": "最近会话",
     "revealConversationSection": "展开所在分组",
     "pinnedConversations": "置顶",
@@ -2186,6 +2188,7 @@
       "requestTitle": "所有当前委托累计请求步数",
       "tokenTitle": "所有当前委托累计词元",
       "requestCountLabel": "{count}步",
+      "tokenCountLabel": "{value} 词元",
       "emptyTitle": "当前没有运行中的监控项",
       "viewRunningTitle": "查看运行中：{summary}"
     },

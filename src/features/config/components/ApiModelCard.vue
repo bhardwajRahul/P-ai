@@ -130,7 +130,7 @@
                   <button
                     class="btn btn-xs btn-square btn-ghost"
                     type="button"
-                    :title="t('close')"
+                    :title="t('common.close')"
                     @click="modelInfoOpen = false"
                   >
                     <X class="h-3.5 w-3.5" />
