@@ -1998,6 +1998,10 @@ function openAttachmentPath(path: string) {
   transform: rotate(180deg);
 }
 
+:deep(.ecall-activity-timeline .ecall-plain-markdown-markdown > :first-child) {
+  margin-top: 0 !important;
+}
+
 .ecall-chat-message-row {
   width: 100%;
 }

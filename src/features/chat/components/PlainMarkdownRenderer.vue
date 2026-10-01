@@ -555,6 +555,14 @@ function findNextInlineMarker(
   margin: 0.25rem 0;
 }
 
+.ecall-plain-markdown-markdown > :first-child {
+  margin-top: 0;
+}
+
+.ecall-plain-markdown-markdown > :last-child {
+  margin-bottom: 0;
+}
+
 .ecall-plain-markdown-heading {
   font-weight: var(--ecall-md-heading-weight-setting, var(--app-font-strong-weight, 600));
   font-variation-settings: "wght" var(--ecall-md-heading-weight-setting, var(--app-font-strong-weight, 600));
