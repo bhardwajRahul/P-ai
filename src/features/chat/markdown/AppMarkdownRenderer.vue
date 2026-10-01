@@ -47,10 +47,7 @@
                   {{ index + 1 }}
                 </span>
                 <div class="min-w-0 whitespace-normal break-all font-normal leading-relaxed">
-                  <template v-if="splitToolcallPreviewTitle(preview).name">
-                    <span>{{ splitToolcallPreviewTitle(preview).name }}</span>
-                    <span v-if="splitToolcallPreviewTitle(preview).pathText || splitToolcallPreviewTitle(preview).rest || preview.filePath"> · </span>
-                  </template>
+                  <span v-if="splitToolcallPreviewTitle(preview).name" class="font-medium mr-1.5">{{ splitToolcallPreviewTitle(preview).name }}</span>
                   <a
                     v-if="preview.filePath"
                     href="#"
@@ -58,12 +55,9 @@
                     :data-href="preview.filePath"
                     :title="preview.filePath"
                     @click="handleToolcallFileLinkClick($event, preview.filePath)"
-                  >{{ splitToolcallPreviewTitle(preview).pathText || preview.fileLabel || preview.filePath }}</a>
-                  <template v-if="preview.filePath && splitToolcallPreviewTitle(preview).rest">
-                    <span> · {{ splitToolcallPreviewTitle(preview).rest }}</span>
-                  </template>
-                  <span v-else-if="!preview.filePath && splitToolcallPreviewTitle(preview).rest">{{ splitToolcallPreviewTitle(preview).rest }}</span>
-                  <span v-else-if="!preview.filePath && !splitToolcallPreviewTitle(preview).name">{{ preview.title || preview.label }}</span>
+                  >{{ splitToolcallPreviewTitle(preview).pathText }}</a>
+                  <span v-else>{{ splitToolcallPreviewTitle(preview).pathText }}</span>
+                  <span v-if="splitToolcallPreviewTitle(preview).rest" class="opacity-75"> · {{ splitToolcallPreviewTitle(preview).rest }}</span>
                 </div>
               </div>
               <pre
@@ -136,7 +130,15 @@ const props = defineProps<{
   streaming?: boolean;
   variant?: "chat" | "document";
   localImageBasePath?: string;
-  toolcallPreviewMap?: Record<string, { title?: string; body?: string; filePath?: string; fileLabel?: string }>;
+  toolcallPreviewMap?: Record<string, {
+    title?: string;
+    body?: string;
+    filePath?: string;
+    fileLabel?: string;
+    action?: string;
+    target?: string;
+    extra?: string;
+  }>;
 }>();
 const emit = defineEmits<{
   (e: "click", event: MouseEvent): void;
@@ -174,6 +176,9 @@ const activeToolcallPreviews = computed(() => {
         body: String(preview.body || "").trim(),
         filePath: String(preview.filePath || "").trim(),
         fileLabel: String(preview.fileLabel || preview.filePath || "").trim(),
+        action: String(preview.action || "").trim(),
+        target: String(preview.target || "").trim(),
+        extra: String(preview.extra || "").trim(),
       };
     })
     .filter((preview): preview is {
@@ -183,6 +188,9 @@ const activeToolcallPreviews = computed(() => {
       body: string;
       filePath: string;
       fileLabel: string;
+      action: string;
+      target: string;
+      extra: string;
     } => !!preview);
 });
 
@@ -208,53 +216,41 @@ function splitToolcallPreviewTitle(preview: {
   title?: string;
   filePath?: string;
   fileLabel?: string;
+  action?: string;
+  target?: string;
+  extra?: string;
 }): { name: string; rest: string; pathText: string } {
+  if (preview.action && preview.target) {
+    return {
+      name: preview.action,
+      pathText: preview.target,
+      rest: preview.extra || "",
+    };
+  }
+
   const title = String(preview.title || "").trim();
   const filePath = String(preview.filePath || "").trim();
   const fileLabel = String(preview.fileLabel || filePath).trim();
   if (!title) {
     return { name: "", rest: "", pathText: fileLabel };
   }
-  if (!filePath) {
-    const parts = title.split(" · ");
-    if (parts.length <= 1) return { name: title, rest: "", pathText: "" };
+
+  // 若标题类似 "阅读 agentStore.ts #1210-1260"，以首个空格拆分动作动词与目标文本
+  const spaceIndex = title.indexOf(" ");
+  if (spaceIndex > 0) {
+    const action = title.slice(0, spaceIndex).trim();
+    const target = title.slice(spaceIndex + 1).trim();
     return {
-      name: parts[0] || "",
-      rest: parts.slice(1).join(" · "),
-      pathText: "",
+      name: action,
+      pathText: target || fileLabel,
+      rest: preview.extra || "",
     };
   }
 
-  // title 形如 "read · E:/a.ts · offset: 150"
-  const separator = " · ";
-  const parts = title.split(separator);
-  if (parts.length === 0) return { name: title, rest: "", pathText: fileLabel };
-
-  const name = parts[0] || "";
-  const remaining = parts.slice(1);
-  // 优先匹配完整 path / label
-  let pathIndex = remaining.findIndex((part) => {
-    const text = part.trim();
-    return text === filePath || text === fileLabel || normalizeLocalLinkHref(text) === normalizeLocalLinkHref(filePath);
-  });
-  if (pathIndex < 0) {
-    // 次选：包含路径片段
-    pathIndex = remaining.findIndex((part) => part.includes(filePath) || (fileLabel && part.includes(fileLabel)));
-  }
-  if (pathIndex < 0) {
-    return {
-      name,
-      rest: remaining.join(separator),
-      pathText: fileLabel || filePath,
-    };
-  }
-
-  const pathText = remaining[pathIndex]?.trim() || fileLabel || filePath;
-  const restParts = remaining.filter((_, index) => index !== pathIndex);
   return {
-    name,
-    rest: restParts.join(separator),
-    pathText,
+    name: title,
+    pathText: fileLabel,
+    rest: preview.extra || "",
   };
 }
 

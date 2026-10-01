@@ -228,17 +228,35 @@
                         >
                           <summary class="collapse-title flex min-h-0 items-center gap-1.5 px-1 py-1 text-xs hover:bg-base-200">
                             <span
-                              class="ecall-activity-item-summary min-w-0 flex-1"
+                              class="ecall-activity-item-summary min-w-0 flex-1 inline-flex items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap"
                               :class="activityItemTitleClass(item)"
                             >
-                              <span>{{ activityItemDisplay(item).text }}</span>
+                              <template v-if="activityItemSemantic(item)">
+                                <span class="font-medium shrink-0">{{ activityItemSemantic(item)!.action }}</span>
+                                <span class="truncate">{{ activityItemSemantic(item)!.target }}</span>
+                                <span
+                                  v-if="activityItemSemantic(item)!.lineRange"
+                                  class="font-mono text-xs opacity-75 shrink-0"
+                                >{{ activityItemSemantic(item)!.lineRange }}</span>
+                                <span
+                                  v-if="activityItemSemantic(item)!.extra"
+                                  class="opacity-75 shrink-0 truncate"
+                                >{{ activityItemSemantic(item)!.extra }}</span>
+                                <span
+                                  v-if="activityItemStatusSuffix(item)"
+                                  class="opacity-75 shrink-0 font-normal"
+                                >{{ activityItemStatusSuffix(item) }}</span>
+                              </template>
+                              <template v-else>
+                                <span>{{ activityItemDisplay(item).text }}</span>
+                              </template>
                               <span
                                 v-if="activityItemDisplay(item).adds > 0"
-                                class="ml-1 shrink-0 text-success"
+                                class="ml-1 shrink-0 font-mono text-success"
                               >+{{ activityItemDisplay(item).adds }}</span>
                               <span
                                 v-if="activityItemDisplay(item).removes > 0"
-                                class="ml-1 shrink-0 text-error"
+                                class="ml-1 shrink-0 font-mono text-error"
                               >-{{ activityItemDisplay(item).removes }}</span>
                             </span>
                             <ChevronDown
@@ -279,17 +297,35 @@
                           @click.stop
                         >
                           <span
-                            class="ecall-activity-item-summary min-w-0 flex-1"
+                            class="ecall-activity-item-summary min-w-0 flex-1 inline-flex items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap"
                             :class="activityItemTitleClass(item)"
                           >
-                            <span>{{ activityItemDisplay(item).text }}</span>
+                            <template v-if="activityItemSemantic(item)">
+                              <span class="font-medium shrink-0">{{ activityItemSemantic(item)!.action }}</span>
+                              <span class="truncate">{{ activityItemSemantic(item)!.target }}</span>
+                              <span
+                                v-if="activityItemSemantic(item)!.lineRange"
+                                class="font-mono text-xs opacity-75 shrink-0"
+                              >{{ activityItemSemantic(item)!.lineRange }}</span>
+                              <span
+                                v-if="activityItemSemantic(item)!.extra"
+                                class="opacity-75 shrink-0 truncate"
+                              >{{ activityItemSemantic(item)!.extra }}</span>
+                              <span
+                                v-if="activityItemStatusSuffix(item)"
+                                class="opacity-75 shrink-0 font-normal"
+                              >{{ activityItemStatusSuffix(item) }}</span>
+                            </template>
+                            <template v-else>
+                              <span>{{ activityItemDisplay(item).text }}</span>
+                            </template>
                             <span
                               v-if="activityItemDisplay(item).adds > 0"
-                              class="ml-1 shrink-0 text-success"
+                              class="ml-1 shrink-0 font-mono text-success"
                             >+{{ activityItemDisplay(item).adds }}</span>
                             <span
                               v-if="activityItemDisplay(item).removes > 0"
-                              class="ml-1 shrink-0 text-error"
+                              class="ml-1 shrink-0 font-mono text-error"
                             >-{{ activityItemDisplay(item).removes }}</span>
                           </span>
                         </div>
@@ -626,7 +662,7 @@ import { normalizeLocalLinkHref } from "../utils/local-link";
 import { textContentSignature } from "../utils/text-signature";
 import { sliceNaturalSentencePrefix } from "../utils/text-slicing";
 import { createToolCallPresentation } from "../utils/tool-call-presentation";
-import { buildToolcallPreviewMap, parseToolCallResultStatus } from "../utils/toolcall-preview";
+import { buildToolcallPreviewMap, parseToolCallResultStatus, type ToolcallPreviewEntry } from "../utils/toolcall-preview";
 import { generateShareFromMessageIds } from "../utils/share-generator";
 import { frontendDispatchElapsedByMessageId } from "../composables/use-chat-flow-frontend-dispatch";
 import { useCollapseTransition } from "../composables/use-collapse-transition";
@@ -698,6 +734,7 @@ const {
   joinNonEmpty,
   normalizeToolCallArgs,
   toolCallDisplayName,
+  toolCallSemanticPresentation,
   toolCallSummaryText,
   toolCallTitle,
   toolTimelineText,
@@ -959,13 +996,21 @@ const assistantCreatedAtText = computed(() => {
 });
 const assistantMetaText = assistantCreatedAtText;
 const streamingHeaderStatus = computed(() => assistantStreamingHeaderStatus(props.block));
-const toolcallPreviewMap = computed<Record<string, { title: string; body: string; filePath?: string; fileLabel?: string }>>(() => {
+const toolcallPreviewMap = computed<Record<string, ToolcallPreviewEntry>>(() => {
   const previews = buildToolcallPreviewMap(props.block.activityItems, toolTimelineText("noArgs"));
   for (const item of props.block.activityItems) {
     if (item.kind !== "tool") continue;
     const toolCallId = String(item.toolCallId || "").trim();
     if (!toolCallId || !previews[toolCallId]) continue;
     previews[toolCallId].title = activityItemTitle(item);
+    const semantic = toolCallSemanticPresentation(item);
+    if (semantic) {
+      previews[toolCallId].action = semantic.action;
+      const targetWithRange = [semantic.target, semantic.lineRange].filter(Boolean).join(" ");
+      previews[toolCallId].target = targetWithRange;
+      previews[toolCallId].fileLabel = targetWithRange;
+      previews[toolCallId].extra = semantic.extra;
+    }
   }
   return previews;
 });
@@ -1538,28 +1583,27 @@ function activityItemDetailClass(item: ChatActivityItem): string {
   return props.markdownIsDark ? "ecall-activity-tool-dark" : "ecall-activity-tool";
 }
 
+function activityItemStatusSuffix(item: ChatActivityItem): string {
+  if (item.kind !== "tool" || !item.resultText) return "";
+  const status = parseToolCallResultStatus(item.resultText);
+  if (status.isDenied) return `(${t("chat.toolReview.denied") || "已拒绝"})`;
+  if (status.isFailed) return `(${t("chat.toolReview.failed") || "失败"})`;
+  return "";
+}
+
+function activityItemSemantic(item: ChatActivityItem) {
+  if (item.kind !== "tool") return null;
+  return toolCallSemanticPresentation(item);
+}
+
+
 function activityItemTitle(item: ChatActivityItem): string {
   if (item.kind === "reasoning" || item.kind === "content") {
     return activityItemTextParts(item).summary;
   }
-  const baseTitle = joinNonEmpty([
-    toolCallDisplayName(item.name),
-    toolCallSummaryText(item),
-  ]);
-  const status = parseToolCallResultStatus(item.resultText);
-  if (status.isDenied) {
-    return `${baseTitle} (${t("chat.toolReview.denied") || "已拒绝"})`;
-  }
-  if (status.isFailed) {
-    return `${baseTitle} (${t("chat.toolReview.failed") || "失败"})`;
-  }
-  return baseTitle;
-}
-
-function countTextLines(text: string): number {
-  const normalized = String(text || "").replace(/\r\n/g, "\n");
-  if (!normalized.trim()) return 0;
-  return normalized.split("\n").length;
+  const baseTitle = toolCallSummaryText(item);
+  const suffix = activityItemStatusSuffix(item);
+  return suffix ? `${baseTitle} ${suffix}` : baseTitle;
 }
 
 function toolCallDiffStats(toolCall: { name: string; argsText: string; resultText?: string }): { adds: number; removes: number } {
@@ -1569,28 +1613,11 @@ function toolCallDiffStats(toolCall: { name: string; argsText: string; resultTex
       return { adds: 0, removes: 0 };
     }
   }
-  const toolName = String(toolCall.name || "").trim();
-  const args = normalizeToolCallArgs(toolCall.argsText);
-  if (typeof args !== "object" || args === null) return { adds: 0, removes: 0 };
-  const obj = args as Record<string, unknown>;
-
-  if (toolName === "write") {
-    return {
-      adds: countTextLines(String(obj.content || "")),
-      removes: 0,
-    };
-  }
-
-  if (toolName === "update") {
-    const oldLines = countTextLines(String(obj.oldString || ""));
-    const newLines = countTextLines(String(obj.newString || ""));
-    return {
-      adds: newLines,
-      removes: oldLines,
-    };
-  }
-
-  return { adds: 0, removes: 0 };
+  const semantic = toolCallSemanticPresentation(toolCall);
+  return {
+    adds: semantic.adds || 0,
+    removes: semantic.removes || 0,
+  };
 }
 
 async function loadToolResult(item: ChatActivityItem): Promise<void> {

@@ -8,6 +8,12 @@ export type ToolcallPreviewEntry = {
   filePath?: string;
   /** 展示用路径文本；默认等于 filePath */
   fileLabel?: string;
+  /** 语义化动作词（如“阅读”、“更新”） */
+  action?: string;
+  /** 语义化目标展示文本（如“agentStore.ts #1210-1260”），存在 filePath 时作为 link 文本 */
+  target?: string;
+  /** 附加参数或说明（如“+100 -30”） */
+  extra?: string;
 };
 
 const FILE_PATH_KEYS = [
@@ -20,6 +26,8 @@ const FILE_PATH_KEYS = [
   "destination",
   "from",
   "to",
+  "file_paths",
+  "images",
 ] as const;
 
 function looksLikeLocalPath(value: string): boolean {
@@ -37,10 +45,21 @@ function looksLikeLocalPath(value: string): boolean {
 function pickPathFromRecord(data: Record<string, unknown>): string {
   for (const key of FILE_PATH_KEYS) {
     const raw = data[key];
-    if (typeof raw !== "string") continue;
-    const value = raw.trim();
-    if (!value || !looksLikeLocalPath(value)) continue;
-    return normalizeLocalLinkHref(value) || value;
+    if (typeof raw === "string") {
+      const value = raw.trim();
+      if (!value || !looksLikeLocalPath(value)) continue;
+      return normalizeLocalLinkHref(value) || value;
+    }
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        if (typeof item === "string") {
+          const value = item.trim();
+          if (value && looksLikeLocalPath(value)) {
+            return normalizeLocalLinkHref(value) || value;
+          }
+        }
+      }
+    }
   }
   return "";
 }
