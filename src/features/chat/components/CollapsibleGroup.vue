@@ -1,5 +1,5 @@
 <template>
-  <section :style="leadStyle">
+  <section :style="leadStyle" class="min-w-0">
     <div
       role="button"
       tabindex="0"
@@ -173,6 +173,8 @@ function onDragEnd(event: DragEvent) {
 .collapsible-group-shell {
   display: grid;
   grid-template-rows: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   transition: grid-template-rows 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -182,6 +184,7 @@ function onDragEnd(event: DragEvent) {
 
 .collapsible-group-inner {
   min-height: 0;
+  min-width: 0;
   overflow: clip;
   visibility: visible;
   transition: visibility 180ms;

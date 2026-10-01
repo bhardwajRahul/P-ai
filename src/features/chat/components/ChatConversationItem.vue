@@ -1,6 +1,6 @@
 <template>
   <div
-    class="group relative mx-1"
+    class="group relative mx-1 min-w-0"
     @contextmenu.prevent="handleCardContextMenu($event)"
     @pointerdown="handleCardPointerDown($event)"
     @pointerup="handleCardPointerUp"
@@ -8,7 +8,7 @@
   >
     <!-- 会话项统一模板：level 决定差异（full 头像 / sim+mini 无左指示，full+sim 两行 / mini 一行） -->
     <div
-      class="group/item flex items-center gap-2 rounded-lg px-2.5 py-1 text-left transition-[background-color,box-shadow,transform] duration-200 ease-out"
+      class="group/item flex min-w-0 items-center gap-2 rounded-lg px-2.5 py-1 text-left transition-[background-color,box-shadow,transform] duration-200 ease-out"
       :class="[
         isActiveConversation ? 'bg-base-300' : 'bg-transparent hover:bg-base-300/60',
         isConversationVisuallyOccupied ? 'opacity-60' : '',

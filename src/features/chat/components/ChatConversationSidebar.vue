@@ -101,11 +101,11 @@
             <template v-for="item in section.visibleItems" :key="item.conversationId">
               <div
                 v-if="section.recentDividers?.[String(item.conversationId || '').trim()]"
-                class="px-4 pb-0.5 pt-2"
+                class="min-w-0 px-4 pb-0.5 pt-2"
               >
                 <button
                   type="button"
-                  class="group flex w-full items-center gap-2 text-left text-caption text-base-content/40 transition-colors hover:text-base-content/75"
+                  class="group flex w-full min-w-0 items-center gap-2 text-left text-caption text-base-content/40 transition-colors hover:text-base-content/75"
                   :title="t('chat.revealConversationSection')"
                   @click.stop="revealRecentSourceSection(section.recentDividers[String(item.conversationId || '').trim()])"
                 >
@@ -156,7 +156,7 @@
             </template>
             <div
               v-if="section.hiddenItemCount > 0 || conversationSectionHasExtraItems(section.key)"
-              class="mx-1 flex items-center gap-2 pb-1.5 pt-0.5"
+              class="mx-1 flex min-w-0 items-center gap-2 pb-1.5 pt-0.5"
             >
               <button
                 v-if="section.hiddenItemCount > 0"
