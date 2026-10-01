@@ -187,7 +187,8 @@ onBeforeUnmount(() => {
         type="button"
         class="inline-flex items-center gap-1 text-xs text-base-content/45 hover:text-base-content/80 transition-colors"
         data-selection-ignore="true"
-        @click.stop="setExpanded(true)"
+        @pointerdown.stop.prevent="setExpanded(true)"
+        @click.stop
       >
         <span>{{ t("common.expand") }}</span>
         <ChevronDown class="h-3 w-3" />
@@ -197,7 +198,8 @@ onBeforeUnmount(() => {
         type="button"
         class="inline-flex items-center gap-1 text-xs text-base-content/45 hover:text-base-content/80 transition-colors"
         data-selection-ignore="true"
-        @click.stop="setExpanded(false)"
+        @pointerdown.stop.prevent="setExpanded(false)"
+        @click.stop
       >
         <span>{{ t("common.collapse") }}</span>
         <ChevronUp class="h-3 w-3" />

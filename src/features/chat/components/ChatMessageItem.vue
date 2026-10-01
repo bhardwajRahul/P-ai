@@ -239,9 +239,10 @@
                 </TransitionGroup>
                 <button
                   type="button"
-                  class="btn btn-sm mt-2 w-full border-0 bg-base-300 text-base-content/70 hover:bg-base-300 hover:text-base-content"
+                  class="btn btn-sm mt-2 sticky bottom-0 z-10 w-full border border-base-content/15 bg-base-100/90 backdrop-blur text-base-content/70 hover:bg-base-200 hover:text-base-content hover:border-base-content/25 transition-colors"
                   data-selection-ignore="true"
-                  @click.stop="closeActivityDetails"
+                  @pointerdown.stop.prevent="closeActivityDetails"
+                  @click.stop
                 >
                   {{ t("common.collapse") }}
                 </button>
