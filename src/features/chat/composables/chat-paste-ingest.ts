@@ -40,6 +40,35 @@ function normalizeFileMime(file: File): string {
 
 export { normalizeFileMime };
 
+export function isEditableElement(target: EventTarget | null): boolean {
+  if (!target || typeof target !== "object") return false;
+  if (typeof HTMLElement !== "undefined" && !(target instanceof HTMLElement)) return false;
+  const el = target as HTMLElement;
+  if (el.isContentEditable) return true;
+  if (typeof el.closest === "function" && el.closest("[contenteditable]:not([contenteditable='false'])")) {
+    return true;
+  }
+  const tagName = typeof el.tagName === "string" ? el.tagName.toUpperCase() : "";
+  if (tagName === "TEXTAREA") return true;
+  if (tagName === "INPUT") {
+    const inputType = String((el as HTMLInputElement).type || "text").toLowerCase();
+    const nonTextInputTypes = new Set([
+      "button",
+      "checkbox",
+      "color",
+      "file",
+      "hidden",
+      "image",
+      "radio",
+      "range",
+      "reset",
+      "submit",
+    ]);
+    return !nonTextInputTypes.has(inputType);
+  }
+  return false;
+}
+
 export function collectPastedFiles(
   event: ClipboardEvent,
 ): Array<{ file: File; mime: string }> {

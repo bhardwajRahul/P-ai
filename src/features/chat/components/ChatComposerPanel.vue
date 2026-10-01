@@ -219,7 +219,7 @@
             <textarea
               ref="chatInputRef"
               v-model="localChatInput"
-              class="block max-h-40 min-h-8 w-full resize-none overflow-y-auto bg-transparent px-2 py-1 text-sm leading-6 outline-none chat-input-no-focus"
+              class="ecall-chat-composer-input block max-h-40 min-h-8 w-full resize-none overflow-y-auto bg-transparent px-2 py-1 text-sm leading-6 outline-none chat-input-no-focus"
             rows="1"
             :placeholder="effectiveChatInputPlaceholder"
             @input="handleChatInputInput"

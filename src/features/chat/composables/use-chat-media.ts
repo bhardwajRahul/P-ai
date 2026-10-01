@@ -13,6 +13,7 @@ import {
   applyQueuedAttachmentResult as sharedApplyQueuedAttachmentResult,
   collectPastedFiles,
   ingestPastedImages,
+  isEditableElement,
   normalizeFileMime,
 } from "./chat-paste-ingest";
 
@@ -106,14 +107,16 @@ export function useChatMedia(options: UseChatMediaOptions) {
     const apiConfig = options.activeChatApiConfig.value;
     if (!apiConfig) return;
     const collected = collectPastedFiles(event);
-    // 焦点位于某个会话输入框（主会话或侧边追问）内时，文本粘贴交给浏览器
-    // 原生行为，内容会落到焦点所在的 textarea，而不是被全局拦截后固定写进
-    // 主会话输入框；图片文件按焦点归属路由：焦点在追问输入框时由追问视图的
-    // paste 监听接管入队，本通道只处理主会话输入框（或焦点不在任何输入框）的图片。
+    // 焦点位于任何可输入元素（input/textarea/contenteditable/会话输入框等）内时，
+    // 文本粘贴交给浏览器原生行为，内容落到焦点所在的输入框，绝不被全局拦截写进主会话输入框；
+    // 图片文件按焦点归属路由：焦点在追问输入框时由追问视图的 paste 监听接管入队，
+    // 本通道只处理主会话输入框（或焦点不在任何输入框）的图片。
     const activeElement = document.activeElement;
-    const composerInputFocused = activeElement instanceof HTMLElement
-      && activeElement.classList.contains("ecall-chat-composer-input");
-    if (composerInputFocused && collected.length === 0) {
+    const target = event.target;
+    const editableTargetFocused = isEditableElement(activeElement)
+      || isEditableElement(target)
+      || (activeElement instanceof HTMLElement && activeElement.classList.contains("ecall-chat-composer-input"));
+    if (editableTargetFocused && collected.length === 0) {
       return;
     }
     if (collected.length > 0) {
@@ -133,6 +136,10 @@ export function useChatMedia(options: UseChatMediaOptions) {
           }
         }
       })();
+      return;
+    }
+
+    if (getActiveChatComposerScope() === "side") {
       return;
     }
 

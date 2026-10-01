@@ -9,6 +9,7 @@ import {
   applyQueuedAttachmentResult,
   collectPastedFiles,
   ingestPastedImages,
+  isEditableElement,
 } from "./chat-paste-ingest";
 import type { ApiConfigItem } from "../../../types/app";
 
@@ -160,3 +161,40 @@ describe("ingestPastedImages", () => {
     expect(targets.setStatusError).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("isEditableElement", () => {
+  it("识别 textarea、文本类型 input 与 contenteditable", () => {
+    const textarea = { tagName: "TEXTAREA" } as unknown as EventTarget;
+    const textInput = { tagName: "INPUT", type: "text" } as unknown as EventTarget;
+    const searchInput = { tagName: "INPUT", type: "search" } as unknown as EventTarget;
+    const defaultInput = { tagName: "INPUT" } as unknown as EventTarget;
+
+    const contentEditableDiv = { tagName: "DIV", isContentEditable: true } as unknown as EventTarget;
+    const childSpan = {
+      tagName: "SPAN",
+      isContentEditable: false,
+      closest: (sel: string) => (sel.includes("contenteditable") ? contentEditableDiv : null),
+    } as unknown as EventTarget;
+
+    expect(isEditableElement(textarea)).toBe(true);
+    expect(isEditableElement(textInput)).toBe(true);
+    expect(isEditableElement(searchInput)).toBe(true);
+    expect(isEditableElement(defaultInput)).toBe(true);
+    expect(isEditableElement(contentEditableDiv)).toBe(true);
+    expect(isEditableElement(childSpan)).toBe(true);
+  });
+
+  it("对按钮、选择框、纯容器或 null 返回 false", () => {
+    const button = { tagName: "BUTTON" } as unknown as EventTarget;
+    const checkbox = { tagName: "INPUT", type: "checkbox" } as unknown as EventTarget;
+    const submitBtn = { tagName: "INPUT", type: "submit" } as unknown as EventTarget;
+    const div = { tagName: "DIV" } as unknown as EventTarget;
+
+    expect(isEditableElement(button)).toBe(false);
+    expect(isEditableElement(checkbox)).toBe(false);
+    expect(isEditableElement(submitBtn)).toBe(false);
+    expect(isEditableElement(div)).toBe(false);
+    expect(isEditableElement(null)).toBe(false);
+  });
+});
+
