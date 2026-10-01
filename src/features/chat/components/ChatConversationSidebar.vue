@@ -19,9 +19,80 @@
             @edit-task="requestTaskEdit"
             @layout-change="scheduleConversationListScrollbarUpdate"
           />
+          <template v-else-if="activeConversationTab === 'contact'">
+            <template v-for="section in displayedContactSections" :key="section.key">
+              <CollapsibleGroup
+                :ref="(el) => setConversationSectionElement(section.key, el)"
+                :title="section.title"
+                :model-value="isConversationSectionCollapsed(section.key)"
+                :icon="conversationSectionIcon(section)"
+                :avatar-url="conversationSectionAvatarUrl(section)"
+                :draggable="isConversationSectionDraggable(section)"
+                :drop-indicator="conversationSectionDragIndicator(section)"
+                @update:model-value="toggleConversationSection(section.key)"
+                @collapse-all="collapseAllConversationSections"
+                @after-enter="scheduleConversationListScrollbarUpdate"
+                @after-leave="scheduleConversationListScrollbarUpdate"
+                @dragstart="handleConversationSectionDragStart(section, $event)"
+                @dragover="handleConversationSectionDragOver(section, $event)"
+                @drop="handleConversationSectionDrop(section, $event)"
+                @dragend="handleConversationSectionDragEnd"
+              >
+                <template v-for="item in section.visibleItems" :key="item.conversationId">
+                  <ChatConversationItem
+                    :item="item"
+                    :level="isSimpleConversationRows ? simpleConversationItemLevel(item) : 'full'"
+                    :active-conversation-id="props.activeConversationId"
+                    :user-alias="props.userAlias"
+                    :user-avatar-url="props.userAvatarUrl"
+                    :persona-name-map="props.personaNameMap"
+                    :persona-avatar-url-map="props.personaAvatarUrlMap"
+                    :pipeline-status-by-id="conversationStatusById"
+                    :show-source-badge="false"
+                    :compact-indicator="isSimpleConversationRows"
+                    @select="(payload) => emit('select', payload)"
+                    @rename="(payload) => emit('rename', payload)"
+                    @toggle-pin-conversation="(conversationId) => emit('togglePinConversation', conversationId)"
+                    @archive-conversation="(conversationId) => emit('archiveConversation', conversationId)"
+                    @export-conversation="(conversationId) => emit('exportConversation', conversationId)"
+                    @delete-conversation="(conversationId) => emit('deleteConversation', conversationId)"
+                  />
+                </template>
+                <div
+                  v-if="section.hiddenItemCount > 0 || conversationSectionHasExtraItems(section.key)"
+                  class="mx-1 flex min-w-0 items-center gap-2 pb-1.5 pt-0.5"
+                >
+                  <button
+                    v-if="section.hiddenItemCount > 0"
+                    type="button"
+                    class="group flex h-7.5 items-center gap-2 rounded-lg px-2.5 text-left text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
+                    :title="t('chat.loadMore')"
+                    @click.stop="loadMoreConversationsInSection(section.key)"
+                  >
+                    <span class="shrink-0" :style="conversationSectionLeadStyle"></span>
+                    <span>{{ t("chat.loadMore") }}（{{ section.hiddenItemCount }}）</span>
+                  </button>
+                  <button
+                    v-if="conversationSectionHasExtraItems(section.key)"
+                    type="button"
+                    class="flex flex-1 h-7.5 items-center rounded-lg px-2 text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
+                    :title="t('chat.collapseSection')"
+                    @click.stop="collapseConversationSection(section.key)"
+                  >
+                    {{ t("chat.collapseSection") }}
+                  </button>
+                </div>
+              </CollapsibleGroup>
+            </template>
+            <div
+              v-if="displayedContactSections.length === 0"
+              class="px-3 py-4 text-center text-sm text-base-content/60"
+            >
+              {{ t("chat.conversationSearchEmpty") }}
+            </div>
+          </template>
           <template v-else>
             <button
-              v-if="activeConversationTab === 'local'"
               type="button"
               class="mx-1 mb-1 flex min-h-9 w-[calc(100%-0.5rem)] items-center gap-2 rounded-lg px-2.5 py-1 text-left text-sm transition-colors"
               :class="activeConversationIsDraft
@@ -33,155 +104,313 @@
               <SquarePen class="h-4 w-4" />
               <span>{{ t("chat.newConversation") }}</span>
             </button>
-            <template v-for="(section, sectionIndex) in displayedConversationSections" :key="section.key">
-            <div
-              v-if="sectionIndex === conversationGroupingHeaderIndex && conversationGroupingHeaderIndex >= 0"
-              class="mx-1 mb-0.5 mt-2"
-            >
-              <EcallDropdown
-                v-model="groupingMenuOpen"
-                teleport
-                :match-trigger-width="false"
-                panel-class="w-40 p-1"
-                placement="bottom"
-              >
-                <template #trigger="{ toggle: toggleGroupingMenu }">
-                  <button
-                    type="button"
-                    class="flex max-w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content"
-                    :title="conversationGroupingLabel"
-                    @click.stop="toggleGroupingMenu"
-                  >
-                    <span class="min-w-0 truncate">{{ conversationGroupingLabel }}</span>
-                    <ChevronDown class="h-3.5 w-3.5 shrink-0" />
-                  </button>
-                </template>
-                <template #default="{ close: closeGroupingMenu }">
-                  <ul class="menu w-full p-0">
-                    <li v-for="option in conversationGroupingOptions" :key="option.value">
-                      <button type="button" @click="selectConversationGrouping(option.value, closeGroupingMenu)">
-                        <component :is="option.icon" class="h-3.5 w-3.5" />
-                        <span>{{ option.label }}</span>
-                        <Check v-if="conversationGrouping === option.value" class="ml-auto h-3.5 w-3.5 text-primary" />
-                      </button>
-                    </li>
-                  </ul>
-                </template>
-              </EcallDropdown>
-            </div>
-            <CollapsibleGroup
-              :ref="(el) => setConversationSectionElement(section.key, el)"
-              :title="section.title"
-              :model-value="isConversationSectionCollapsed(section.key)"
-              :icon="conversationSectionIcon(section)"
-              :avatar-url="conversationSectionAvatarUrl(section)"
-              :draggable="isConversationSectionDraggable(section)"
-              :drop-indicator="conversationSectionDragIndicator(section)"
-              @update:model-value="toggleConversationSection(section.key)"
-              @collapse-all="collapseAllConversationSections"
-              @after-enter="scheduleConversationListScrollbarUpdate"
-              @after-leave="scheduleConversationListScrollbarUpdate"
-              @dragstart="handleConversationSectionDragStart(section, $event)"
-              @dragover="handleConversationSectionDragOver(section, $event)"
-              @drop="handleConversationSectionDrop(section, $event)"
-              @dragend="handleConversationSectionDragEnd"
-            >
-            <template #actions>
-              <button
-                v-if="section.workspaceRootPath"
-                type="button"
-                class="btn btn-ghost btn-xs ml-auto h-6 min-h-6 w-6 min-w-6 shrink-0 p-0 text-base-content opacity-0 transition-opacity group-hover/section:opacity-100"
-                :title="t('chat.newConversation')"
-                @click.stop="createConversationInSection(section)"
-                @dblclick.stop
-              >
-                <SquarePen class="h-3.5 w-3.5" />
-              </button>
-            </template>
-            <template v-for="item in section.visibleItems" :key="item.conversationId">
-              <div
-                v-if="section.recentDividers?.[String(item.conversationId || '').trim()]"
-                class="min-w-0 px-4 pb-0.5 pt-2"
-              >
+
+            <!-- 1. 最近大区 -->
+            <div v-if="displayedRecentSections.length > 0" class="super-section mb-1">
+              <div class="mx-1 mt-1 mb-0.5 flex select-none items-center justify-between rounded px-1.5 py-0.5 text-sm text-base-content/60">
+                <!-- 左边：折叠/展开按钮（只控制内容区开合） -->
                 <button
                   type="button"
-                  class="group flex w-full min-w-0 items-center gap-2 text-left text-caption text-base-content/40 transition-colors hover:text-base-content/75"
-                  :title="t('chat.revealConversationSection')"
-                  @click.stop="revealRecentSourceSection(section.recentDividers[String(item.conversationId || '').trim()])"
+                  class="group flex items-center gap-1 min-w-0 rounded px-1 py-0.5 transition-colors hover:text-base-content/90"
+                  :title="t('chat.recentConversations')"
+                  @click="toggleRecentSuperSection"
                 >
-                  <span class="h-px min-w-2 flex-1 rounded-full bg-linear-to-r from-transparent to-base-content/15" aria-hidden="true"></span>
-                  <span class="shrink-0 font-medium">{{ section.recentDividers[String(item.conversationId || "").trim()].label }}</span>
-                  <span class="h-px min-w-2 flex-1 rounded-full bg-linear-to-r from-base-content/15 to-transparent" aria-hidden="true"></span>
+                  <span class="truncate">{{ t("chat.recentConversations") }}</span>
+                  <ChevronRight
+                    class="h-3 w-3 shrink-0 ml-0.5 transition-transform duration-200 ease-out opacity-0 group-hover:opacity-60"
+                    :class="recentSuperCollapsed ? '' : 'rotate-90'"
+                  />
                 </button>
+
+                <!-- 右边：时间窗口切换按钮（只负责打开选项） -->
+                <div class="shrink-0">
+                  <EcallDropdown
+                    v-model="recentTimeFilterOpen"
+                    teleport
+                    :match-trigger-width="false"
+                    panel-class="w-36 p-1"
+                    placement="bottom"
+                  >
+                    <template #trigger="{ toggle: toggleTimeFilter }">
+                      <button
+                        type="button"
+                        class="flex h-5 min-h-5 items-center rounded px-1 text-sm text-base-content/60 transition-colors hover:bg-base-300/60 hover:text-base-content"
+                        :title="currentRecentTimeLabel"
+                        @click.stop="toggleTimeFilter"
+                      >
+                        <Clock class="h-3 w-3" />
+                      </button>
+                    </template>
+                    <template #default="{ close: closeTimeFilter }">
+                      <ul class="menu w-full p-0">
+                        <li v-for="opt in recentTimeFilterOptions" :key="opt.value">
+                          <button type="button" class="flex-nowrap" @click="selectRecentTimeFilter(opt.value, closeTimeFilter)">
+                            <Clock class="h-3.5 w-3.5 shrink-0" />
+                            <span class="whitespace-nowrap">{{ opt.label }}</span>
+                            <Check v-if="recentTimeFilterHours === opt.value" class="ml-auto h-3.5 w-3.5 shrink-0 text-primary" />
+                          </button>
+                        </li>
+                      </ul>
+                    </template>
+                  </EcallDropdown>
+                </div>
               </div>
-              <ChatConversationItem
-                :item="item"
-                :level="isSimpleConversationRows ? simpleConversationItemLevel(item) : 'full'"
-                :active-conversation-id="props.activeConversationId"
-                :user-alias="props.userAlias"
-                :user-avatar-url="props.userAvatarUrl"
-                :persona-name-map="props.personaNameMap"
-                :persona-avatar-url-map="props.personaAvatarUrlMap"
-                :pipeline-status-by-id="conversationStatusById"
-                :show-source-badge="isRecentConversationSection(section.key) && isPersonaGrouping"
-                :compact-indicator="isSimpleConversationRows"
-                @select="(payload) => emit('select', payload)"
-                @rename="(payload) => emit('rename', payload)"
-                @toggle-pin-conversation="(conversationId) => emit('togglePinConversation', conversationId)"
-                @archive-conversation="(conversationId) => emit('archiveConversation', conversationId)"
-                @export-conversation="(conversationId) => emit('exportConversation', conversationId)"
-                @delete-conversation="(conversationId) => emit('deleteConversation', conversationId)"
-                @reveal-section="revealConversationSection(item)"
-              />
-              <template v-if="(section.simpleFollowers[String(item.conversationId || '').trim()] || []).length > 0">
-                <ChatConversationItem
-                  v-for="simpleItem in (section.simpleFollowers[String(item.conversationId || '').trim()] || [])"
-                  :key="`simple-${simpleItem.conversationId}`"
-                  :item="simpleItem"
-                  :level="simpleItemLevel(simpleItem)"
-                  :active-conversation-id="props.activeConversationId"
-                  :user-alias="props.userAlias"
-                  :user-avatar-url="props.userAvatarUrl"
-                  :persona-name-map="props.personaNameMap"
-                  :persona-avatar-url-map="props.personaAvatarUrlMap"
-                  :pipeline-status-by-id="conversationStatusById"
-                  @select="(payload) => emit('select', payload)"
-                  @rename="(payload) => emit('rename', payload)"
-                  @toggle-pin-conversation="(conversationId) => emit('togglePinConversation', conversationId)"
-                  @archive-conversation="(conversationId) => emit('archiveConversation', conversationId)"
-                  @export-conversation="(conversationId) => emit('exportConversation', conversationId)"
-                  @delete-conversation="(conversationId) => emit('deleteConversation', conversationId)"
-                />
-              </template>
-            </template>
-            <div
-              v-if="section.hiddenItemCount > 0 || conversationSectionHasExtraItems(section.key)"
-              class="mx-1 flex min-w-0 items-center gap-2 pb-1.5 pt-0.5"
-            >
-              <button
-                v-if="section.hiddenItemCount > 0"
-                type="button"
-                class="group flex h-7.5 items-center gap-2 rounded-lg px-2.5 text-left text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
-                :title="t('chat.loadMore')"
-                @click.stop="loadMoreConversationsInSection(section.key)"
-              >
-                <span class="shrink-0" :style="conversationSectionLeadStyle"></span>
-                <span>{{ t("chat.loadMore") }}（{{ section.hiddenItemCount }}）</span>
-              </button>
-              <button
-                v-if="conversationSectionHasExtraItems(section.key)"
-                type="button"
-                class="flex flex-1 h-7.5 items-center rounded-lg px-2 text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
-                :title="t('chat.collapseSection')"
-                @click.stop="collapseConversationSection(section.key)"
-              >
-                {{ t("chat.collapseSection") }}
-              </button>
+
+              <div class="super-section-shell" :class="{ 'is-collapsed': recentSuperCollapsed }">
+                <div class="super-section-inner">
+                  <template v-for="section in displayedRecentSections" :key="section.key">
+                    <CollapsibleGroup
+                      :ref="(el) => setConversationSectionElement(section.key, el)"
+                      :title="section.title"
+                      :model-value="isConversationSectionCollapsed(section.key)"
+                      :icon="conversationSectionIcon(section)"
+                      :avatar-url="conversationSectionAvatarUrl(section)"
+                      :draggable="false"
+                      @update:model-value="toggleConversationSection(section.key)"
+                      @collapse-all="collapseAllConversationSections"
+                      @after-enter="scheduleConversationListScrollbarUpdate"
+                      @after-leave="scheduleConversationListScrollbarUpdate"
+                    >
+                      <template #actions>
+                        <button
+                          v-if="section.workspaceRootPath"
+                          type="button"
+                          class="btn btn-ghost btn-xs ml-auto h-6 min-h-6 w-6 min-w-6 shrink-0 p-0 text-base-content opacity-0 transition-opacity group-hover/section:opacity-100"
+                          :title="t('chat.newConversation')"
+                          @click.stop="createConversationInSection(section)"
+                          @dblclick.stop
+                        >
+                          <SquarePen class="h-3.5 w-3.5" />
+                        </button>
+                      </template>
+                      <template v-for="item in section.visibleItems" :key="item.conversationId">
+                        <ChatConversationItem
+                          :item="item"
+                          :level="isSimpleConversationRows ? simpleConversationItemLevel(item) : 'full'"
+                          :active-conversation-id="props.activeConversationId"
+                          :user-alias="props.userAlias"
+                          :user-avatar-url="props.userAvatarUrl"
+                          :persona-name-map="props.personaNameMap"
+                          :persona-avatar-url-map="props.personaAvatarUrlMap"
+                          :pipeline-status-by-id="conversationStatusById"
+                          :show-source-badge="false"
+                          :compact-indicator="isSimpleConversationRows"
+                          @select="(payload) => emit('select', payload)"
+                          @rename="(payload) => emit('rename', payload)"
+                          @toggle-pin-conversation="(conversationId) => emit('togglePinConversation', conversationId)"
+                          @archive-conversation="(conversationId) => emit('archiveConversation', conversationId)"
+                          @export-conversation="(conversationId) => emit('exportConversation', conversationId)"
+                          @delete-conversation="(conversationId) => emit('deleteConversation', conversationId)"
+                          @reveal-section="revealConversationSection(item)"
+                        />
+                        <template v-if="(section.simpleFollowers[String(item.conversationId || '').trim()] || []).length > 0">
+                          <ChatConversationItem
+                            v-for="simpleItem in (section.simpleFollowers[String(item.conversationId || '').trim()] || [])"
+                            :key="`simple-${simpleItem.conversationId}`"
+                            :item="simpleItem"
+                            :level="simpleItemLevel(simpleItem)"
+                            :active-conversation-id="props.activeConversationId"
+                            :user-alias="props.userAlias"
+                            :user-avatar-url="props.userAvatarUrl"
+                            :persona-name-map="props.personaNameMap"
+                            :persona-avatar-url-map="props.personaAvatarUrlMap"
+                            :pipeline-status-by-id="conversationStatusById"
+                            @select="(payload) => emit('select', payload)"
+                            @rename="(payload) => emit('rename', payload)"
+                            @toggle-pin-conversation="(conversationId) => emit('togglePinConversation', conversationId)"
+                            @archive-conversation="(conversationId) => emit('archiveConversation', conversationId)"
+                            @export-conversation="(conversationId) => emit('exportConversation', conversationId)"
+                            @delete-conversation="(conversationId) => emit('deleteConversation', conversationId)"
+                          />
+                        </template>
+                      </template>
+                    </CollapsibleGroup>
+                  </template>
+                  <div
+                    v-if="recentHiddenCount > 0 || recentExtraCount > 0"
+                    class="mx-1 flex min-w-0 items-center gap-2 pb-1.5 pt-0.5"
+                  >
+                    <button
+                      v-if="recentHiddenCount > 0"
+                      type="button"
+                      class="group flex h-7.5 items-center gap-2 rounded-lg px-2.5 text-left text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
+                      :title="t('chat.loadMore')"
+                      @click.stop="loadMoreRecentConversations"
+                    >
+                      <span class="shrink-0" :style="conversationSectionLeadStyle"></span>
+                      <span>{{ t("chat.loadMore") }}（{{ recentHiddenCount }}）</span>
+                    </button>
+                    <button
+                      v-if="recentExtraCount > 0"
+                      type="button"
+                      class="flex flex-1 h-7.5 items-center rounded-lg px-2 text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
+                      :title="t('chat.collapseSection')"
+                      @click.stop="collapseRecentConversations"
+                    >
+                      {{ t("chat.collapseSection") }}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-            </CollapsibleGroup>
-            </template>
+
+            <!-- 2. 分类名大区 -->
+            <div v-if="displayedCategorySections.length > 0" class="super-section">
+              <div class="mx-1 mt-2 mb-0.5 flex select-none items-center justify-between rounded px-1.5 py-0.5 text-sm text-base-content/60">
+                <!-- 左边：折叠/展开按钮（只控制内容区开合） -->
+                <button
+                  type="button"
+                  class="group flex items-center gap-1 min-w-0 rounded px-1 py-0.5 transition-colors hover:text-base-content/90"
+                  :title="conversationGroupingLabel"
+                  @click="toggleCategorySuperSection"
+                >
+                  <span class="truncate">{{ conversationGroupingLabel }}</span>
+                  <ChevronRight
+                    class="h-3 w-3 shrink-0 ml-0.5 transition-transform duration-200 ease-out opacity-0 group-hover:opacity-60"
+                    :class="categorySuperCollapsed ? '' : 'rotate-90'"
+                  />
+                </button>
+
+                <!-- 右边：分组切换按钮（只负责打开选项） -->
+                <div class="shrink-0">
+                  <EcallDropdown
+                    v-model="groupingMenuOpen"
+                    teleport
+                    :match-trigger-width="false"
+                    panel-class="w-40 p-1"
+                    placement="bottom"
+                  >
+                    <template #trigger="{ toggle: toggleGroupingMenu }">
+                      <button
+                        type="button"
+                        class="flex h-5 min-h-5 items-center rounded px-1 text-sm text-base-content/60 transition-colors hover:bg-base-300/60 hover:text-base-content"
+                        :title="conversationGroupingLabel"
+                        @click.stop="toggleGroupingMenu"
+                      >
+                        <component :is="currentGroupingIcon" class="h-3 w-3" />
+                      </button>
+                    </template>
+                    <template #default="{ close: closeGroupingMenu }">
+                      <ul class="menu w-full p-0">
+                        <li v-for="option in conversationGroupingOptions" :key="option.value">
+                          <button type="button" @click="selectConversationGrouping(option.value, closeGroupingMenu)">
+                            <component :is="option.icon" class="h-3.5 w-3.5" />
+                            <span>{{ option.label }}</span>
+                            <Check v-if="conversationGrouping === option.value" class="ml-auto h-3.5 w-3.5 text-primary" />
+                          </button>
+                        </li>
+                      </ul>
+                    </template>
+                  </EcallDropdown>
+                </div>
+              </div>
+
+              <div class="super-section-shell" :class="{ 'is-collapsed': categorySuperCollapsed }">
+                <div class="super-section-inner">
+                  <template v-for="section in displayedCategorySections" :key="section.key">
+                    <CollapsibleGroup
+                      :ref="(el) => setConversationSectionElement(section.key, el)"
+                      :title="section.title"
+                      :model-value="isConversationSectionCollapsed(section.key)"
+                      :icon="conversationSectionIcon(section)"
+                      :avatar-url="conversationSectionAvatarUrl(section)"
+                      :draggable="isConversationSectionDraggable(section)"
+                      :drop-indicator="conversationSectionDragIndicator(section)"
+                      @update:model-value="toggleConversationSection(section.key)"
+                      @collapse-all="collapseAllConversationSections"
+                      @after-enter="scheduleConversationListScrollbarUpdate"
+                      @after-leave="scheduleConversationListScrollbarUpdate"
+                      @dragstart="handleConversationSectionDragStart(section, $event)"
+                      @dragover="handleConversationSectionDragOver(section, $event)"
+                      @drop="handleConversationSectionDrop(section, $event)"
+                      @dragend="handleConversationSectionDragEnd"
+                    >
+                      <template #actions>
+                        <button
+                          v-if="section.workspaceRootPath"
+                          type="button"
+                          class="btn btn-ghost btn-xs ml-auto h-6 min-h-6 w-6 min-w-6 shrink-0 p-0 text-base-content opacity-0 transition-opacity group-hover/section:opacity-100"
+                          :title="t('chat.newConversation')"
+                          @click.stop="createConversationInSection(section)"
+                          @dblclick.stop
+                        >
+                          <SquarePen class="h-3.5 w-3.5" />
+                        </button>
+                      </template>
+                      <template v-for="item in section.visibleItems" :key="item.conversationId">
+                        <ChatConversationItem
+                          :item="item"
+                          :level="isSimpleConversationRows ? simpleConversationItemLevel(item) : 'full'"
+                          :active-conversation-id="props.activeConversationId"
+                          :user-alias="props.userAlias"
+                          :user-avatar-url="props.userAvatarUrl"
+                          :persona-name-map="props.personaNameMap"
+                          :persona-avatar-url-map="props.personaAvatarUrlMap"
+                          :pipeline-status-by-id="conversationStatusById"
+                          :show-source-badge="false"
+                          :compact-indicator="isSimpleConversationRows"
+                          @select="(payload) => emit('select', payload)"
+                          @rename="(payload) => emit('rename', payload)"
+                          @toggle-pin-conversation="(conversationId) => emit('togglePinConversation', conversationId)"
+                          @archive-conversation="(conversationId) => emit('archiveConversation', conversationId)"
+                          @export-conversation="(conversationId) => emit('exportConversation', conversationId)"
+                          @delete-conversation="(conversationId) => emit('deleteConversation', conversationId)"
+                          @reveal-section="revealConversationSection(item)"
+                        />
+                        <template v-if="(section.simpleFollowers[String(item.conversationId || '').trim()] || []).length > 0">
+                          <ChatConversationItem
+                            v-for="simpleItem in (section.simpleFollowers[String(item.conversationId || '').trim()] || [])"
+                            :key="`simple-${simpleItem.conversationId}`"
+                            :item="simpleItem"
+                            :level="simpleItemLevel(simpleItem)"
+                            :active-conversation-id="props.activeConversationId"
+                            :user-alias="props.userAlias"
+                            :user-avatar-url="props.userAvatarUrl"
+                            :persona-name-map="props.personaNameMap"
+                            :persona-avatar-url-map="props.personaAvatarUrlMap"
+                            :pipeline-status-by-id="conversationStatusById"
+                            @select="(payload) => emit('select', payload)"
+                            @rename="(payload) => emit('rename', payload)"
+                            @toggle-pin-conversation="(conversationId) => emit('togglePinConversation', conversationId)"
+                            @archive-conversation="(conversationId) => emit('archiveConversation', conversationId)"
+                            @export-conversation="(conversationId) => emit('exportConversation', conversationId)"
+                            @delete-conversation="(conversationId) => emit('deleteConversation', conversationId)"
+                          />
+                        </template>
+                      </template>
+                      <div
+                        v-if="section.hiddenItemCount > 0 || conversationSectionHasExtraItems(section.key)"
+                        class="mx-1 flex min-w-0 items-center gap-2 pb-1.5 pt-0.5"
+                      >
+                        <button
+                          v-if="section.hiddenItemCount > 0"
+                          type="button"
+                          class="group flex h-7.5 items-center gap-2 rounded-lg px-2.5 text-left text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
+                          :title="t('chat.loadMore')"
+                          @click.stop="loadMoreConversationsInSection(section.key)"
+                        >
+                          <span class="shrink-0" :style="conversationSectionLeadStyle"></span>
+                          <span>{{ t("chat.loadMore") }}（{{ section.hiddenItemCount }}）</span>
+                        </button>
+                        <button
+                          v-if="conversationSectionHasExtraItems(section.key)"
+                          type="button"
+                          class="flex flex-1 h-7.5 items-center rounded-lg px-2 text-xs text-base-content/50 transition-colors hover:bg-base-300/50 hover:text-base-content active:bg-base-300/80"
+                          :title="t('chat.collapseSection')"
+                          @click.stop="collapseConversationSection(section.key)"
+                        >
+                          {{ t("chat.collapseSection") }}
+                        </button>
+                      </div>
+                    </CollapsibleGroup>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- 空状态 -->
             <div
-              v-if="displayedConversationSections.length === 0"
+              v-if="displayedRecentSections.length === 0 && displayedCategorySections.length === 0"
               class="px-3 py-4 text-center text-sm text-base-content/60"
             >
               {{ t("chat.conversationSearchEmpty") }}
@@ -396,7 +625,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 import { useI18n } from "vue-i18n";
-import { Archive, Bell, Check, ChevronDown, Folder, LayoutList, Moon, Search, Settings, SquarePen, Sun, UserRound } from "@lucide/vue";
+import { Archive, Bell, Check, ChevronDown, ChevronRight, Clock, Folder, LayoutList, Moon, Search, Settings, SquarePen, Sun, UserRound } from "@lucide/vue";
 import CollapsibleGroup from "./CollapsibleGroup.vue";
 import ChatConversationItem from "./ChatConversationItem.vue";
 import type { ApiConfigItem, ChatConversationOverviewItem, ConversationPreviewMessage } from "../../../types/app";
@@ -410,16 +639,16 @@ import { formatConversationListTime } from "../utils/conversation-time";
 import {
   aggregateConversationItems,
   conversationLastUsedMs,
-  groupRecentItemsBySource,
-  type RecentSourceBlockDivider,
 } from "../utils/conversation-aggregation";
 import {
   applyConversationSectionOrder,
-  buildConversationSections,
+  buildCategoryConversationSections,
+  buildRecentConversationSections,
+  buildRemoteConversationSections,
   canonicalWorkspaceRootForComparison,
   conversationCountSinceDayStart,
-  RECENT_CONVERSATION_SECTION_KEY,
   CURRENT_PROJECT_SECTION_KEY,
+  RECENT_CONVERSATION_SECTION_KEY,
   workspaceNameFromPath,
   type ConversationSection,
   type ConversationSectionGrouping,
@@ -440,8 +669,6 @@ type DisplayConversationSection = ConversationSection & {
   visibleCount: number;
   hiddenItemCount: number;
   totalItemCount: number;
-  /** 最近会话按来源聚块的分割线，key 为该块第一个会话 id；仅非人格分组依据下存在 */
-  recentDividers?: Record<string, RecentSourceBlockDivider>;
 };
 type BatchArchiveConversationsOutput = {
   success: boolean;
@@ -540,17 +767,88 @@ const conversationGroupingOptions = computed<Array<{
 const conversationGroupingLabel = computed(() =>
   conversationGroupingOptions.value.find((option) => option.value === conversationGrouping.value)?.label || "",
 );
+const currentGroupingIcon = computed(() =>
+  conversationGroupingOptions.value.find((option) => option.value === conversationGrouping.value)?.icon || LayoutList,
+);
 
-/** 分类区插在第一个实体分组之前，统领下面的项目 / 人格列表；没有可分类的分组时返回 -1，整个分类区隐藏 */
-const conversationGroupingHeaderIndex = computed(() => {
-  if (activeConversationTab.value === "contact") return -1;
-  const sections = displayedConversationSections.value;
-  return sections.findIndex((section) =>
-    section.key !== "pinned"
-      && section.key !== RECENT_CONVERSATION_SECTION_KEY
-      && section.key !== CURRENT_PROJECT_SECTION_KEY,
-  );
+const RECENT_TIME_FILTER_KEY = "easy-call.chat.recent-time-filter.v1";
+const recentTimeFilterOpen = ref(false);
+const recentTimeFilterHours = ref<number>(readRecentTimeFilterPreference());
+const RECENT_TIME_FILTER_HOUR_OPTIONS = [12, 24, 48, 72] as const;
+const recentTimeFilterOptions = computed(() =>
+  RECENT_TIME_FILTER_HOUR_OPTIONS.map((value) => ({
+    value,
+    label: t("chat.recentWithinHours", { count: value }),
+  })),
+);
+const currentRecentTimeLabel = computed(() => {
+  const found = recentTimeFilterOptions.value.find((o) => o.value === recentTimeFilterHours.value);
+  return found ? found.label : t("chat.recentWithinHours", { count: 24 });
 });
+
+function readRecentTimeFilterPreference(): number {
+  if (typeof window === "undefined") return 24;
+  try {
+    const val = window.localStorage.getItem(RECENT_TIME_FILTER_KEY);
+    const n = Number(val);
+    if ([12, 24, 48, 72].includes(n)) return n;
+  } catch {}
+  return 24;
+}
+
+function selectRecentTimeFilter(hours: number, close?: () => void) {
+  recentTimeFilterHours.value = hours;
+  try {
+    window.localStorage.setItem(RECENT_TIME_FILTER_KEY, String(hours));
+  } catch {}
+  // 切换时间窗口时重置“加载更多”，避免旧计数与新过滤结果不匹配
+  conversationSectionLoadMoreCounts.value = {
+    ...conversationSectionLoadMoreCounts.value,
+    "local:recent": 0,
+  };
+  scheduleConversationListScrollbarUpdate();
+  close?.();
+}
+
+const RECENT_SUPER_COLLAPSED_KEY = "easy-call.chat.sidebar.recent-super-collapsed";
+const CATEGORY_SUPER_COLLAPSED_KEY = "easy-call.chat.sidebar.category-super-collapsed";
+
+function readSuperSectionCollapsed(key: string, defaultValue = false): boolean {
+  if (typeof window === "undefined") return defaultValue;
+  try {
+    const val = window.localStorage.getItem(key);
+    if (val !== null) return val === "true";
+  } catch {}
+  return defaultValue;
+}
+
+const isRecentSuperSectionCollapsed = ref(readSuperSectionCollapsed(RECENT_SUPER_COLLAPSED_KEY, false));
+const isCategorySuperSectionCollapsed = ref(readSuperSectionCollapsed(CATEGORY_SUPER_COLLAPSED_KEY, false));
+
+const recentSuperCollapsed = computed(() =>
+  normalizedConversationSearchQuery.value ? false : isRecentSuperSectionCollapsed.value,
+);
+const categorySuperCollapsed = computed(() =>
+  normalizedConversationSearchQuery.value ? false : isCategorySuperSectionCollapsed.value,
+);
+
+function writeSuperSectionCollapsed(key: string, collapsed: boolean) {
+  try {
+    window.localStorage.setItem(key, String(collapsed));
+  } catch {}
+}
+
+function toggleRecentSuperSection() {
+  isRecentSuperSectionCollapsed.value = !isRecentSuperSectionCollapsed.value;
+  writeSuperSectionCollapsed(RECENT_SUPER_COLLAPSED_KEY, isRecentSuperSectionCollapsed.value);
+  scheduleConversationListScrollbarUpdate();
+}
+
+function toggleCategorySuperSection() {
+  isCategorySuperSectionCollapsed.value = !isCategorySuperSectionCollapsed.value;
+  writeSuperSectionCollapsed(CATEGORY_SUPER_COLLAPSED_KEY, isCategorySuperSectionCollapsed.value);
+  scheduleConversationListScrollbarUpdate();
+}
 
 function selectConversationGrouping(value: ConversationSectionGrouping, closeMenu?: () => void) {
   conversationGrouping.value = value;
@@ -606,9 +904,73 @@ const conversationPreviewCache = computed(() => new Map(
   props.items.map((item) => [String(item.conversationId || "").trim(), Array.isArray(item.previewMessages) ? item.previewMessages : []]),
 ));
 
-const conversationSections = computed<ConversationSection[]>(() =>
-  buildConversationSections(props.items, {
-    tab: activeConversationTab.value,
+/** 与分组构建同一口径：优先 lastMessageAt，缺省才用 updatedAt */
+function recentCandidateRecencyMs(item: ChatConversationOverviewItem): number {
+  const raw = String(item.lastMessageAt || item.updatedAt || "").trim();
+  if (!raw) return 0;
+  const time = Date.parse(raw);
+  return Number.isFinite(time) ? time : 0;
+}
+
+const allRecentCandidateItems = computed<ChatConversationOverviewItem[]>(() => {
+  if (activeConversationTab.value !== "local") return [];
+  const normalizedActiveId = String(props.activeConversationId || "").trim();
+  const seenIds = new Set<string>();
+  return props.items
+    .filter((item) => {
+      if (String(item.kind || "local_unarchived").trim() === "remote_im_contact") return false;
+      if (item.isSystemNotificationConversation) return false;
+      if (item.isDraft && String(item.conversationId || "").trim() !== normalizedActiveId) return false;
+      if (recentTimeFilterHours.value > 0) {
+        const cutoff = Date.now() - recentTimeFilterHours.value * 3600 * 1000;
+        if (recentCandidateRecencyMs(item) < cutoff) return false;
+      }
+      return true;
+    })
+    .sort((left, right) => recentCandidateRecencyMs(right) - recentCandidateRecencyMs(left))
+    .filter((item) => {
+      const id = String(item.conversationId || "").trim();
+      if (!id || seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
+});
+
+const recentBaseCount = computed(() =>
+  Math.max(CONVERSATION_SECTION_MIN_VISIBLE, conversationCountSinceDayStart(allRecentCandidateItems.value)),
+);
+const recentExtraCount = computed(() =>
+  Math.max(0, Number(conversationSectionLoadMoreCounts.value["local:recent"] || 0)),
+);
+const recentVisibleLimit = computed(() =>
+  normalizedConversationSearchQuery.value
+    ? allRecentCandidateItems.value.length
+    : (recentBaseCount.value + recentExtraCount.value),
+);
+const recentHiddenCount = computed(() =>
+  Math.max(0, allRecentCandidateItems.value.length - recentVisibleLimit.value),
+);
+
+function loadMoreRecentConversations() {
+  const current = Number(conversationSectionLoadMoreCounts.value["local:recent"] || 0);
+  conversationSectionLoadMoreCounts.value = {
+    ...conversationSectionLoadMoreCounts.value,
+    "local:recent": current + CONVERSATION_SECTION_LOAD_MORE_STEP,
+  };
+  scheduleConversationListScrollbarUpdate();
+}
+
+function collapseRecentConversations() {
+  conversationSectionLoadMoreCounts.value = {
+    ...conversationSectionLoadMoreCounts.value,
+    "local:recent": 0,
+  };
+  scheduleConversationListScrollbarUpdate();
+}
+
+const rawRecentSections = computed<ConversationSection[]>(() => {
+  if (activeConversationTab.value !== "local") return [];
+  return buildRecentConversationSections(props.items, {
     titles: {
       recent: t("chat.recentConversations"),
       pinned: t("chat.systemNotifications"),
@@ -622,12 +984,38 @@ const conversationSections = computed<ConversationSection[]>(() =>
     activeConversationId: props.activeConversationId,
     grouping: conversationGrouping.value,
     personaNameMap: props.personaNameMap,
-  }),
-);
+    maxCount: recentVisibleLimit.value,
+    recentHours: recentTimeFilterHours.value,
+  });
+});
 
-const orderedConversationSections = computed<ConversationSection[]>(() => {
-  const tab = activeConversationTab.value === "contact" ? "contact" : "local";
-  return applyConversationSectionOrder(conversationSections.value, conversationSectionOrders.value[tab]).sections;
+const rawCategorySections = computed<ConversationSection[]>(() => {
+  if (activeConversationTab.value !== "local") return [];
+  const sections = buildCategoryConversationSections(props.items, {
+    titles: {
+      recent: t("chat.recentConversations"),
+      pinned: t("chat.systemNotifications"),
+      other: t("chat.otherConversations"),
+      defaultWorkspace: t("chat.defaultWorkspace"),
+      currentProject: t("chat.currentProject"),
+      unknownPersona: t("chat.unknownPersona"),
+    },
+    locale: locale.value,
+    grouping: conversationGrouping.value,
+    personaNameMap: props.personaNameMap,
+  });
+  return applyConversationSectionOrder(sections, conversationSectionOrders.value.local).sections;
+});
+
+const rawContactSections = computed<ConversationSection[]>(() => {
+  if (activeConversationTab.value !== "contact") return [];
+  const visibleItems = props.items.filter((item) => String(item.kind || "").trim() === "remote_im_contact");
+  const sections = buildRemoteConversationSections(visibleItems, {
+    fallbackTitle: t("chat.otherConversations"),
+    locale: locale.value,
+    pinnedFirst: true,
+  });
+  return applyConversationSectionOrder(sections, conversationSectionOrders.value.contact).sections;
 });
 
 const normalizedConversationSearchQuery = computed(() =>
@@ -725,15 +1113,39 @@ watch(
   { immediate: true },
 );
 
-const filteredConversationSections = computed(() => {
+function filterSectionBySearch(section: ConversationSection, query: string): ConversationSection | null {
+  const filtered = section.items.filter((item) => conversationMatchesSearch(item, query));
+  if (filtered.length === 0) return null;
+  return { ...section, items: filtered };
+}
+
+const displayedRecentSections = computed<DisplayConversationSection[]>(() => {
   const query = normalizedConversationSearchQuery.value;
-  if (!query) return orderedConversationSections.value;
-  return orderedConversationSections.value
-    .map((section) => ({
-      ...section,
-      items: section.items.filter((item) => conversationMatchesSearch(item, query)),
-    }))
-    .filter((section) => section.items.length > 0);
+  return rawRecentSections.value
+    .map((s) => (query ? filterSectionBySearch(s, query) : s))
+    .filter((s): s is ConversationSection => s !== null)
+    .map((s) => buildDisplayedConversationSection(s));
+});
+
+const displayedCategorySections = computed<DisplayConversationSection[]>(() => {
+  const query = normalizedConversationSearchQuery.value;
+  return rawCategorySections.value
+    .map((s) => (query ? filterSectionBySearch(s, query) : s))
+    .filter((s): s is ConversationSection => s !== null)
+    .map((s) => buildDisplayedConversationSection(s));
+});
+
+const displayedContactSections = computed<DisplayConversationSection[]>(() => {
+  const query = normalizedConversationSearchQuery.value;
+  return rawContactSections.value
+    .map((s) => (query ? filterSectionBySearch(s, query) : s))
+    .filter((s): s is ConversationSection => s !== null)
+    .map((s) => buildDisplayedConversationSection(s));
+});
+
+const allConversationSections = computed<ConversationSection[]>(() => {
+  if (activeConversationTab.value === "contact") return rawContactSections.value;
+  return [...rawRecentSections.value, ...rawCategorySections.value];
 });
 
 /** 系统通知会话不再作为可折叠分组，改为右下角操作栏的铃铛图标按钮。
@@ -757,19 +1169,6 @@ function isActiveSystemNotificationConversation(item: ChatConversationOverviewIt
   const itemId = String(item.conversationId || "").trim();
   return !!itemId && itemId === String(props.activeConversationId || "").trim();
 }
-
-/** 草稿会话不在侧栏列表中显示，只通过顶部「新建会话」按钮表达 */
-const visibleConversationSections = computed(() =>
-  filteredConversationSections.value
-    .map((section) => ({ ...section, items: section.items.filter((item) => !item.isDraft) }))
-    .filter((section) => section.items.length > 0),
-);
-
-const displayedConversationSections = computed<DisplayConversationSection[]>(() =>
-  visibleConversationSections.value
-    .filter((section) => section.key !== "pinned")
-    .map((section) => buildDisplayedConversationSection(section)),
-);
 
 watch(
   () => props.activeConversationId,
@@ -837,6 +1236,7 @@ async function persistConversationSectionOrder(tab: "local" | "contact", ordered
 
 function isConversationSectionDraggable(section: ConversationSection): boolean {
   if (normalizedConversationSearchQuery.value) return false;
+  if (section.key.startsWith("recent:")) return false;
   return section.key !== "pinned"
     && section.key !== RECENT_CONVERSATION_SECTION_KEY
     && section.key !== CURRENT_PROJECT_SECTION_KEY;
@@ -889,7 +1289,8 @@ function handleConversationSectionDrop(section: ConversationSection, event: Drag
   }
   event.preventDefault();
   const tab = activeConversationTab.value === "contact" ? "contact" : "local";
-  const draggableKeys = orderedConversationSections.value
+  const sourceSections = tab === "contact" ? rawContactSections.value : rawCategorySections.value;
+  const draggableKeys = sourceSections
     .filter((item) => isConversationSectionDraggable(item))
     .map((item) => item.key);
   const fromIndex = draggableKeys.indexOf(draggingKey);
@@ -906,20 +1307,16 @@ function handleConversationSectionDrop(section: ConversationSection, event: Drag
   const [moved] = nextDraggableKeys.splice(fromIndex, 1);
   const adjustedToIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
   nextDraggableKeys.splice(adjustedToIndex, 0, moved);
-  const fixedPrefix = orderedConversationSections.value
-    .filter((item) => !isConversationSectionDraggable(item))
-    .map((item) => item.key);
-  const nextOrder = [...fixedPrefix, ...nextDraggableKeys];
   handleConversationSectionDragEnd();
   const currentSavedOrder = conversationSectionOrders.value[tab] || [];
-  const orderUnchanged = nextOrder.length === currentSavedOrder.length
-    && nextOrder.every((key, index) => key === currentSavedOrder[index]);
+  const orderUnchanged = nextDraggableKeys.length === currentSavedOrder.length
+    && nextDraggableKeys.every((key, index) => key === currentSavedOrder[index]);
   if (orderUnchanged) return;
   conversationSectionOrders.value = {
     ...conversationSectionOrders.value,
-    [tab]: nextOrder,
+    [tab]: nextDraggableKeys,
   };
-  void persistConversationSectionOrder(tab, nextOrder);
+  void persistConversationSectionOrder(tab, nextDraggableKeys);
 }
 
 function conversationSectionDragIndicator(section: ConversationSection): "before" | "after" | null {
@@ -932,7 +1329,7 @@ function defaultVisibleConversationCount(section: ConversationSection): number {
   if (items.length <= CONVERSATION_SECTION_MIN_VISIBLE) return items.length;
   if (normalizedConversationSearchQuery.value) return items.length;
   if (section.key === "pinned") return items.length;
-  if (section.key === RECENT_CONVERSATION_SECTION_KEY) {
+  if (section.key.startsWith("recent:") || section.key === RECENT_CONVERSATION_SECTION_KEY) {
     // 基础展示量 = 至少 5 条 + 凌晨 4 点至今活跃过的会话，超出部分通过「加载更多」逐步展开。
     return Math.max(CONVERSATION_SECTION_MIN_VISIBLE, conversationCountSinceDayStart(items));
   }
@@ -963,7 +1360,7 @@ const conversationSectionLeadStyle = computed(() => {
   return { width: `max(var(--ecall-section-lead, ${fallback}), ${fallback})` };
 });
 
-/** 置顶 / 最近是会话集合而非目录，用箭头；其余分组用文件夹开合 */
+/** 置顶用箭头；最近子分组与工作区分组用文件夹；其余默认文件夹 */
 function conversationSectionIcon(section: ConversationSection): "chevron" | "folder" {
   if (activeConversationTab.value === "contact") return "chevron";
   return section.key === "pinned" || section.key === RECENT_CONVERSATION_SECTION_KEY ? "chevron" : "folder";
@@ -982,31 +1379,20 @@ function buildDisplayedConversationSection(section: ConversationSection): Displa
   const baseVisibleCount = defaultVisibleConversationCount(section);
   const extraVisibleCount = Math.max(0, Number(conversationSectionLoadMoreCounts.value[stateKey] || 0));
   const visibleCount = Math.min(items.length, baseVisibleCount + extraVisibleCount);
-  // 最近会话在非人格分组依据下不用头像徽章，改为按来源聚块 + 分割线；
-  // 搜索态保持原始顺序，不做聚块。
-  const useRecentDividers = section.key === RECENT_CONVERSATION_SECTION_KEY
-    && conversationGrouping.value !== "persona"
-    && !normalizedConversationSearchQuery.value;
   const sliced = items.slice(0, visibleCount);
-  const { orderedItems, dividers } = useRecentDividers
-    ? groupRecentItemsBySource(sliced, { defaultLabel: t("chat.otherConversations") })
-    : { orderedItems: sliced, dividers: [] as RecentSourceBlockDivider[] };
-  const recentDividers = dividers.length > 0
-    ? Object.fromEntries(dividers.map((divider) => [divider.conversationId, divider]))
-    : undefined;
+
   // 精简模式：不做 full 聚合，条目统一为简单行，但仍按同样规则截断并支持「加载更多」
   if (isSimpleConversationRows.value) {
     return {
       ...section,
-      visibleItems: orderedItems,
+      visibleItems: sliced,
       simpleFollowers: {},
       visibleCount: visibleCount,
       hiddenItemCount: Math.max(0, items.length - visibleCount),
       totalItemCount: items.length,
-      recentDividers,
     };
   }
-  const { reorderedItems, simpleFollowers } = aggregateConversationItems(orderedItems, {
+  const { reorderedItems, simpleFollowers } = aggregateConversationItems(sliced, {
     searchActive: !!normalizedConversationSearchQuery.value,
   });
   return {
@@ -1016,7 +1402,6 @@ function buildDisplayedConversationSection(section: ConversationSection): Displa
     visibleCount: visibleCount,
     hiddenItemCount: Math.max(0, items.length - visibleCount),
     totalItemCount: items.length,
-    recentDividers,
   };
 }
 
@@ -1096,13 +1481,8 @@ function isConversationSectionCollapsed(key: string): boolean {
   if (normalizedConversationSearchQuery.value) return false;
   const collapsed = collapsedConversationSectionKeys.value[key];
   if (collapsed !== undefined) return collapsed;
-  // 有「当前项目」分组时：默认展开当前项目、折叠最近会话；
-  // 没有（未绑定工作区）时最近会话保持默认展开，避免整列全折叠。
+  if (key.startsWith("recent:")) return false;
   if (key === CURRENT_PROJECT_SECTION_KEY) return false;
-  const hasCurrentProjectSection = conversationSections.value.some(
-    (section) => section.key === CURRENT_PROJECT_SECTION_KEY,
-  );
-  if (key === RECENT_CONVERSATION_SECTION_KEY) return hasCurrentProjectSection;
   return true;
 }
 
@@ -1147,31 +1527,16 @@ function setConversationSectionElement(key: string, element: unknown) {
 function revealConversationSection(item: ChatConversationOverviewItem) {
   const conversationId = String(item.conversationId || "").trim();
   if (!conversationId) return;
-  const section = conversationSections.value.find((entry) =>
-    entry.key !== RECENT_CONVERSATION_SECTION_KEY
-    && entry.items.some((candidate) => String(candidate.conversationId || "").trim() === conversationId),
+  const section = rawCategorySections.value.find((entry) =>
+    entry.items.some((candidate) => String(candidate.conversationId || "").trim() === conversationId),
   );
   if (!section) return;
   const wasCollapsed = isConversationSectionCollapsed(section.key);
   expandConversationSection(section.key);
-  const element = conversationSectionElements.get(section.key);
-  window.setTimeout(() => {
-    if (element) conversationFloatingScrollRef.value?.scrollToElement(element);
-  }, wasCollapsed ? 220 : 0);
-}
-
-function revealRecentSourceSection(divider: RecentSourceBlockDivider) {
-  const targetPath = canonicalWorkspaceRootForComparison(divider.workspaceRootPath);
-  const section = conversationSections.value.find((entry) => {
-    if (entry.key === RECENT_CONVERSATION_SECTION_KEY || entry.key === "pinned") return false;
-    if (targetPath) {
-      return canonicalWorkspaceRootForComparison(String(entry.workspaceRootPath || "")) === targetPath;
-    }
-    return entry.key.startsWith("channel:") && entry.title === divider.label;
-  });
-  if (!section) return;
-  const wasCollapsed = isConversationSectionCollapsed(section.key);
-  expandConversationSection(section.key);
+  if (isCategorySuperSectionCollapsed.value) {
+    isCategorySuperSectionCollapsed.value = false;
+    writeSuperSectionCollapsed(CATEGORY_SUPER_COLLAPSED_KEY, false);
+  }
   const element = conversationSectionElements.get(section.key);
   window.setTimeout(() => {
     if (element) conversationFloatingScrollRef.value?.scrollToElement(element);
@@ -1179,7 +1544,7 @@ function revealRecentSourceSection(divider: RecentSourceBlockDivider) {
 }
 
 function collapseAllConversationSections() {
-  collapsedConversationSectionKeys.value = conversationSections.value.reduce((next, section) => {
+  collapsedConversationSectionKeys.value = allConversationSections.value.reduce((next, section) => {
     next[section.key] = true;
     return next;
   }, { ...collapsedConversationSectionKeys.value } as Record<string, boolean>);
@@ -1411,5 +1776,35 @@ function formatConversationTime(value?: string): string {
 .conversation-tab-slide-right-enter-from {
   opacity: 0;
   transform: translateX(-12px);
+}
+
+.super-section-shell {
+  display: grid;
+  grid-template-rows: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  transition: grid-template-rows 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.super-section-shell.is-collapsed {
+  grid-template-rows: 0fr;
+}
+
+.super-section-inner {
+  min-height: 0;
+  min-width: 0;
+  overflow: clip;
+  visibility: visible;
+  transition: visibility 180ms;
+}
+
+.super-section-shell.is-collapsed .super-section-inner {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .super-section-shell {
+    transition: none;
+  }
 }
 </style>

@@ -1787,6 +1787,7 @@
     "mainConversationPinned": "System notification conversation is always pinned",
     "defaultDepartment": "Default Department",
     "recentConversations": "Recent",
+    "recentWithinHours": "Within {count}h",
     "revealConversationSection": "Reveal group",
     "pinnedConversations": "Pinned",
     "systemNotifications": "System Notifications",

@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { buildConversationSections, canonicalWorkspaceRootForComparison, conversationCountSinceDayStart, applyConversationSectionOrder, type ConversationSection, type ConversationSectionTitles } from "./conversation-sections";
+import {
+  applyConversationSectionOrder,
+  buildCategoryConversationSections,
+  buildConversationSections,
+  buildRecentConversationSections,
+  canonicalWorkspaceRootForComparison,
+  conversationCountSinceDayStart,
+  type ConversationSection,
+  type ConversationSectionTitles,
+} from "./conversation-sections";
 import type { ChatConversationOverviewItem } from "../../../types/app";
 
 const titles: ConversationSectionTitles = {
@@ -506,3 +515,54 @@ describe("人格分组模式", () => {
     expect(sections.some((section) => section.key.startsWith("persona:"))).toBe(false);
   });
 });
+
+describe("buildRecentConversationSections", () => {
+  it("非人格模式下，当前项目排在最前，其余来源按最近时间倒序成独立分组", () => {
+    const items = [
+      item({ conversationId: "c1", workspaceRootPath: "E:/work/current", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+      item({ conversationId: "other1", workspaceRootPath: "E:/work/other", lastMessageAt: "2026-08-05T00:00:00Z", updatedAt: "2026-08-05T00:00:00Z" }),
+      item({ conversationId: "def1", lastMessageAt: "2026-08-02T00:00:00Z", updatedAt: "2026-08-02T00:00:00Z" }),
+      item({ conversationId: "sys", isSystemNotificationConversation: true, lastMessageAt: "2026-08-09T00:00:00Z" }),
+    ];
+    const sections = buildRecentConversationSections(items, {
+      titles,
+      currentWorkspaceRootPath: "E:/work/current",
+      grouping: "workspace",
+    });
+    expect(sections.map((s) => s.key)).toEqual([
+      "recent:current-project",
+      "recent:workspace:e:/work/other",
+      "recent:workspace:__default__",
+    ]);
+    expect(sections[0].title).toBe("当前项目");
+    expect(sections.some((s) => s.items.some((i) => i.conversationId === "sys"))).toBe(false);
+  });
+
+  it("人格模式下按 agentId 聚类为独立最近子分组", () => {
+    const items = [
+      item({ conversationId: "p1", agentId: "agent-a", lastMessageAt: "2026-08-01T00:00:00Z", updatedAt: "2026-08-01T00:00:00Z" }),
+      item({ conversationId: "p2", agentId: "agent-b", lastMessageAt: "2026-08-05T00:00:00Z", updatedAt: "2026-08-05T00:00:00Z" }),
+    ];
+    const sections = buildRecentConversationSections(items, {
+      titles,
+      grouping: "persona",
+      personaNameMap: { "agent-a": "助手A", "agent-b": "助手B" },
+    });
+    expect(sections.map((s) => s.key)).toEqual(["recent:persona:agent-b", "recent:persona:agent-a"]);
+    expect(sections[0].title).toBe("助手B");
+  });
+});
+
+describe("buildCategoryConversationSections", () => {
+  it("工作区模式生成工作区分组，过滤草稿与系统通知", () => {
+    const items = [
+      item({ conversationId: "w1", workspaceRootPath: "E:/work/a", lastMessageAt: "2026-08-01T00:00:00Z" }),
+      item({ conversationId: "draft", isDraft: true, workspaceRootPath: "E:/work/a" }),
+      item({ conversationId: "sys", isSystemNotificationConversation: true }),
+    ];
+    const sections = buildCategoryConversationSections(items, { titles, grouping: "workspace" });
+    expect(sections.map((s) => s.key)).toEqual(["workspace:e:/work/a"]);
+    expect(sections[0].items.map((i) => i.conversationId)).toEqual(["w1"]);
+  });
+});
+

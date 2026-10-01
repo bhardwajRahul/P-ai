@@ -132,6 +132,156 @@ export function buildConversationSections(
   ];
 }
 
+export function buildRecentConversationSections(
+  items: ChatConversationOverviewItem[],
+  options: {
+    titles: ConversationSectionTitles;
+    locale?: string | string[];
+    currentWorkspaceRootPath?: string;
+    activeConversationId?: string;
+    grouping?: ConversationSectionGrouping;
+    personaNameMap?: Record<string, string>;
+    maxCount?: number;
+    /** 最近时间窗口（小时），仅保留该时间内活跃的会话；默认不限制 */
+    recentHours?: number;
+  },
+): ConversationSection[] {
+  const { titles, locale } = options;
+  const isPersonaGrouping = options.grouping === "persona";
+  const normalizedActiveId = String(options.activeConversationId || "").trim();
+
+  const candidates = items.filter((item) => {
+    if (String(item.kind || "local_unarchived").trim() === "remote_im_contact") return false;
+    if (item.isSystemNotificationConversation) return false;
+    if (item.isDraft && String(item.conversationId || "").trim() !== normalizedActiveId) return false;
+    if (options.recentHours != null && options.recentHours > 0) {
+      const cutoff = Date.now() - options.recentHours * 3600 * 1000;
+      if (conversationRecencyMs(item) < cutoff) return false;
+    }
+    return true;
+  });
+
+  if (candidates.length === 0) return [];
+
+  const seenIds = new Set<string>();
+  const sortedCandidates = candidates
+    .sort((left, right) => conversationRecencyMs(right) - conversationRecencyMs(left))
+    .filter((item) => {
+      const id = String(item.conversationId || "").trim();
+      if (!id || seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
+
+  const limitedCandidates = (typeof options.maxCount === "number" && options.maxCount > 0)
+    ? sortedCandidates.slice(0, options.maxCount)
+    : sortedCandidates;
+
+  if (limitedCandidates.length === 0) return [];
+
+  if (isPersonaGrouping) {
+    const byPersona = new Map<string, { title: string; personaId?: string; items: ChatConversationOverviewItem[] }>();
+    for (const item of limitedCandidates) {
+      const agentId = String(item.agentId || "").trim();
+      const title = String(options.personaNameMap?.[agentId] || "").trim() || agentId || titles.unknownPersona;
+      const key = `recent:persona:${agentId || "__unknown__"}`;
+      const existing = byPersona.get(key);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        byPersona.set(key, { title, personaId: agentId || undefined, items: [item] });
+      }
+    }
+    return Array.from(byPersona.entries())
+      .map(([key, group]) => ({
+        key,
+        title: group.title,
+        personaId: group.personaId,
+        items: sortConversationItemsPinnedFirst(group.items),
+        recency: group.items.reduce((max, entry) => Math.max(max, conversationRecencyMs(entry)), 0),
+      }))
+      .sort((left, right) => right.recency - left.recency)
+      .map(({ recency: _recency, ...section }) => section);
+  }
+
+  const currentWorkspacePath = String(options.currentWorkspaceRootPath || "").trim();
+  const normalizedCurrentWorkspacePath = canonicalWorkspaceRootForComparison(currentWorkspacePath);
+
+  const byWorkspace = new Map<string, { title: string; workspaceRootPath?: string; items: ChatConversationOverviewItem[]; isCurrent: boolean }>();
+  for (const item of limitedCandidates) {
+    const path = String(item.workspaceRootPath || "").trim();
+    const normalizedPath = canonicalWorkspaceRootForComparison(path);
+    const isCurrent = !!normalizedCurrentWorkspacePath && normalizedPath === normalizedCurrentWorkspacePath;
+    const key = isCurrent
+      ? "recent:current-project"
+      : `recent:workspace:${normalizedPath || "__default__"}`;
+    const title = isCurrent
+      ? titles.currentProject
+      : (String(item.workspaceLabel || "").trim() || workspaceNameFromPath(path) || titles.defaultWorkspace);
+
+    const existing = byWorkspace.get(key);
+    if (existing) {
+      existing.items.push(item);
+    } else {
+      byWorkspace.set(key, {
+        title,
+        workspaceRootPath: isCurrent ? currentWorkspacePath : (path || undefined),
+        items: [item],
+        isCurrent,
+      });
+    }
+  }
+
+  const sectionsWithRecency = Array.from(byWorkspace.entries()).map(([key, group]) => ({
+    key,
+    title: group.title,
+    workspaceRootPath: group.workspaceRootPath,
+    items: sortConversationItemsPinnedFirst(group.items),
+    isCurrent: group.isCurrent,
+    recency: group.items.reduce((max, entry) => Math.max(max, conversationRecencyMs(entry)), 0),
+  }));
+
+  return sectionsWithRecency
+    .sort((left, right) => {
+      if (left.isCurrent !== right.isCurrent) return left.isCurrent ? -1 : 1;
+      return right.recency - left.recency;
+    })
+    .map(({ recency: _recency, isCurrent: _isCurrent, ...section }) => section);
+}
+
+export function buildCategoryConversationSections(
+  items: ChatConversationOverviewItem[],
+  options: {
+    titles: ConversationSectionTitles;
+    locale?: string | string[];
+    grouping?: ConversationSectionGrouping;
+    personaNameMap?: Record<string, string>;
+  },
+): ConversationSection[] {
+  const { titles, locale } = options;
+  const isPersonaGrouping = options.grouping === "persona";
+
+  const regularItems = items.filter((item) => {
+    if (String(item.kind || "local_unarchived").trim() === "remote_im_contact") return false;
+    if (item.isSystemNotificationConversation || item.isDraft) return false;
+    return true;
+  });
+
+  if (isPersonaGrouping) {
+    return buildPersonaConversationSections(regularItems, {
+      fallbackTitle: titles.unknownPersona,
+      personaNameMap: options.personaNameMap,
+      locale,
+    });
+  }
+
+  return buildWorkspaceConversationSections(regularItems, {
+    defaultWorkspaceTitle: titles.defaultWorkspace,
+    locale,
+    pinnedFirst: true,
+  });
+}
+
 export const RECENT_CONVERSATION_SECTION_KEY = "recent";
 export const CURRENT_PROJECT_SECTION_KEY = "current-project";
 
