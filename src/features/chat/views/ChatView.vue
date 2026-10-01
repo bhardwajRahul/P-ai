@@ -112,11 +112,9 @@
           <div class="ecall-chat-history-flow flex min-w-0 shrink-0 flex-col">
             <div
               v-if="showNoMoreHistoryDivider"
-              class="mx-auto flex w-full max-w-225 items-center gap-3 px-4 pb-2 pt-1 text-xs text-base-content/45"
+              class="divider mx-auto my-0 w-full max-w-225 px-4 pb-2 pt-1 text-xs font-semibold text-base-content/55"
             >
-              <div class="h-px flex-1 bg-base-300/70"></div>
-              <span class="shrink-0 font-semibold text-base-content/55">{{ t("chat.noMoreHistory") }}</span>
-              <div class="h-px flex-1 bg-base-300/70"></div>
+              {{ t("chat.noMoreHistory") }}
             </div>
             <Virtualizer
               v-if="scrollContainer"
@@ -131,21 +129,17 @@
                 <div :key="item.id" class="w-full ecall-chat-virtual-item">
                   <div
                     v-if="item.kind === 'compaction'"
-                    class="mt-4 flex items-center gap-3 text-xs text-base-content/45"
+                    class="divider mt-4 mb-0 text-xs text-base-content/45"
                   >
-                    <div class="h-px flex-1 bg-base-300/80"></div>
                     <button type="button" class="btn btn-ghost btn-xs shrink-0 gap-1.5 px-2 text-base-content/60 hover:text-base-content"
                       :title="t('chat.viewSummary')" @click="openConversationSummary(item.block, $event)"
                       @contextmenu.prevent.stop="openCompactionSummaryContextMenu(item.block, $event)">
                       <History class="h-3.5 w-3.5" />
                       <span>{{ t("chat.viewSummary") }}</span>
                     </button>
-                    <div class="h-px flex-1 bg-base-300/80"></div>
                   </div>
-                  <div v-else-if="item.kind === 'plan_started'" class="mt-4 flex items-center gap-3 text-xs text-base-content/45">
-                    <div class="h-px flex-1 bg-base-300/80"></div>
+                  <div v-else-if="item.kind === 'plan_started'" class="divider mt-4 mb-0 text-xs text-base-content/45">
                     <span class="shrink-0 rounded-full border border-base-300 bg-base-100 px-3 py-1 text-base-content/55">{{ t("chat.planStartedDivider") }}</span>
-                    <div class="h-px flex-1 bg-base-300/80"></div>
                   </div>
                   <div v-else-if="item.kind === 'message'"
                     v-memo="[...messageMemoKey(item.block, item.renderId, item.blockIndex, item.compactWithPrevious), agentNameMapSignature]">

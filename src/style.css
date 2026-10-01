@@ -152,6 +152,37 @@
   --noise: 0;
 }
 
+/* 分割线两端淡出：靠近中间实，向外透明。mask 保留 DaisyUI 的颜色变量和彩色变体。 */
+.divider {
+  --divider-color: color-mix(in oklab, var(--color-base-content) 15%, transparent);
+}
+
+.divider::before,
+.divider::after {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000);
+  mask-image: linear-gradient(to right, transparent, #000);
+}
+
+.divider::after {
+  -webkit-mask-image: linear-gradient(to right, #000, transparent);
+  mask-image: linear-gradient(to right, #000, transparent);
+}
+
+.divider-horizontal.divider::before,
+.divider-horizontal.divider::after {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000);
+  mask-image: linear-gradient(to bottom, transparent, #000);
+}
+
+.divider-horizontal.divider::after {
+  -webkit-mask-image: linear-gradient(to bottom, #000, transparent);
+  mask-image: linear-gradient(to bottom, #000, transparent);
+}
+
+.divider:not(.divider-horizontal):not(:empty) {
+  height: auto;
+}
+
 html,
 body,
 #app {
