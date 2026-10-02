@@ -381,7 +381,6 @@
                   class="ecall-process-fold"
                   @click.stop="processSegmentsExpanded = !processSegmentsExpanded"
                 >
-                  <MessagesSquare v-if="assistantBubbleBackgroundEnabled" class="h-3.5 w-3.5 shrink-0" />
                   <span>{{ processSegmentsExpanded ? t("common.collapse") : t("chat.previousProcessMessages", { count: collapsibleProcessPieceCount }) }}</span>
                   <ChevronRight
                     class="h-3.5 w-3.5 shrink-0 transition-transform duration-200"
@@ -659,7 +658,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect, watchPostEffect, type Ref, type StyleValue } from "vue";
 import { useI18n } from "vue-i18n";
-import { Braces, ChevronDown, ChevronRight, Copy, FileText, ImageIcon, ListCheck, MessagesSquare, Split, Undo2 } from "@lucide/vue";
+import { Braces, ChevronDown, ChevronRight, Copy, FileText, ImageIcon, ListCheck, Split, Undo2 } from "@lucide/vue";
 import { invokeTauri, openTransportWorkspaceFile, readTransportChatImage } from "../../../services/tauri-api";
 import type { ChatActivityItem, ChatMessageBlock } from "../../../types/app";
 import {
