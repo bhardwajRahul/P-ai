@@ -634,6 +634,7 @@ async fn builtin_deep_recall(
         Some(source_agent_id),
         DELEGATE_TOOL_KIND_DEEP_RECALL,
         deep_recall_delegate_args(source_agent_id, query),
+        None,
     )
     .await;
     // 委托已结束，按本次委托会话释放它占用的内存索引；归属不明时兜底清理。

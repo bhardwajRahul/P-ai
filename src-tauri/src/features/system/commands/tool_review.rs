@@ -429,6 +429,8 @@ struct ToolReviewCodeReviewInput {
     target: Option<String>,
     #[serde(default)]
     agent_id: Option<String>,
+    #[serde(default)]
+    api_config_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2312,6 +2314,16 @@ async fn submit_tool_review_code_internal(
     } else {
         REVIEWER_AGENT_ID.to_string()
     };
+    let review_model_override = input
+        .api_config_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|raw| {
+            resolve_chat_api_config_id(&runtime_snapshot.config, raw)
+                .ok_or_else(|| format!("指定模型不可用或不支持文本对话，apiConfigId={raw}"))
+        })
+        .transpose()?;
     let pending_report = tool_review_create_pending_report(
         &app_state.data_path,
         conversation_id,
@@ -2339,6 +2351,7 @@ async fn submit_tool_review_code_internal(
     let target_owned = if target_text.trim().is_empty() { None } else { Some(target_text.clone()) };
     let source_agent_id_owned = source_agent_id.clone();
     let target_agent_id_owned = target_agent_id.clone();
+    let review_model_override_owned = review_model_override.clone();
     tauri::async_runtime::spawn(async move {
         runtime_log_info(format!(
             "[工具审查][后端] 开始代码审查子任务 conversation_id={} scope={} report_id={} target={}",
@@ -2400,6 +2413,7 @@ async fn submit_tool_review_code_internal(
             Some(source_agent_id_owned.as_str()),
             DELEGATE_TOOL_KIND_DELEGATE,
             delegate_args,
+            review_model_override_owned.as_deref(),
         )
         .await
         {

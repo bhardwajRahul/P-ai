@@ -859,7 +859,7 @@ const props = defineProps<{
   onBranchConversationFromSelection: (payload: { count: number; messageIds: string[] }) => void;
   onBranchConversationFromCurrent: () => void;
   onForwardConversationFromSelection: (payload: { count: number; messageIds: string[]; target: { kind: "local_unarchived" | "remote_im_contact"; conversationId: string; remoteContactId?: string } }) => void;
-  onUserAsyncDelegateFromSelection: (payload: { count: number; messageIds: string[]; agentId: string; presetId: string; why: string; goal: string; todo: string }) => Promise<boolean> | boolean;
+  onUserAsyncDelegateFromSelection: (payload: { count: number; messageIds: string[]; agentId: string; presetId: string; why: string; goal: string; todo: string; apiConfigId?: string }) => Promise<boolean> | boolean;
   loadArchives: () => void;
   selectArchive: (id: string) => void;
   selectArchiveBlock: (blockId?: number | null) => void;
@@ -1009,6 +1009,7 @@ async function handleUserAsyncDelegateFromSelection(payload: {
   why: string;
   goal: string;
   todo: string;
+  apiConfigId?: string;
 }) {
   const ok = await props.onUserAsyncDelegateFromSelection(payload);
   if (ok) chatViewRef.value?.exitMessageSelectionMode();

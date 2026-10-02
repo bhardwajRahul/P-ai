@@ -15,18 +15,9 @@ export interface UseChatSelectionOptions {
     selectionActionCopyError: (payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string; error: string }) => void;
     selectionActionBranch: (payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string }) => void;
     selectionActionForward: (payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string; target: ConversationForwardTarget }) => void;
-    selectionActionDelegate: (payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string; agentId: string; presetId: string; why: string; goal: string; todo: string }) => void;
     selectionActionShare: (payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string; exportFormat?: "html" | "png" | "copyPng" }) => void;
   };
 }
-
-type DelegateActionPayload = {
-  agentId: string;
-  presetId: string;
-  why: string;
-  goal: string;
-  todo: string;
-};
 
 export function useChatSelection(options: UseChatSelectionOptions) {
   const {
@@ -132,8 +123,8 @@ export function useChatSelection(options: UseChatSelectionOptions) {
   }
 
   function emitSelectionAction(
-    kind: "branch" | "share" | "forward" | "delegate",
-    actionPayload: ConversationForwardTarget | DelegateActionPayload | "" | "html" | "png" | "copyPng" = "",
+    kind: "branch" | "share" | "forward",
+    actionPayload: ConversationForwardTarget | "" | "html" | "png" | "copyPng" = "",
   ) {
     const payload = selectionPayload();
     if (kind === "branch") {
@@ -152,18 +143,6 @@ export function useChatSelection(options: UseChatSelectionOptions) {
       if (!target.conversationId) return;
       if (target.kind === "remote_im_contact" && !target.remoteContactId) return;
       onEmit.selectionActionForward({ ...payload, target });
-      return;
-    }
-    if (kind === "delegate") {
-      if (!actionPayload || typeof actionPayload === "string" || !("agentId" in actionPayload)) return;
-      onEmit.selectionActionDelegate({
-        ...payload,
-        agentId: String(actionPayload.agentId || "").trim(),
-        presetId: String(actionPayload.presetId || "review").trim() || "review",
-        why: String(actionPayload.why || "").trim(),
-        goal: String(actionPayload.goal || "").trim(),
-        todo: String(actionPayload.todo || "").trim(),
-      });
       return;
     }
     if (payload.count === 0) return;

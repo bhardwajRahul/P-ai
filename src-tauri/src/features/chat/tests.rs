@@ -10953,6 +10953,7 @@
                 why: None,
                 goal: Some("请调查这个问题".to_string()),
                 todo: None,
+                api_config_id: None,
                 background: None,
                 question: None,
                 focus: None,

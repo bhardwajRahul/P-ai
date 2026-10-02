@@ -336,6 +336,7 @@ export function useChatConversationActionsOrchestrator(bindings: Record<string, 
     why: string;
     goal: string;
     todo: string;
+    apiConfigId?: string;
   }) {
     const conversationId = String(bindings.currentChatConversationId.value || "").trim();
     const targetAgentId = String(payload?.agentId || "").trim();
@@ -364,6 +365,7 @@ export function useChatConversationActionsOrchestrator(bindings: Record<string, 
           goal,
           todo,
           selectedMessageIds,
+          apiConfigId: String(payload?.apiConfigId || "").trim() || undefined,
         },
       });
       const targetName = String(result?.targetAgentName || result?.targetAgentId || "").trim() || "子代理";

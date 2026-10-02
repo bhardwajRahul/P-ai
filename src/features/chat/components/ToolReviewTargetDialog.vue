@@ -1,60 +1,80 @@
 <template>
   <dialog ref="dialogRef" class="modal !items-start overflow-y-auto overflow-x-hidden pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:!items-center sm:py-6" @close="onDialogClose" @cancel.prevent="onDialogClose">
     <div class="modal-box mx-auto flex max-h-[calc(100dvh-max(2rem,env(safe-area-inset-top)+env(safe-area-inset-bottom)))] w-[88vw] max-w-4xl flex-col overflow-hidden p-0">
-      <div class="shrink-0 border-b border-base-300 px-5 py-4">
-        <div class="text-base font-semibold">{{ t("chat.toolReview.generateReviewReport") }}</div>
+      <div class="relative z-20 shrink-0 border-b border-base-300 px-5 py-3">
+        <SegmentedControl
+          :model-value="panel"
+          :options="launchPanelOptions"
+          size="sm"
+          :full-width="false"
+          @update:model-value="setPanel"
+        />
       </div>
       <div class="relative z-20 shrink-0 overflow-visible px-5 pt-4">
-        <div class="mb-4 grid gap-1.5">
+        <div class="grid gap-1.5">
           <div class="text-xs font-medium text-base-content/60">{{ t("chat.toolReview.agentLabel") }}</div>
           <AgentPersonaSelect
             v-model:agent-id="selectedAgentId"
+            v-model:api-config-id="selectedApiConfigId"
             :options="agentSelectOptions"
+            :api-configs="apiConfigs"
             :persona-avatar-url-map="personaAvatarUrlMap"
+            show-model
             auto-select-first
           />
         </div>
-        <div role="tablist" class="tabs tabs-border flex-wrap">
-          <button type="button" role="tab" class="tab" :class="{ 'tab-active': scope === 'commit' }" @click="setScope('commit')">{{ t("chat.toolReview.scopeCommit") }}</button>
-          <button type="button" role="tab" class="tab" :class="{ 'tab-active': scope === 'main' }" @click="setScope('main')">{{ t("chat.toolReview.scopeMain") }}</button>
-          <button type="button" role="tab" class="tab" :class="{ 'tab-active': scope === 'uncommitted' }" @click="setScope('uncommitted')">{{ t("chat.toolReview.scopeUncommitted") }}</button>
-          <button type="button" role="tab" class="tab" :class="{ 'tab-active': scope === 'custom' }" @click="setScope('custom')">{{ t("chat.toolReview.scopeCustom") }}</button>
-        </div>
       </div>
-      <div class="relative z-0 min-h-0 flex-1 px-5 py-4" :class="scope === 'commit' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto'">
-        <div v-if="scope === 'commit'" class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100">
-          <div class="flex shrink-0 items-center justify-between gap-3 border-b border-base-300 bg-base-100 px-4 py-3 text-sm">
-            <button type="button" class="btn btn-sm shrink-0" :disabled="commitOptionsLoading || commitPage <= 1" @click="requestCommitPage(commitPage - 1)">上一页</button>
-            <span class="min-w-0 flex-1 text-center text-base-content/70">第 {{ commitPage }} 页 / 共 {{ commitTotalPages }} 页</span>
-            <button type="button" class="btn btn-sm shrink-0" :disabled="commitOptionsLoading || commitPage >= commitTotalPages" @click="requestCommitPage(commitPage + 1)">下一页</button>
-          </div>
-          <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <div v-if="commitOptionsLoading" class="px-4 py-3 text-sm text-base-content/70">{{ t("chat.toolReview.commitPickerLoading") }}</div>
-            <div v-else-if="commitOptions.length === 0" class="px-4 py-3 text-sm text-base-content/70">{{ t("chat.toolReview.commitPickerEmpty") }}</div>
-            <button
-              v-for="item in commitOptions"
-              :key="item.hash"
-              type="button"
-              class="flex w-full items-start gap-3 border-b border-base-300 px-4 py-3 text-left last:border-b-0 hover:bg-base-200"
-              @click="toggleCommitSelection(item.hash)"
-            >
-              <input type="checkbox" class="checkbox checkbox-sm mt-1" :checked="selectedCommitHashes.includes(item.hash)" tabindex="-1">
-              <div class="min-w-0 flex-1 text-sm text-base-content">{{ item.subject }}</div>
+      <div class="relative z-0 min-h-0 flex-1 px-5 py-4" :class="panel === 'review' && scope === 'commit' ? 'flex flex-col overflow-hidden' : 'overflow-y-auto'">
+        <template v-if="panel === 'delegate'">
+          <div v-if="recentGoals.length > 0" class="mb-3 flex flex-wrap gap-2">
+            <button v-for="item in recentGoals" :key="item.id" type="button" class="btn btn-xs max-w-full justify-start" :title="item.goal" @click="applyRecentGoal(item)">
+              <span class="max-w-52 truncate">{{ item.goal }}</span>
             </button>
           </div>
-        </div>
-
-        <div v-else-if="scope === 'custom'">
-          <textarea
-            v-model="customTargetText"
-            class="textarea textarea-bordered h-40 w-full"
-            :placeholder="t('chat.toolReview.customDialogPlaceholder')"
-          ></textarea>
-        </div>
-
-        <div v-else class="rounded-box border border-base-300 px-4 py-3 text-sm text-base-content/70">
-          {{ scope === 'main' ? t('chat.toolReview.scopeMain') : t('chat.toolReview.scopeUncommitted') }}
-        </div>
+          <label class="grid gap-1">
+            <span class="text-xs font-medium text-base-content/60">{{ t("chat.selection.delegateGoalLabel") }}</span>
+            <textarea v-model="goalText" class="textarea textarea-bordered min-h-32 w-full resize-y text-sm" :placeholder="t('chat.selection.goalPlaceholder')" maxlength="10000"></textarea>
+          </label>
+        </template>
+        <template v-else>
+          <div role="tablist" class="tabs tabs-border mb-4 flex-wrap">
+            <button type="button" role="tab" class="tab" :class="{ 'tab-active': scope === 'commit' }" @click="setScope('commit')">{{ t("chat.toolReview.scopeCommit") }}</button>
+            <button type="button" role="tab" class="tab" :class="{ 'tab-active': scope === 'main' }" @click="setScope('main')">{{ t("chat.toolReview.scopeMain") }}</button>
+            <button type="button" role="tab" class="tab" :class="{ 'tab-active': scope === 'uncommitted' }" @click="setScope('uncommitted')">{{ t("chat.toolReview.scopeUncommitted") }}</button>
+            <button type="button" role="tab" class="tab" :class="{ 'tab-active': scope === 'custom' }" @click="setScope('custom')">{{ t("chat.toolReview.scopeCustom") }}</button>
+          </div>
+          <div v-if="scope === 'commit'" class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-100">
+            <div class="flex shrink-0 items-center justify-between gap-3 border-b border-base-300 bg-base-100 px-4 py-3 text-sm">
+              <button type="button" class="btn btn-sm shrink-0" :disabled="commitOptionsLoading || commitPage <= 1" @click="requestCommitPage(commitPage - 1)">上一页</button>
+              <span class="min-w-0 flex-1 text-center text-base-content/70">第 {{ commitPage }} 页 / 共 {{ commitTotalPages }} 页</span>
+              <button type="button" class="btn btn-sm shrink-0" :disabled="commitOptionsLoading || commitPage >= commitTotalPages" @click="requestCommitPage(commitPage + 1)">下一页</button>
+            </div>
+            <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              <div v-if="commitOptionsLoading" class="px-4 py-3 text-sm text-base-content/70">{{ t("chat.toolReview.commitPickerLoading") }}</div>
+              <div v-else-if="commitOptions.length === 0" class="px-4 py-3 text-sm text-base-content/70">{{ t("chat.toolReview.commitPickerEmpty") }}</div>
+              <button
+                v-for="item in commitOptions"
+                :key="item.hash"
+                type="button"
+                class="flex w-full items-start gap-3 border-b border-base-300 px-4 py-3 text-left last:border-b-0 hover:bg-base-200"
+                @click="toggleCommitSelection(item.hash)"
+              >
+                <input type="checkbox" class="checkbox checkbox-sm mt-1" :checked="selectedCommitHashes.includes(item.hash)" tabindex="-1">
+                <div class="min-w-0 flex-1 text-sm text-base-content">{{ item.subject }}</div>
+              </button>
+            </div>
+          </div>
+          <div v-else-if="scope === 'custom'">
+            <textarea
+              v-model="customTargetText"
+              class="textarea textarea-bordered h-40 w-full"
+              :placeholder="t('chat.toolReview.customDialogPlaceholder')"
+            ></textarea>
+          </div>
+          <div v-else class="rounded-box border border-base-300 px-4 py-3 text-sm text-base-content/70">
+            {{ scope === 'main' ? t('chat.toolReview.scopeMain') : t('chat.toolReview.scopeUncommitted') }}
+          </div>
+        </template>
         <div v-if="errorText" class="mt-3 rounded border border-error/30 bg-error/10 px-3 py-2 text-sm text-error">
           {{ errorText }}
         </div>
@@ -71,20 +91,33 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import type { ApiConfigItem } from "../../../types/app";
 import AgentPersonaSelect from "../../shared/components/AgentPersonaSelect.vue";
+import SegmentedControl, { type SegmentedControlOption } from "../../config/components/SegmentedControl.vue";
 import type { ToolReviewCodeReviewScope, ToolReviewCommitOption } from "../composables/use-chat-tool-review";
 import type { AgentPersonaOption } from "../../shared/agent-persona-options";
 
-type AgentOption = AgentPersonaOption;
+type LaunchPanel = "delegate" | "review";
+
+type RecentGoal = {
+  id: string;
+  agentId: string;
+  goal: string;
+};
+
+const RECENT_STORAGE_KEY = "easy_call.user_async_delegate_recent.v1";
+const RECENT_LIMIT = 3;
 
 const props = defineProps<{
   open: boolean;
+  initialPanel: LaunchPanel;
   submitting: boolean;
   errorText: string;
   currentAgentId: string;
-  agentOptions: AgentOption[];
+  agentOptions: AgentPersonaOption[];
+  apiConfigs?: ApiConfigItem[];
   personaAvatarUrlMap?: Record<string, string>;
   commitOptions: ToolReviewCommitOption[];
   commitOptionsLoading: boolean;
@@ -96,39 +129,59 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: [];
   pickCommitReview: [page: number];
-  reviewCode: [input: { scope: ToolReviewCodeReviewScope; target?: string; agentId: string }];
+  panelChange: [panel: LaunchPanel];
+  reviewCode: [input: { scope: ToolReviewCodeReviewScope; target?: string; agentId: string; apiConfigId?: string }];
+  delegate: [input: { agentId: string; goal: string; apiConfigId?: string }];
 }>();
 
 const { t } = useI18n();
 const dialogRef = ref<HTMLDialogElement | null>(null);
+const panel = ref<LaunchPanel>("review");
+
+const launchPanelOptions = computed<Array<SegmentedControlOption<LaunchPanel>>>(() => [
+  { value: "delegate", label: t("chat.conversationMenu.groupDelegate") },
+  { value: "review", label: t("chat.toolReview.generateReviewReport") },
+]);
+
+/** 面板切换同时上报，由宿主记住最后一次选择，下次打开沿用 */
+function setPanel(value: LaunchPanel) {
+  if (panel.value === value) return;
+  panel.value = value;
+  emit("panelChange", value);
+}
+const selectedAgentId = ref("");
+const selectedApiConfigId = ref("");
+const selectedCommitHashes = ref<string[]>([]);
+const customTargetText = ref("");
+const goalText = ref("");
+const scope = ref<ToolReviewCodeReviewScope>("main");
+const recentGoals = ref<RecentGoal[]>([]);
+
+const apiConfigs = computed(() => (Array.isArray(props.apiConfigs) ? props.apiConfigs : []));
 
 function onDialogClose() {
   if (props.submitting) {
-    const d = dialogRef.value;
-    if (d && !d.open && props.open) d.showModal();
+    const dialog = dialogRef.value;
+    if (dialog && !dialog.open && props.open) dialog.showModal();
     return;
   }
   close();
 }
 
 function syncDialog() {
-  const d = dialogRef.value;
-  if (!d) return;
+  const dialog = dialogRef.value;
+  if (!dialog) return;
   if (props.open) {
-    if (!d.open) d.showModal();
-  } else if (d.open) d.close();
+    if (!dialog.open) dialog.showModal();
+  } else if (dialog.open) dialog.close();
 }
 
 watch(() => props.open, syncDialog);
 watch(dialogRef, syncDialog);
 
-const selectedAgentId = ref("");
-const selectedCommitHashes = ref<string[]>([]);
-const customTargetText = ref("");
-const scope = ref<ToolReviewCodeReviewScope>("main");
-
 const agentSelectOptions = computed<AgentPersonaOption[]>(() => {
   const seen = new Set<string>();
+  const excludeSelf = panel.value === "delegate" ? String(props.currentAgentId || "").trim() : "";
   return (Array.isArray(props.agentOptions) ? props.agentOptions : [])
     .map((item) => {
       const agentId = String(item.agentId || "").trim();
@@ -140,6 +193,7 @@ const agentSelectOptions = computed<AgentPersonaOption[]>(() => {
     })
     .filter((item) => {
       if (!item.agentId || !item.id || seen.has(item.id)) return false;
+      if (excludeSelf && item.agentId === excludeSelf) return false;
       seen.add(item.id);
       return true;
     });
@@ -149,9 +203,11 @@ const validSelectionOption = computed<AgentPersonaOption | null>(() => {
   const selectedAgentIdValue = String(selectedAgentId.value || "").trim();
   const selected = agentSelectOptions.value.find((item) => item.agentId === selectedAgentIdValue);
   if (selected) return selected;
-  const currentAgentId = String(props.currentAgentId || "").trim();
-  const currentOption = agentSelectOptions.value.find((item) => item.agentId === currentAgentId);
-  if (currentOption) return currentOption;
+  if (panel.value !== "delegate") {
+    const currentAgentId = String(props.currentAgentId || "").trim();
+    const currentOption = agentSelectOptions.value.find((item) => item.agentId === currentAgentId);
+    if (currentOption) return currentOption;
+  }
   return agentSelectOptions.value[0] || null;
 });
 
@@ -159,28 +215,112 @@ const commitTotalPages = computed(() => Math.max(1, Math.ceil(props.commitTotal 
 
 const canConfirm = computed(() => {
   if (props.submitting || !validSelectionOption.value) return false;
+  if (panel.value === "delegate") return !!goalText.value.trim();
   if (scope.value === "commit") return selectedCommitHashes.value.length > 0;
   if (scope.value === "custom") return !!customTargetText.value.trim();
   return true;
 });
 
 watch(
-  () => [props.currentAgentId, agentSelectOptions.value.map((item) => item.id).join("|")] as const,
+  () => [props.currentAgentId, panel.value, agentSelectOptions.value.map((item) => item.id).join("|")] as const,
   () => {
     const selectedOption = validSelectionOption.value;
-    selectedAgentId.value = String(selectedOption?.agentId || "").trim();
+    const nextAgentId = String(selectedOption?.agentId || "").trim();
+    if (selectedAgentId.value !== nextAgentId) {
+      selectedAgentId.value = nextAgentId;
+      selectedApiConfigId.value = String(selectedOption?.apiConfigId || "").trim();
+      return;
+    }
+    if (!selectedApiConfigId.value) {
+      selectedApiConfigId.value = String(selectedOption?.apiConfigId || "").trim();
+    }
   },
   { immediate: true },
 );
 
 watch(
   () => props.open,
-  (open) => {
+  (open, wasOpen) => {
     if (!open) return;
-    const selectedOption = validSelectionOption.value;
-    selectedAgentId.value = String(selectedOption?.agentId || "").trim();
+    panel.value = props.initialPanel === "delegate" ? "delegate" : "review";
+    if (wasOpen) return;
+    goalText.value = "";
+    selectedCommitHashes.value = [];
+    customTargetText.value = "";
+    scope.value = "main";
   },
 );
+
+watch(
+  () => props.initialPanel,
+  (value) => {
+    if (!props.open) return;
+    panel.value = value === "delegate" ? "delegate" : "review";
+  },
+);
+
+function loadRecentGoals() {
+  try {
+    const raw = window.localStorage.getItem(RECENT_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return;
+    recentGoals.value = parsed
+      .map((item) => {
+        const record = item as { id?: string; agentId?: string; goal?: string; question?: string };
+        const goal = String(record?.goal || record?.question || "").trim();
+        const agentId = String(record?.agentId || "").trim();
+        if (!goal || !agentId) return null;
+        return {
+          id: String(record?.id || `${agentId}:${goal}`).trim(),
+          agentId,
+          goal,
+        };
+      })
+      .filter((item): item is RecentGoal => !!item)
+      .slice(0, RECENT_LIMIT);
+  } catch {
+    recentGoals.value = [];
+  }
+}
+
+function rememberGoal(agentId: string, goal: string) {
+  const next = {
+    id: `${Date.now()}:${agentId}`,
+    agentId,
+    goal,
+    presetId: "custom",
+    why: "",
+    todo: "",
+    label: goal,
+  };
+  const kept = recentGoals.value.filter((item) => !(item.agentId === agentId && item.goal === goal));
+  recentGoals.value = [{ id: next.id, agentId, goal }, ...kept].slice(0, RECENT_LIMIT);
+  try {
+    const raw = window.localStorage.getItem(RECENT_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) as unknown : [];
+    const previous = Array.isArray(parsed) ? parsed : [];
+    const stored = [
+      next,
+      ...previous.filter((item) => {
+        const record = item as { agentId?: string; goal?: string };
+        return !(String(record?.agentId || "") === agentId && String(record?.goal || "") === goal);
+      }),
+    ].slice(0, RECENT_LIMIT);
+    window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(stored));
+  } catch {
+    // 最近目标写不进去不影响这次提交
+  }
+}
+
+function applyRecentGoal(item: RecentGoal) {
+  goalText.value = item.goal;
+  if (agentSelectOptions.value.some((option) => option.agentId === item.agentId)) {
+    selectedAgentId.value = item.agentId;
+    const option = agentSelectOptions.value.find((entry) => entry.agentId === item.agentId);
+    selectedApiConfigId.value = String(option?.apiConfigId || selectedApiConfigId.value || "").trim();
+  }
+}
 
 function setScope(nextScope: ToolReviewCodeReviewScope) {
   scope.value = nextScope;
@@ -205,27 +345,40 @@ function toggleCommitSelection(hash: string) {
 function close() {
   selectedCommitHashes.value = [];
   customTargetText.value = "";
+  goalText.value = "";
   emit("close");
+}
+
+function selectedModelId(): string {
+  return String(selectedApiConfigId.value || "").trim();
 }
 
 function confirm() {
   const selection = validSelectionOption.value;
   const agentId = String(selection?.agentId || "").trim();
   if (!agentId) return;
+  const apiConfigId = selectedModelId() || undefined;
+  if (panel.value === "delegate") {
+    const goal = goalText.value.trim().slice(0, 10000);
+    if (!goal) return;
+    rememberGoal(agentId, goal);
+    emit("delegate", { agentId, goal, apiConfigId });
+    close();
+    return;
+  }
   if (scope.value === "commit") {
     if (selectedCommitHashes.value.length === 0) return;
-    emit("reviewCode", { scope: "commit", target: selectedCommitHashes.value.join("\n"), agentId });
-    close();
+    emit("reviewCode", { scope: "commit", target: selectedCommitHashes.value.join("\n"), agentId, apiConfigId });
     return;
   }
   if (scope.value === "custom") {
     const target = customTargetText.value.trim();
     if (!target) return;
-    emit("reviewCode", { scope: "custom", target, agentId });
-    close();
+    emit("reviewCode", { scope: "custom", target, agentId, apiConfigId });
     return;
   }
-  emit("reviewCode", { scope: scope.value, target: "", agentId });
-  close();
+  emit("reviewCode", { scope: scope.value, target: "", agentId, apiConfigId });
 }
+
+onMounted(loadRecentGoals);
 </script>

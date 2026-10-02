@@ -225,7 +225,6 @@
               :show-share-menu-item="showConversationActions"
               :show-open-in-browser-button="showOpenInBrowserButton && !activeConversationIsSystemNotification"
               :open-in-browser-disabled="!activeConversationId || activeConversationIsSystemNotification"
-              :show-code-review-menu-item="true"
               :side-chat-enabled="sideChatPanelEnabled"
               :delegate-statuses="delegateStatuses"
               :running-task-count="runningTaskCount"
@@ -240,7 +239,6 @@
               @open-share-selection="openShareSelectionMenu"
               @open-conversation-in-browser="openActiveConversationInBrowser"
               @open-run-summary="openRunSummaryPanel"
-              @open-code-review="openCodeReviewDialog"
               @open-branch-from-current="openBranchFromCurrentMessage"
               @open-side-chat="selectChatRightPanelMode('sideChat')"
               @add-mention="$emit('addMention', $event)"
@@ -569,18 +567,15 @@
             :goal-disabled="activeConversationSummary?.kind === 'remote_im_contact'"
             :system-notification-mode="activeConversationIsSystemNotification"
             :remote-contact-mode="activeConversationIsRemoteContact"
-            :selection-delegate-only="messageSelectionDelegateOnly"
             :show-side-conversation-list="showSideConversationList"
             :active-conversation-id="activeConversationId" :unarchived-conversation-items="unarchivedConversationItems"
             :remote-im-contact-conversations="remoteImContactConversations"
             :user-alias="userAlias" :user-avatar-url="userAvatarUrl"
-            :persona-name="personaName" :persona-name-map="personaNameMap" :persona-avatar-url-map="personaAvatarUrlMap"
-            :create-conversation-agent-options="createConversationAgentOptions"
+            :persona-name="personaName" :persona-name-map="personaNameMap"
             :default-create-conversation-agent-id="defaultCreateConversationAgentId"
             :ide-context-groups="mergedVisibleIdeContextGroups" :attached-ide-context-references="attachedIdeContextReferences"
             :current-theme="currentTheme"
             :show-conversation-actions="showConversationActions"
-            :active-agent-id="activeAgentId"
             :is-rounded="isWebRoundedMode"
             @update:chat-input="$emit('update:chatInput', $event)" @add-mention="$emit('addMention', $event)"
             @remove-mention="$emit('removeMention', $event)" @remove-clipboard-image="$emit('removeClipboardImage', $event)"
@@ -599,7 +594,6 @@
             @selection-action-copy="copySelectedMessages"
             @selection-action-branch="emitSelectionAction('branch')"
             @selection-action-forward="emitSelectionAction('forward', $event)"
-            @selection-action-delegate="emitSelectionAction('delegate', $event)"
             @selection-action-share="emitSelectionAction('share', $event)"
             @trim-conversation="$emit('trimConversation')" @open-conversation-list="$emit('openConversationList')" @open-settings="$emit('openSettings')"
             @create-conversation="$emit('createConversation', $event)"
@@ -637,10 +631,12 @@
         <ToolReviewTargetDialog
           v-if="showConversationActions"
           :open="codeReviewDialogOpen"
+          :initial-panel="launchPanel"
           :submitting="!!toolReviewSubmittingBatchKey"
           :error-text="codeReviewErrorText"
           :current-agent-id="props.activeAgentId"
           :agent-options="props.createConversationAgentOptions"
+          :api-configs="props.chatModelOptions"
           :persona-avatar-url-map="props.personaAvatarUrlMap"
           :commit-options="commitOptions"
           :commit-options-loading="commitOptionsLoading"
@@ -648,8 +644,10 @@
           :commit-page="commitPage"
           :commit-page-size="commitPageSize"
           @close="closeCodeReviewDialog"
+          @panel-change="writeLaunchPanel"
           @pick-commit-review="loadCodeReviewCommitOptions"
           @review-code="handleSubmitCodeReview"
+          @delegate="handleLaunchDelegate"
         />
         <TaskCreateCard
           v-if="showConversationActions"
@@ -1040,7 +1038,7 @@ const emit = defineEmits<{
   (e: "selectionActionCopyError", payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string; error: string }): void;
   (e: "selectionActionBranch", payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string }): void;
   (e: "selectionActionForward", payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string; target: ConversationForwardTarget }): void;
-  (e: "selectionActionDelegate", payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string; agentId: string; presetId: string; why: string; goal: string; todo: string }): void;
+  (e: "selectionActionDelegate", payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string; agentId: string; presetId: string; why: string; goal: string; todo: string; apiConfigId?: string }): void;
   (e: "selectionActionShare", payload: { count: number; messageIds: string[]; blocks: ChatMessageBlock[]; conversationId?: string; exportFormat?: "html" | "png" | "copyPng" }): void;
   (e: "approveTerminalApproval", requestId: string, reason?: string): void;
   (e: "denyTerminalApproval", requestId: string, reason?: string): void;
@@ -1075,6 +1073,23 @@ type WebAccessInfo = {
 };
 
 const codeReviewDialogOpen = ref(false);
+const LAUNCH_PANEL_STORAGE_KEY = "easy_call.tool_launch_panel.v1";
+/** 记住上一次选择的入口面板，下次打开沿用；首次默认自定义委托 */
+function readLaunchPanel(): "delegate" | "review" {
+  try {
+    return window.localStorage.getItem(LAUNCH_PANEL_STORAGE_KEY) === "review" ? "review" : "delegate";
+  } catch {
+    return "delegate";
+  }
+}
+function writeLaunchPanel(value: "delegate" | "review") {
+  try {
+    window.localStorage.setItem(LAUNCH_PANEL_STORAGE_KEY, value);
+  } catch {
+    // 记不住不影响本次使用
+  }
+}
+const launchPanel = ref<"delegate" | "review">(readLaunchPanel());
 const codeReviewErrorText = ref("");
 const commitOptions = ref<ToolReviewCommitOption[]>([]);
 const commitOptionsLoading = ref(false);
@@ -1483,20 +1498,22 @@ function canConfirmPlan(block: ChatMessageBlock): boolean {
   return !props.messageBlocks.slice(blockIndex + 1).some((item) => !item.isExtraTextBlock && item.role === "user");
 }
 
-const messageSelectionDelegateOnly = ref(false);
-
-function openSelectionMenu(options: { delegateOnly?: boolean; allowWhenBusy?: boolean } = {}) {
-  // 多选入口忙碌时禁用；分支/委托/转发/分享属于子代理或纯读取操作，
+function openSelectionMenu(options: { allowWhenBusy?: boolean } = {}) {
+  // 多选入口忙碌时禁用；分支/转发/分享属于子代理或纯读取操作，
   // 不影响主轮次，忙碌时允许进入选择模式（allowWhenBusy）。
   if (!options.allowWhenBusy && (props.chatting || props.frozen || conversationInteractionBusy.value)) return;
   clearNativeTextSelection();
-  messageSelectionDelegateOnly.value = !!options.delegateOnly;
   messageSelectionModeEnabled.value = true;
   selectedMessageRenderIds.value = [];
   void nextTick(() => composerPanelRef.value?.focusInput?.({ preventScroll: true }));
 }
 const openBranchSelectionMenu = () => openSelectionMenu({ allowWhenBusy: true });
-const openDelegateSelectionMenu = () => openSelectionMenu({ delegateOnly: true, allowWhenBusy: true });
+const openDelegateSelectionMenu = () => {
+  clearNativeTextSelection();
+  codeReviewErrorText.value = "";
+  launchPanel.value = readLaunchPanel();
+  codeReviewDialogOpen.value = true;
+};
 const openForwardSelectionMenu = () => openSelectionMenu({ allowWhenBusy: true });
 const openShareSelectionMenu = () => openSelectionMenu({ allowWhenBusy: true });
 
@@ -1753,18 +1770,15 @@ const {
     },
     selectionActionBranch: (payload) => emit("selectionActionBranch", payload),
     selectionActionForward: (payload) => emit("selectionActionForward", payload),
-    selectionActionDelegate: (payload) => emit("selectionActionDelegate", payload),
     selectionActionShare: (payload) => emit("selectionActionShare", payload),
   },
 });
 
 function handleEnterMessageSelectionMode(selectionKey: string) {
-  messageSelectionDelegateOnly.value = false;
   enterMessageSelectionMode(selectionKey);
 }
 
 function handleExitMessageSelectionMode() {
-  messageSelectionDelegateOnly.value = false;
   resetMessageSelectionMode();
 }
 
@@ -3693,6 +3707,7 @@ async function handleSaveLocalImage(path: string) {
 function openCodeReviewDialog() {
   clearNativeTextSelection();
   codeReviewErrorText.value = "";
+  launchPanel.value = readLaunchPanel();
   codeReviewDialogOpen.value = true;
 }
 function closeCodeReviewDialog() {
@@ -3719,7 +3734,7 @@ async function loadCodeReviewCommitOptions(page = 1) {
     commitOptionsLoading.value = false;
   }
 }
-async function handleSubmitCodeReview(input: { scope: ToolReviewCodeReviewScope; target?: string; agentId: string }) {
+async function handleSubmitCodeReview(input: { scope: ToolReviewCodeReviewScope; target?: string; agentId: string; apiConfigId?: string }) {
   const conversationId = String(props.activeConversationId || "").trim();
   if (!conversationId || toolReviewSubmittingBatchKey.value) return;
   codeReviewErrorText.value = "";
@@ -3728,12 +3743,28 @@ async function handleSubmitCodeReview(input: { scope: ToolReviewCodeReviewScope;
     scope: input.scope,
     target: String(input.target || "").trim() || undefined,
     agentId: String(input.agentId || "").trim() || undefined,
+    apiConfigId: String(input.apiConfigId || "").trim() || undefined,
   });
   if (!report) {
     codeReviewErrorText.value = t("chat.startCodeReviewFailed");
     return;
   }
   codeReviewDialogOpen.value = false;
+}
+/** 合卡对话框的「自定义委托」分支：不再走消息多选，直接把目标交出去 */
+function handleLaunchDelegate(input: { agentId: string; goal: string; apiConfigId?: string }) {
+  emit("selectionActionDelegate", {
+    count: 0,
+    messageIds: [],
+    blocks: [],
+    conversationId: String(props.activeConversationId || "").trim() || undefined,
+    agentId: String(input.agentId || "").trim(),
+    presetId: "custom",
+    why: "",
+    goal: String(input.goal || "").trim(),
+    todo: "",
+    apiConfigId: String(input.apiConfigId || "").trim() || undefined,
+  });
 }
 /** 运行监控胶囊点击：按当前在跑的类型分流。只跑委托/任务时打开对应页面；
  *  只跑后台终端、或多种混合时打开主页卡片墙（即预览）。 */

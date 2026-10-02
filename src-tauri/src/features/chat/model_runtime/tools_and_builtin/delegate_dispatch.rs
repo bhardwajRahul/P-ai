@@ -267,6 +267,22 @@ fn resolve_delegate_target_api_config_ids(
     Ok(vec![resolved])
 }
 
+/// 指定模型覆盖：把用户在卡片上选的模型放到候选列表首位，其余保留作失败回退。
+fn apply_delegate_model_override(
+    config: &AppConfig,
+    mut api_config_ids: Vec<String>,
+    model_override: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let Some(raw) = model_override.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(api_config_ids);
+    };
+    let resolved = resolve_chat_api_config_id(config, raw)
+        .ok_or_else(|| format!("指定模型不可用或不支持文本对话，apiConfigId={raw}"))?;
+    api_config_ids.retain(|id| id != &resolved);
+    api_config_ids.insert(0, resolved);
+    Ok(api_config_ids)
+}
+
 fn spawn_delegate_task(
     app_state: AppState,
     delegate: DelegateEntry,
@@ -506,6 +522,7 @@ async fn builtin_delegate(
             Some(source_agent_id.as_str()),
             DELEGATE_TOOL_KIND_DELEGATE,
             args,
+            None,
         )
         .await;
     }
@@ -584,6 +601,7 @@ async fn delegate_execute_sync(
     source_agent_id: Option<&str>,
     kind: &str,
     args: DelegateToolArgs,
+    model_override: Option<&str>,
 ) -> Result<Value, String> {
     let validated = match validate_delegate_args(&args) {
         Ok(value) => value,
@@ -638,7 +656,11 @@ async fn delegate_execute_sync(
     let sync_result = run_sync_delegate_on_child_task(
         app_state.clone(),
         delegate.clone(),
-        resolve_delegate_target_api_config_ids(app_state, &preflight, Some(session_id))?,
+        apply_delegate_model_override(
+            &preflight.config,
+            resolve_delegate_target_api_config_ids(app_state, &preflight, Some(session_id))?,
+            model_override,
+        )?,
         session_id.to_string(),
     )
     .await;

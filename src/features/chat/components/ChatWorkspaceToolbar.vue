@@ -43,37 +43,18 @@
               <span class="leading-5">{{ t("chat.conversationMenu.shareConversation") }}</span>
             </button>
           </li>
-          <li v-if="hasDelegateMenuItems">
-            <details
-              :open="activeSubmenu === 'delegate'"
-              @toggle="handleDetailsToggle($event, 'delegate')"
-            >
-              <summary>
-                <Users class="h-4 w-4 shrink-0" />
-                <span class="leading-5">{{ t("chat.conversationMenu.groupDelegate") }}</span>
-              </summary>
-              <ul ref="delegateSubmenuEl">
-              <li v-if="showCodeReviewMenuItem">
-                <button type="button" class="flex min-h-9 items-center justify-start gap-3 px-3 py-1.5 text-left" @click="emit('openCodeReview')">
-                  <ClipboardCheck class="h-4 w-4 shrink-0" />
-                  <span class="leading-5">{{ t('chat.toolbar.codeReview') }}</span>
-                </button>
-              </li>
-              <li v-if="showDelegateMenuItem">
-                <button type="button" class="flex min-h-9 items-center justify-start gap-3 px-3 py-1.5 text-left" @click="emit('openDelegateSelection')">
-                  <ClipboardList class="h-4 w-4 shrink-0" />
-                  <span class="leading-5">{{ t("chat.conversationMenu.startDelegate") }}</span>
-                </button>
-              </li>
-              </ul>
-            </details>
+          <li v-if="showDelegateMenuItem">
+            <button type="button" class="flex min-h-9 items-center justify-start gap-3 px-3 py-1.5 text-left" @click="emit('openDelegateSelection')">
+              <ClipboardList class="h-4 w-4 shrink-0" />
+              <span class="leading-5">{{ t("chat.conversationMenu.groupDelegate") }}</span>
+            </button>
           </li>
           <li v-if="hasBranchMenuItems">
             <details
               :open="activeSubmenu === 'branch'"
               @toggle="handleDetailsToggle($event, 'branch')"
             >
-              <summary>
+              <summary class="min-h-9 gap-3">
                 <Split class="h-4 w-4 shrink-0" />
                 <span class="leading-5">{{ t("chat.conversationMenu.groupBranch") }}</span>
               </summary>
@@ -104,7 +85,7 @@
               :open="activeSubmenu === 'interaction'"
               @toggle="handleDetailsToggle($event, 'interaction')"
             >
-              <summary>
+              <summary class="min-h-9 gap-3">
                 <Send class="h-4 w-4 shrink-0" />
                 <span class="leading-5">{{ t("chat.conversationMenu.groupInteraction") }}</span>
               </summary>
@@ -129,7 +110,7 @@
               :open="activeSubmenu === 'appearance'"
               @toggle="handleDetailsToggle($event, 'appearance')"
             >
-              <summary>
+              <summary class="min-h-9 gap-3">
                 <Palette class="h-4 w-4 shrink-0" />
                 <span class="leading-5">{{ t("chat.conversationMenu.groupAppearance") }}</span>
               </summary>
@@ -245,7 +226,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useAttrs, type Ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { BellRing, ClipboardCheck, ClipboardList, GitBranch, GitBranchPlus, Grip, ListTodo, MessageSquareMore, Package, Palette, Send, Share2, Split, Users } from "@lucide/vue";
+import { BellRing, ClipboardList, GitBranch, GitBranchPlus, Grip, ListTodo, MessageSquareMore, Package, Palette, Send, Share2, Split } from "@lucide/vue";
 import type { ChatMentionEntry, ChatMentionTarget, ConversationDelegateStatusSummary, ShellWorkMode } from "../../../types/app";
 import { useChatComposerAppearance } from "../../shell/composables/use-chat-composer-appearance";
 import { useChatMessageAppearance, type ChatMarkdownLayout } from "../../shell/composables/use-chat-message-appearance";
@@ -274,7 +255,6 @@ const props = withDefaults(defineProps<{
   showTaskCreateMenuItem?: boolean;
   showDelegateMenuItem?: boolean;
   showBranchMenuItem?: boolean;
-  showCodeReviewMenuItem?: boolean;
   showForwardMenuItem?: boolean;
   showAutoPushMenuItem?: boolean;
   showShareMenuItem?: boolean;
@@ -291,7 +271,6 @@ const props = withDefaults(defineProps<{
   showTaskCreateMenuItem: true,
   showDelegateMenuItem: true,
   showBranchMenuItem: true,
-  showCodeReviewMenuItem: true,
   showForwardMenuItem: true,
   showAutoPushMenuItem: true,
   showShareMenuItem: true,
@@ -301,7 +280,6 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: "lockWorkspace"): void;
   (e: "openBranchSelection"): void;
-  (e: "openCodeReview"): void;
   (e: "openTaskCreate"): void;
   (e: "openDelegateSelection"): void;
   (e: "openRunSummary"): void;
@@ -340,11 +318,10 @@ const {
 const showTaskCreateMenuItem = computed(() => props.showTaskCreateMenuItem);
 const showDelegateMenuItem = computed(() => props.showDelegateMenuItem);
 const showBranchMenuItem = computed(() => props.showBranchMenuItem);
-const showCodeReviewMenuItem = computed(() => props.showCodeReviewMenuItem);
 const showForwardMenuItem = computed(() => props.showForwardMenuItem);
 const showAutoPushMenuItem = computed(() => props.showAutoPushMenuItem);
 const showShareMenuItem = computed(() => props.showShareMenuItem);
-type SubmenuKey = "delegate" | "branch" | "interaction" | "appearance";
+type SubmenuKey = "branch" | "interaction" | "appearance";
 const activeSubmenu = ref<SubmenuKey | null>(null);
 /** details 原生展开/收起与 activeSubmenu 双向同步，保证同时只展开一组 */
 function handleDetailsToggle(event: ToggleEvent, key: SubmenuKey) {
@@ -355,12 +332,10 @@ function handleDetailsToggle(event: ToggleEvent, key: SubmenuKey) {
     activeSubmenu.value = null;
   }
 }
-const delegateSubmenuEl = ref<HTMLElement | null>(null);
 const branchSubmenuEl = ref<HTMLElement | null>(null);
 const interactionSubmenuEl = ref<HTMLElement | null>(null);
 const appearanceSubmenuEl = ref<HTMLElement | null>(null);
 const submenuEls: Record<SubmenuKey, Ref<HTMLElement | null>> = {
-  delegate: delegateSubmenuEl,
   branch: branchSubmenuEl,
   interaction: interactionSubmenuEl,
   appearance: appearanceSubmenuEl,
@@ -398,9 +373,6 @@ function handleGlobalPointerDown(event: PointerEvent) {
    子项在文档流内展开，随主菜单一起滚动，不存在飞出视口问题。
    仅点按 summary 展开，无 hover 预展开。 */
 
-const hasDelegateMenuItems = computed(
-  () => props.showCodeReviewMenuItem || props.showDelegateMenuItem,
-);
 const hasBranchMenuItems = computed(
   () => props.showBranchMenuItem || !!props.sideChatEnabled,
 );

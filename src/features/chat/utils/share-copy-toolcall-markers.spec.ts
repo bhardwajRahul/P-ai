@@ -75,7 +75,6 @@ describe("copy/share toolcall marker filtering", () => {
         selectionActionCopyError: vi.fn(),
         selectionActionBranch: vi.fn(),
         selectionActionForward: vi.fn(),
-        selectionActionDelegate: vi.fn(),
         selectionActionShare: vi.fn(),
       },
     });

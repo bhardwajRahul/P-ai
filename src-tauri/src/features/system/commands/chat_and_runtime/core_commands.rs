@@ -479,6 +479,8 @@ struct SubmitUserAsyncDelegateInput {
     #[serde(default)]
     todo: Option<String>,
     #[serde(default)]
+    api_config_id: Option<String>,
+    #[serde(default)]
     background: Option<String>,
     #[serde(default)]
     question: Option<String>,
@@ -834,7 +836,11 @@ fn resolve_user_async_delegate_plan(
         .iter()
         .find(|agent| agent.id == target_agent_id && !agent.is_built_in_user)
         .ok_or_else(|| format!("目标委任人不存在，agentId={target_agent_id}"))?;
-    let target_api_config_ids = delegate_target_chat_api_config_ids(app_config, target_agent);
+    let target_api_config_ids = apply_delegate_model_override(
+        app_config,
+        delegate_target_chat_api_config_ids(app_config, target_agent),
+        input.api_config_id.as_deref(),
+    )?;
     if target_api_config_ids.is_empty() {
         return Err(format!("目标人格没有可用模型，agentId={target_agent_id}"));
     }

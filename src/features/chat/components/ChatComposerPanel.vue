@@ -9,18 +9,13 @@
     <ChatSelectionActionPanel
       v-if="selectionModeEnabled"
       :show-conversation-actions="showConversationActions"
-      :delegate-only="selectionDelegateOnly || systemNotificationMode || remoteContactMode"
       :selected-message-count="selectedMessageCount"
       :active-conversation-id="activeConversationId"
       :unarchived-conversation-items="unarchivedConversationItems"
       :remote-im-contact-conversations="remoteImContactConversations"
-      :create-conversation-agent-options="createConversationAgentOptions"
-      :persona-avatar-url-map="personaAvatarUrlMap"
-      :active-agent-id="activeAgentId"
       @exit-selection-mode="emit('exitSelectionMode')"
       @selection-action-branch="emit('selectionActionBranch')"
       @selection-action-forward="emit('selectionActionForward', $event)"
-      @selection-action-delegate="emit('selectionActionDelegate', $event)"
       @selection-action-copy="emit('selectionActionCopy')"
       @selection-action-share="emit('selectionActionShare', $event)"
     />
@@ -33,7 +28,7 @@
         @click="emit('openDelegateSelection')"
       >
         <ClipboardList class="h-3.5 w-3.5" />
-        {{ t("chat.conversationMenu.startDelegate") }}
+        {{ t("chat.conversationMenu.groupDelegate") }}
       </button>
       <button
         type="button"
@@ -63,6 +58,15 @@
         :theme="teleportTheme"
         @update:model-value="selectConversationPreferredModel"
       />
+      <button
+        type="button"
+        class="btn btn-sm gap-2"
+        :disabled="frozen || busy"
+        @click="emit('openDelegateSelection')"
+      >
+        <ClipboardList class="h-3.5 w-3.5" />
+        {{ t("chat.conversationMenu.groupDelegate") }}
+      </button>
       <button
         type="button"
         class="btn btn-sm gap-2"
@@ -352,13 +356,11 @@ import InputPanelToolbar from "./input-panel/InputPanelToolbar.vue";
 import { useChatQueue, type ChatQueueEvent } from "../composables/use-chat-queue";
 import { chatInputEnterConfirmsComposition } from "../composables/chat-composer-ime";
 import { clearChatComposerFocus, registerChatComposerFocus } from "../composables/chat-composer-focus";
-import type { AgentPersonaOption } from "../../shared/agent-persona-options";
 import { ideContextReferenceDisplayParts } from "../utils/ide-context-reference-display";
 import { mergeComposerIdeContextGroups } from "../utils/ide-context-reference-groups";
 
 type BinaryAttachment = { mime: string; bytesBase64: string; previewDataUrl?: string };
 type QueuedAttachmentNotice = { id: string; fileName: string; path: string; mime: string; pending?: boolean };
-type ConversationPersonaOption = AgentPersonaOption;
 type MentionOptionView = {
   agentId: string;
   agentName: string;
@@ -371,7 +373,6 @@ type MentionOptionView = {
 const props = withDefaults(defineProps<{
   composerScope?: "main" | "side";
   selectionModeEnabled: boolean;
-  selectionDelegateOnly?: boolean;
   selectedMessageCount: number;
   chatInput: string;
   instructionPresets: PromptCommandPreset[];
@@ -402,15 +403,12 @@ const props = withDefaults(defineProps<{
   userAvatarUrl: string;
   personaName: string;
   personaNameMap: Record<string, string>;
-  personaAvatarUrlMap: Record<string, string>;
-  createConversationAgentOptions: ConversationPersonaOption[];
   defaultCreateConversationAgentId: string;
   ideContextGroups: IdeContextWorkspaceGroup[];
   attachedIdeContextReferences: IdeContextReferenceItem[];
   currentTheme?: string;
   showConversationActions?: boolean;
   chatUsagePercent?: number;
-  activeAgentId?: string;
   isRounded?: boolean;
   queueEventsOverride?: ChatQueueEvent[] | null;
   queueVisible?: boolean;
@@ -423,7 +421,6 @@ const emit = defineEmits<{
   (e: "exitSelectionMode"): void;
   (e: "selectionActionBranch"): void;
   (e: "selectionActionForward", target: ConversationForwardTarget): void;
-  (e: "selectionActionDelegate", payload: { agentId: string; presetId: string; why: string; goal: string; todo: string }): void;
   (e: "selectionActionCopy"): void;
   (e: "selectionActionShare", format: "html" | "png" | "copyPng"): void;
   (e: "update:chatInput", value: string): void;

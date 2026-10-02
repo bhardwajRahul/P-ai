@@ -112,6 +112,7 @@ type SubmitToolReviewCodeInput = {
   scope: ToolReviewCodeReviewScope;
   target?: string;
   agentId?: string;
+  apiConfigId?: string;
 };
 
 type DeleteToolReviewReportInput = {
@@ -262,6 +263,7 @@ export function useChatToolReview(options: UseChatToolReviewOptions) {
           scope,
           target: String(input.target || "").trim() || undefined,
           agentId: String(input.agentId || "").trim() || undefined,
+          apiConfigId: String(input.apiConfigId || "").trim() || undefined,
         },
       });
       toolReviewCurrentReportId.value = String(result?.report?.id || "").trim();
