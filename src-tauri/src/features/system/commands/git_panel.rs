@@ -950,11 +950,24 @@ async fn git_panel_checkout_check(input: GitPanelCheckoutInput) -> Result<GitPan
         .collect();
 
     // 目标分支相对当前 HEAD 修改的文件
-    let changed_stdout = git_executor().run_read(
-        &repo_root,
-        &["diff", "--name-only", "HEAD", &reference],
-    )
-    .await?;
+    // 空仓库（无任何提交）时 HEAD 不存在，diff 会失败，视为无差异
+    let changed_stdout = match git_executor()
+        .run_read(&repo_root, &["diff", "--name-only", "HEAD", &reference])
+        .await
+    {
+        Ok(s) => s,
+        Err(err) => {
+            let lower = err.to_lowercase();
+            if lower.contains("does not have any commits yet")
+                || lower.contains("bad revision 'head'")
+                || (lower.contains("fatal:") && lower.contains("head"))
+            {
+                String::new()
+            } else {
+                return Err(err);
+            }
+        }
+    };
     let changed_paths: Vec<String> = changed_stdout
         .lines()
         .map(|line| line.trim().to_string())
@@ -1059,7 +1072,19 @@ async fn git_panel_log(input: GitPanelLogInput) -> Result<GitPanelLogOutput, Str
         args.push(skip.to_string());
     }
     let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
-    let stdout = git_executor().run_read(&repo_root, &args_ref).await?;
+    let stdout = match git_executor().run_read(&repo_root, &args_ref).await {
+        Ok(s) => s,
+        Err(err) => {
+            let lower = err.to_lowercase();
+            if lower.contains("does not have any commits yet")
+                || (lower.contains("fatal:") && (lower.contains("head") || lower.contains("log")))
+            {
+                // 仓库尚无任何提交：正常情况，返回空列表而非报错
+                return Ok(GitPanelLogOutput { entries: Vec::new() });
+            }
+            return Err(err);
+        }
+    };
     let entries = stdout
         .split('\u{1e}')
         .filter_map(|record| {

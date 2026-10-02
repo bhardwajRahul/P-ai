@@ -92,7 +92,7 @@ async fn tool_review_list_commit_options_internal(
         workspace_text,
         total_command
     ));
-    let total_output = tool_review_exec_git_readonly(
+    let total_output = match tool_review_exec_git_readonly(
         state,
         &conversation.id,
         &workspace_path,
@@ -100,19 +100,28 @@ async fn tool_review_list_commit_options_internal(
         120_000,
     )
     .await
-    .map_err(|err| {
-        runtime_log_error(format!(
-            "[工具审查][commit列表] git失败 conversation_id={} cwd={} command={} err={}",
-            conversation.id,
-            workspace_text,
-            total_command,
-            err
-        ));
-        err
-    })?;
-    let total = total_output.trim().parse::<usize>().map_err(|err| {
-        format!("无法解析 commit 总数：{}", err)
-    })?;
+    {
+        Ok(output) => output,
+        Err(err) => {
+            let lower = err.to_lowercase();
+            if lower.contains("does not have any commits yet")
+                || (lower.contains("fatal:") && lower.contains("head"))
+            {
+                // 仓库尚无提交：正常情况，返回 0 而非报错
+                "0".to_string()
+            } else {
+                runtime_log_error(format!(
+                    "[工具审查][commit列表] git失败 conversation_id={} cwd={} command={} err={}",
+                    conversation.id,
+                    workspace_text,
+                    total_command,
+                    err
+                ));
+                return Err(err);
+            }
+        }
+    };
+    let total = total_output.trim().parse::<usize>().unwrap_or(0);
     let offset = page.saturating_sub(1).saturating_mul(page_size);
     let command = format!("git log --skip {} -n {} --pretty=format:%H%x1f%h%x1f%s%x1f%cI", offset, page_size);
     runtime_log_info(format!(
@@ -121,7 +130,7 @@ async fn tool_review_list_commit_options_internal(
         workspace_text,
         command
     ));
-    let output = tool_review_exec_git_readonly(
+    let output = match tool_review_exec_git_readonly(
         state,
         &conversation.id,
         &workspace_path,
@@ -129,16 +138,27 @@ async fn tool_review_list_commit_options_internal(
         120_000,
     )
     .await
-    .map_err(|err| {
-        runtime_log_error(format!(
-            "[工具审查][commit列表] git失败 conversation_id={} cwd={} command={} err={}",
-            conversation.id,
-            workspace_text,
-            command,
-            err
-        ));
-        err
-    })?;
+    {
+        Ok(output) => output,
+        Err(err) => {
+            let lower = err.to_lowercase();
+            if lower.contains("does not have any commits yet")
+                || (lower.contains("fatal:") && lower.contains("head"))
+            {
+                // 仓库尚无提交：返回空列表
+                String::new()
+            } else {
+                runtime_log_error(format!(
+                    "[工具审查][commit列表] git失败 conversation_id={} cwd={} command={} err={}",
+                    conversation.id,
+                    workspace_text,
+                    command,
+                    err
+                ));
+                return Err(err);
+            }
+        }
+    };
     runtime_log_info(format!(
         "[工具审查][commit列表] git完成 conversation_id={} cwd={} stdout_lines={}",
         conversation.id,
