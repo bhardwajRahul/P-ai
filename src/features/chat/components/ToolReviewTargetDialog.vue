@@ -80,7 +80,7 @@
         </div>
       </div>
       <div class="flex shrink-0 items-center justify-end gap-3 border-t border-base-300 px-5 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <button type="button" class="btn" :disabled="submitting" @click="close">{{ t("common.cancel") }}</button>
+        <button type="button" class="btn" :disabled="submitting || delegating" @click="close">{{ t("common.cancel") }}</button>
         <button type="button" class="btn btn-primary" :disabled="!canConfirm" @click="confirm">{{ t("common.confirm") }}</button>
       </div>
     </div>
@@ -114,6 +114,7 @@ const props = defineProps<{
   open: boolean;
   initialPanel: LaunchPanel;
   submitting: boolean;
+  delegating?: boolean;
   errorText: string;
   currentAgentId: string;
   agentOptions: AgentPersonaOption[];
@@ -160,7 +161,7 @@ const recentGoals = ref<RecentGoal[]>([]);
 const apiConfigs = computed(() => (Array.isArray(props.apiConfigs) ? props.apiConfigs : []));
 
 function onDialogClose() {
-  if (props.submitting) {
+  if (props.submitting || props.delegating) {
     const dialog = dialogRef.value;
     if (dialog && !dialog.open && props.open) dialog.showModal();
     return;
@@ -214,7 +215,7 @@ const validSelectionOption = computed<AgentPersonaOption | null>(() => {
 const commitTotalPages = computed(() => Math.max(1, Math.ceil(props.commitTotal / Math.max(1, props.commitPageSize))));
 
 const canConfirm = computed(() => {
-  if (props.submitting || !validSelectionOption.value) return false;
+  if (props.submitting || props.delegating || !validSelectionOption.value) return false;
   if (panel.value === "delegate") return !!goalText.value.trim();
   if (scope.value === "commit") return selectedCommitHashes.value.length > 0;
   if (scope.value === "custom") return !!customTargetText.value.trim();
@@ -353,6 +354,14 @@ function selectedModelId(): string {
   return String(selectedApiConfigId.value || "").trim();
 }
 
+/** 由宿主在提交成功后调用：把这次目标写进最近列表（失败不写） */
+function rememberCurrentDelegateGoal() {
+  const agentId = String(validSelectionOption.value?.agentId || "").trim();
+  const goal = String(goalText.value || "").trim();
+  if (!agentId || !goal) return;
+  rememberGoal(agentId, goal);
+}
+
 function confirm() {
   const selection = validSelectionOption.value;
   const agentId = String(selection?.agentId || "").trim();
@@ -361,9 +370,9 @@ function confirm() {
   if (panel.value === "delegate") {
     const goal = goalText.value.trim().slice(0, 10000);
     if (!goal) return;
-    rememberGoal(agentId, goal);
+    // 提交是异步的：这里只发出请求，由宿主拿到结果后再决定关闭或报错，
+    // 失败时保留已填目标，也不把失败的目标记进最近列表。
     emit("delegate", { agentId, goal, apiConfigId });
-    close();
     return;
   }
   if (scope.value === "commit") {
@@ -381,4 +390,9 @@ function confirm() {
 }
 
 onMounted(loadRecentGoals);
+
+defineExpose({
+  /** 提交成功后由宿主调用，把本次目标记入最近列表 */
+  rememberCurrentDelegateGoal,
+});
 </script>

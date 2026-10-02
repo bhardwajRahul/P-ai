@@ -630,9 +630,11 @@
         />
         <ToolReviewTargetDialog
           v-if="showConversationActions"
+          ref="launchDialogRef"
           :open="codeReviewDialogOpen"
           :initial-panel="launchPanel"
           :submitting="!!toolReviewSubmittingBatchKey"
+          :delegating="launchDelegating"
           :error-text="codeReviewErrorText"
           :current-agent-id="props.activeAgentId"
           :agent-options="props.createConversationAgentOptions"
@@ -1090,6 +1092,8 @@ function writeLaunchPanel(value: "delegate" | "review") {
   }
 }
 const launchPanel = ref<"delegate" | "review">(readLaunchPanel());
+const launchDelegating = ref(false);
+const launchDialogRef = ref<InstanceType<typeof ToolReviewTargetDialog> | null>(null);
 const codeReviewErrorText = ref("");
 const commitOptions = ref<ToolReviewCommitOption[]>([]);
 const commitOptionsLoading = ref(false);
@@ -1784,6 +1788,7 @@ function handleExitMessageSelectionMode() {
 
 defineExpose({
   exitMessageSelectionMode: handleExitMessageSelectionMode,
+  finishLaunchDelegate,
   showTransientNotice,
   openFileInReader,
   openDirectoryInReader,
@@ -3751,8 +3756,11 @@ async function handleSubmitCodeReview(input: { scope: ToolReviewCodeReviewScope;
   }
   codeReviewDialogOpen.value = false;
 }
-/** 合卡对话框的「自定义委托」分支：不再走消息多选，直接把目标交出去 */
+/** 合卡对话框的「自定义委托」分支：只把请求发出去，结果由 finishLaunchDelegate 收口 */
 function handleLaunchDelegate(input: { agentId: string; goal: string; apiConfigId?: string }) {
+  if (launchDelegating.value) return;
+  codeReviewErrorText.value = "";
+  launchDelegating.value = true;
   emit("selectionActionDelegate", {
     count: 0,
     messageIds: [],
@@ -3765,6 +3773,17 @@ function handleLaunchDelegate(input: { agentId: string; goal: string; apiConfigI
     todo: "",
     apiConfigId: String(input.apiConfigId || "").trim() || undefined,
   });
+}
+/** 委托提交结果收口：成功关闭卡片并记入最近目标，失败保留已填内容并在卡片内报错 */
+function finishLaunchDelegate(ok: boolean) {
+  if (!launchDelegating.value) return;
+  launchDelegating.value = false;
+  if (!ok) {
+    codeReviewErrorText.value = t("chat.startDelegateFailed");
+    return;
+  }
+  launchDialogRef.value?.rememberCurrentDelegateGoal();
+  codeReviewDialogOpen.value = false;
 }
 /** 运行监控胶囊点击：按当前在跑的类型分流。只跑委托/任务时打开对应页面；
  *  只跑后台终端、或多种混合时打开主页卡片墙（即预览）。 */

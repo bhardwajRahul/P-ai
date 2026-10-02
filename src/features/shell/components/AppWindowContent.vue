@@ -897,6 +897,7 @@ const promptPreviewDialogVNodeRef: VNodeRef = (el) => {
 
 const chatViewRef = ref<{
   exitMessageSelectionMode: () => void;
+  finishLaunchDelegate?: (ok: boolean) => void;
   showTransientNotice: (text: string, tone?: "default" | "error" | "info") => void;
   openFileInReader: (path: string, line?: number) => Promise<void>;
   openDirectoryInReader: (path: string) => Promise<boolean>;
@@ -1013,6 +1014,8 @@ async function handleUserAsyncDelegateFromSelection(payload: {
 }) {
   const ok = await props.onUserAsyncDelegateFromSelection(payload);
   if (ok) chatViewRef.value?.exitMessageSelectionMode();
+  // 卡片的自定义委托分支由它收口：成功才关，失败在卡片内报错
+  chatViewRef.value?.finishLaunchDelegate?.(!!ok);
 }
 
 const chatBusyOverlay = computed(() => {
