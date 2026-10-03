@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-10-02T02:30:00.076Z",
-  "latestVersion": "v0.96.2",
+  "generatedAt": "2026-10-03T07:47:51.369Z",
+  "latestVersion": "v0.96.3",
   "releases": [
+    {
+      "version": "v0.96.3",
+      "path": "docs/changelog/releases/v0.96.3.md",
+      "summary": "**新增 Grok 登录与图生视频**：可在配置里用 Grok 账号登录，接入 xAI 供应商；图像生成支持 Grok，并新增「图生视频」工具，把图片转成视频，默认生视频模型可在设置里指定。"
+    },
     {
       "version": "v0.96.2",
       "path": "docs/changelog/releases/v0.96.2.md",
