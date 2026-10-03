@@ -904,6 +904,7 @@ import { recentWorkspacePaths } from "../../../utils/recent-workspaces";
 import { type ChatRenderItem, isRightAlignedMessage, isCompactionBlock, canOpenInFileReader, fileExtensionFromPath } from "../utils/chat-render";
 import { computeTimelineSegmentStarts, resolveTimelineVisibleStartIndex } from "../utils/timeline-segments";
 import { computeSessionTopColumnOffset, isSessionTopColumnOffsetSettled } from "../utils/session-top-column-offset";
+import { isSessionToolbarBehindElasticSpace } from "../utils/session-toolbar-visibility";
 import InlineMarkdownText from "../markdown/InlineMarkdownText.vue";
 import { clearFileReaderContextCandidates } from "../utils/file-reader-context-tags";
 import { useIdeContext } from "../composables/use-ide-context";
@@ -1996,26 +1997,72 @@ const latestOwnTailContentRange = computed(() => {
   const startIndex = virtualRenderItems.value.findIndex((item) => item.id === itemId);
   return startIndex < 0 ? [] : virtualRenderItems.value.slice(startIndex);
 });
+
+// 尾部内容动态特征指纹：当正文增长、计划卡出现、工具执行或思考状态变更时自动感知，驱动弹性高度重测
+const latestOwnTailRangeSignature = computed(() => {
+  const range = latestOwnTailContentRange.value;
+  if (range.length === 0) return "";
+  // 留白归零剪枝：当留白已收缩至 0 且已完成测量，正文继续增长数学上绝不可能使留白恢复，可跳过正文长度追踪
+  const isSaturated = latestOwnTailSpacerMinHeight.value === 0
+    && latestOwnTailContentMeasured.value
+    && latestOwnTailContentHeight.value >= latestOwnElasticMinHeight.value;
+
+  return range
+    .map((item) => {
+      if (item.kind === "message") {
+        const b = item.block;
+        // 未饱和时按 60 字符（约 2~3 行）分块阶梯追踪，避免单字驱动高频重排；流式结束时会通过 props.chatting 精准冲刷
+        const textStep = isSaturated ? 0 : (b.text ? Math.floor(b.text.length / 60) : 0);
+        return [
+          item.id,
+          textStep,
+          b.planCard ? `${b.planCard.action || ""}:${b.planCard.path || ""}` : "",
+          b.activityItems ? b.activityItems.length : 0,
+          b.activityRunning ? "1" : "0",
+          b.toolCalls ? b.toolCalls.length : 0,
+          b.images ? b.images.length : 0,
+          b.audios ? b.audios.length : 0,
+          b.taskTrigger ? "1" : "0",
+        ].join(",");
+      }
+      return `${item.kind}:${item.id}`;
+    })
+    .join(";");
+});
+
 const tailMetricsTick = ref(0);
 let tailMetricsRaf = 0;
 let tailMetricsRetry = 0;
-function scheduleTailMetricsRefresh() {
+function scheduleTailMetricsRefresh(maxFrames = 3) {
   if (tailMetricsRaf) return;
   tailMetricsRaf = requestAnimationFrame(() => {
     tailMetricsRaf = 0;
     tailMetricsTick.value += 1;
-    if (!latestOwnTailContentMeasured.value && latestOwnTailContentRange.value.length > 0 && tailMetricsRetry < 24) {
+    const needMeasure = !latestOwnTailContentMeasured.value && latestOwnTailContentRange.value.length > 0;
+    const limit = needMeasure ? 24 : maxFrames;
+    if (tailMetricsRetry < limit) {
       tailMetricsRetry += 1;
-      scheduleTailMetricsRefresh();
+      scheduleTailMetricsRefresh(maxFrames);
     } else {
       tailMetricsRetry = 0;
     }
   });
 }
-watch([() => virtualRenderItems.value.length, () => String(latestOwnElasticItemId.value || "").trim(), () => !!virtuaRef.value], () => {
-  tailMetricsRetry = 0;
-  void nextTick(() => scheduleTailMetricsRefresh());
-}, { immediate: true });
+watch(
+  [
+    () => virtualRenderItems.value.length,
+    () => String(latestOwnElasticItemId.value || "").trim(),
+    latestOwnTailRangeSignature,
+    () => props.chatting,
+    () => props.conversationBusy,
+    () => !!virtuaRef.value,
+  ],
+  () => {
+    tailMetricsRetry = 0;
+    void nextTick(() => scheduleTailMetricsRefresh(3));
+  },
+  { immediate: true },
+);
 onBeforeUnmount(() => {
   if (tailMetricsRaf) {
     cancelAnimationFrame(tailMetricsRaf);
@@ -2554,7 +2601,9 @@ watch(
     if (!tailContentMeasured) return;
 
     const next = Math.max(0, targetHeight - tailContentHeight);
-    if (latestOwnTailSpacerMinHeight.value !== next) {
+    const diff = Math.abs(latestOwnTailSpacerMinHeight.value - next);
+    // 归零必须精确到位；微小亚像素波动（< 2px）吸附避免无谓的样式回写与 Layout
+    if (next === 0 ? latestOwnTailSpacerMinHeight.value !== 0 : diff >= 2) {
       latestOwnTailSpacerMinHeight.value = next;
       // 留白重算只改高度，不再补滚到底：
       // 对齐语义是「最新用户消息停在视口顶部」，这里再滚一次会把它顶出可视区（跟随贴底另有 pin 负责）。
@@ -2613,10 +2662,22 @@ const supportsFloatingSessionToolbar = computed(() =>
   && !activeConversationIsRemoteContact.value,
 );
 
-// 会话悬浮操作区：下排工作区 bar 贴底时出现，上排（预览条 + 时间线按钮）离底时出现
+const sessionToolbarBehindElasticSpace = computed(() => {
+  void scrollNavigationTick.value;
+  const el = scrollContainer.value;
+  if (!el) return false;
+  return isSessionToolbarBehindElasticSpace({
+    scrollHeight: el.scrollHeight,
+    scrollTop: el.scrollTop,
+    clientHeight: el.clientHeight,
+    spacer: latestOwnTailSpacerMinHeight.value,
+  });
+});
+
+// 会话悬浮操作区：下排工作区 bar 在贴底或背靠弹性空间（不遮挡消息）时显性，离底且消息进入背后时收起
 const showFloatingSessionToolbar = computed(() => {
   if (!supportsFloatingSessionToolbar.value) return false;
-  return sessionControlPanelVisible.value;
+  return sessionControlPanelVisible.value || sessionToolbarBehindElasticSpace.value;
 });
 
 // 上下两排互斥，且共用同一个位置：切换时先让旧的一排淡出、再让新的一排淡入（顺切），
@@ -3457,6 +3518,10 @@ watch(chatContentRoot, (el, _prev, onCleanup) => {
   if (!el || typeof ResizeObserver === "undefined") return;
   contentResizeObserver = new ResizeObserver(() => {
     schedulePinChatToBottomWhileFollowing();
+    if (latestOwnTailSpacerMinHeight.value > 0 || !latestOwnTailContentMeasured.value) {
+      scheduleTailMetricsRefresh(1);
+    }
+    scrollNavigationTick.value += 1;
   });
   contentResizeObserver.observe(el);
   onCleanup(() => {

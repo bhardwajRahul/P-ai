@@ -58,7 +58,9 @@ export function estimateMessageBlockHeight(block: ChatMessageBlock, isOwn: boole
   estimate += codeFenceCount * 180;
   estimate += mermaidFenceCount * 120;
 
-  if (block.planCard) estimate += 84;
+  if (block.planCard) {
+    estimate += block.planCard.action === "present" ? 144 : 84;
+  }
   if (block.taskTrigger) estimate += 120;
   if (block.activityItems.length > 0 || block.activityRunning) estimate += 42;
   estimate += block.images.length * 120;
