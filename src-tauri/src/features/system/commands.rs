@@ -10,6 +10,7 @@ include!("commands/background_shell.rs");
 
 // ==================== Codex OAuth 命令 ====================
 include!("commands/codex_auth.rs");
+include!("commands/grok_auth.rs");
 include!("commands/codex_usage.rs");
 
 // ==================== 提示词组装层 ====================

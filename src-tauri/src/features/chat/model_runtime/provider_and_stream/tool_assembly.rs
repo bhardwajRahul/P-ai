@@ -678,6 +678,16 @@ fn runtime_tool_denied_reason(
             {
                 return Some("未选择默认生图模型，生图工具不挂载".to_string());
             }
+            if tool_name == "image_to_video"
+                && app_config
+                    .image_to_video_model_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .is_none()
+            {
+                return Some("未选择默认生视频模型，图生视频工具不挂载".to_string());
+            }
             if tool_name == "read_media" {
                 // 图片可由当前对话模型直返（enable_image）；音频/视频需走多模态分析模型。
                 // 任一通道可用即挂载，两者都不可用时才跳过。
@@ -1139,6 +1149,7 @@ fn build_builtin_runtime_tool_executor(
         "meme" => Box::new(BuiltinMemeTool { app_state: state.clone() }),
         "image_generate" => Box::new(BuiltinImageGenerateTool { app_state: state.clone() }),
         "image_edit" => Box::new(BuiltinImageEditTool { app_state: state.clone() }),
+        "image_to_video" => Box::new(BuiltinImageToVideoTool { app_state: state.clone() }),
         "contact_send_files" => Box::new(BuiltinContactSendFilesTool {
             app_state: state.clone(),
             session_id: tool_session_id.to_string(),
@@ -1847,6 +1858,47 @@ mod tool_assembly_permission_tests {
             .map(|tool| tool.definition.name.as_str())
             .collect::<Vec<_>>();
         assert_eq!(names, vec!["image_generate", "image_edit", "read_media"]);
+    }
+
+    #[test]
+    fn legal_tool_resolver_should_gate_image_to_video_on_video_model() {
+        let agent = whitelist_agent(&["image_to_video"]);
+        let mut config = AppConfig::default();
+        // 只配置生图模型时，图生视频不应挂载
+        config.image_generation_model_id = Some("provider-a::model-a".to_string());
+        config.image_to_video_model_id = None;
+        let policy = RuntimeToolPolicy {
+            conversation_resolved: true,
+            local_conversation: true,
+            ..RuntimeToolPolicy::default()
+        };
+        let tools = vec![CachedRuntimeToolSchema::builtin(test_definition("image_to_video"))];
+        let memory = test_memory_context(true);
+        let resolved = resolve_legal_runtime_tools(
+            &config,
+            &test_api(),
+            &agent,
+            &policy,
+            Some(&memory),
+            &tools,
+        );
+        assert!(resolved.attached.is_empty());
+
+        config.image_to_video_model_id = Some("provider-a::video".to_string());
+        let resolved = resolve_legal_runtime_tools(
+            &config,
+            &test_api(),
+            &agent,
+            &policy,
+            Some(&memory),
+            &tools,
+        );
+        let names = resolved
+            .attached
+            .iter()
+            .map(|tool| tool.definition.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["image_to_video"]);
     }
 
     #[test]

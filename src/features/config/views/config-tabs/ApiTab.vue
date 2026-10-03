@@ -145,7 +145,7 @@
 
 
       <ApiKeyListCard
-        v-if="!selectedProviderIsCodex"
+        v-if="!selectedProviderIsCodex && !selectedProviderIsGrok"
         :title="t('config.imageGeneration.apiKeys')"
         :key="selectedProvider.id"
         :model-value="selectedProvider.apiKeys"
@@ -155,10 +155,14 @@
       />
 
       <CodexProviderPanel
-        v-else
+        v-else-if="selectedProviderIsCodex"
         :provider="selectedProvider"
         :draft-groups="draftModelGroups"
         @select-model="selectModelCard"
+      />
+      <GrokProviderPanel
+        v-if="selectedProviderIsGrok"
+        :provider-id="selectedProvider.id"
       />
 
       <ConfigCard v-if="!selectedProviderIsCodex" :title="t('config.api.connectionTest')">
@@ -271,7 +275,9 @@
                   {{ provider.name || provider.id }}
                 </div>
                 <div class="text-caption opacity-50 truncate mt-0.5 font-mono">
-                  {{ formatEndpointDisplay(provider.baseUrl) || '-' }}
+                  {{ provider.providerType === 'xai' && provider.codexApiProviderId
+                    ? t('config.imageGeneration.credentialRef')
+                    : (formatEndpointDisplay(provider.baseUrl) || '-') }}
                 </div>
               </div>
 
@@ -390,11 +396,10 @@ import type { SettingsBreadcrumbItem } from "../../components/SettingsBreadcrumb
 import type { UnderlineTabItem } from "../../components/UnderlineTabs.vue";
 import { canUseTransportGenaiChatAdapters, invokeTauri, listTransportGenaiChatAdapters, openTransportExternalUrl } from "../../../../services/tauri-api";
 import CodexProviderPanel from "./CodexProviderPanel.vue";
+import GrokProviderPanel from "./GrokProviderPanel.vue";
 import ImageGenerationTab from "./ImageGenerationTab.vue";
 import {
   appendImageGenerationProvider,
-  createImageGenerationProvider,
-  imageGenerationEndpointId,
 } from "../../utils/image-generation-config";
 import { normalizeApiRequestFormat } from "../../utils/api-request-format";
 import {
@@ -429,7 +434,7 @@ type ProviderPreset = {
   hasFreeQuota?: boolean;
 };
 
-type ProtocolOption = { value: ApiRequestFormat; label: string };
+type ProtocolOption = { value: ApiRequestFormat; label: string; loginProvider?: "grok" };
 type FetchModelMetadataResult = {
   found: boolean;
   fuzzyMatch?: boolean | null;
@@ -620,6 +625,7 @@ const LOCAL_TEXT_PROTOCOL_OPTIONS: ProtocolOption[] = [
   { value: "auto", label: "Auto" },
   { value: "openai", label: "OpenAI Compatible" },
   { value: "codex", label: "OpenAI Codex" },
+  { value: "xai", label: "Grok", loginProvider: "grok" },
 ];
 
 // genai 清单 id → 前端协议值 映射；未命中（后端 supported=false）的适配器不进入候选。
@@ -1081,6 +1087,7 @@ const protocolOptions = computed(() =>
 
 const selectedProtocol = computed<ApiRequestFormat>(() => canonicalRequestFormat(selectedProvider.value?.requestFormat || "openai"));
 const selectedProviderIsCodex = computed(() => selectedProtocol.value === "codex");
+const selectedProviderIsGrok = computed(() => selectedProvider.value?.loginProvider === "grok");
 const providerTemplateValues = computed<Record<string, unknown>>({
   get: () => {
     const provider = selectedProvider.value;
@@ -1102,17 +1109,27 @@ const providerTemplateValues = computed<Record<string, unknown>>({
     }
     if (typeof values.requestFormat === "string" && values.requestFormat !== provider.requestFormat) {
       provider.requestFormat = values.requestFormat as ApiRequestFormat;
-      if (provider.requestFormat === "codex") {
-        expandDraftGroupsForCodexIfNeeded();
-        void refreshCodexAuthStatus(provider);
+      const selectedProtocol = protocolOptions.value.find((item) => item.value === provider.requestFormat);
+      if (selectedProtocol?.loginProvider === "grok") {
+        seedGrokProvider(provider);
+        rebuildDraftGroups();
+        syncDerivedUiToSelectedProvider();
+        scheduleMetadataSyncForAllGroups();
+        void refreshResolvedAdaptersForSelectedProvider();
       } else {
-        stopCodexAuthPolling();
-        // 切回非 codex 不自动缩回已展开的档位，保留用户意图
+        provider.loginProvider = "";
+        if (provider.requestFormat === "codex") {
+          expandDraftGroupsForCodexIfNeeded();
+          void refreshCodexAuthStatus(provider);
+        } else {
+          stopCodexAuthPolling();
+          // 切回非 codex 不自动缩回已展开的档位，保留用户意图
+        }
+        // 协议是用户显式选择，直接同步衍生 UI，不靠 watch
+        syncDerivedUiToSelectedProvider();
+        scheduleMetadataSyncForAllGroups();
+        void refreshResolvedAdaptersForSelectedProvider();
       }
-      // 协议是用户显式选择，直接同步衍生 UI，不靠 watch
-      syncDerivedUiToSelectedProvider();
-      scheduleMetadataSyncForAllGroups();
-      void refreshResolvedAdaptersForSelectedProvider();
     }
   },
 });
@@ -1137,7 +1154,7 @@ const providerTemplateGroups = computed<ConfigTemplateGroup[]>(() => {
       }],
     },
   ];
-  if (!selectedProviderIsCodex.value) {
+  if (!selectedProviderIsCodex.value && !selectedProviderIsGrok.value) {
     rows.push({
       items: [{
         key: "baseUrl",
@@ -1627,6 +1644,30 @@ function normalizeProviderRequestFormats() {
   }
 }
 
+const GROK_OAUTH_BASE_URL = "https://cli-chat-proxy.grok.com/v1";
+const GROK_DEFAULT_MODEL = "grok-4.7";
+const GROK_DEFAULT_CONTEXT_TOKENS = 500_000;
+
+function seedGrokProvider(provider: ApiProviderConfigItem) {
+  provider.loginProvider = "grok";
+  provider.requestFormat = "xai";
+  if (!provider.baseUrl || provider.baseUrl.includes("api.openai.com")) {
+    provider.baseUrl = GROK_OAUTH_BASE_URL;
+  }
+  const meaningful = (provider.models || []).filter((model) => {
+    const name = String(model.model || "").trim();
+    return name && name !== "gpt-4o-mini";
+  });
+  if (meaningful.length > 0) return;
+  const model = createModel(`${Date.now()}-grok`, GROK_DEFAULT_MODEL);
+  model.contextWindowTokens = GROK_DEFAULT_CONTEXT_TOKENS;
+  model.enableImage = true;
+  provider.models = [model];
+  provider.apiKeys = [];
+  const first = provider.models[0];
+  if (first) props.config.selectedApiConfigId = `${provider.id}::${first.id}`;
+}
+
 function createModel(seed: string, name = ""): ApiModelConfigItem {
   return {
     id: `api-model-${seed}`,
@@ -1661,6 +1702,7 @@ function createProvider(seed: string, capability: ApiCapability = selectedCapabi
     enableTools: capability === "text",
     tools: [],
     baseUrl: providerPresets.find((preset) => preset.urls[requestFormat])?.urls[requestFormat] || (isCodex ? DEFAULT_CODEX_BASE_URL : "https://api.openai.com/v1"),
+    loginProvider: "",
     codexAuthMode: DEFAULT_CODEX_AUTH_MODE,
     codexLocalAuthPath: DEFAULT_CODEX_LOCAL_AUTH_PATH,
     codexCustomUrl: "",
@@ -1891,7 +1933,13 @@ function removeModelGroup(group: DraftModelGroup) {
   const [, selectedModelId] = String(props.config.selectedApiConfigId || "").split("::");
   if (selectedModelId === group.primary.id) {
     const nextGroup = draftModelGroups.value[0];
-    props.config.selectedApiConfigId = nextGroup ? `${provider.id}::${nextGroup.primary.id}` : "";
+    if (nextGroup) {
+      props.config.selectedApiConfigId = `${provider.id}::${nextGroup.primary.id}`;
+      browsingProviderId.value = "";
+    } else {
+      props.config.selectedApiConfigId = "";
+      browsingProviderId.value = provider.id;
+    }
   }
 }
 
@@ -2207,8 +2255,9 @@ async function testModelConnection(modelCardId: string) {
   if (!provider) return;
   const modelCard = draftViewModels.value.find((m) => m.id === modelCardId);
   if (!modelCard) return;
+  const usesGrokLogin = provider.loginProvider === "grok";
   const apiKey = (provider.apiKeys || []).find((k) => k.trim()) ?? "";
-  if (!apiKey.trim()) {
+  if (!usesGrokLogin && !apiKey.trim()) {
     modelConnectionResult.value = {
       ...modelConnectionResult.value,
       [modelCardId]: { success: false, error: "API key is empty" },
@@ -2283,6 +2332,7 @@ async function runProviderConnectionProbe(
   }
   await invokeTauri<string>("quick_genai_chat", {
     input: {
+      loginProvider: provider.loginProvider === "grok" ? "grok" : "",
       baseUrl: provider.baseUrl.trim(),
       apiKey: apiKey.trim(),
       requestFormat: provider.requestFormat,
@@ -2315,8 +2365,9 @@ async function runSingleConnectionTest(apiKey: string): Promise<ConnectionTestRe
 async function runConnectionTestFirstKey() {
   const provider = selectedProvider.value;
   if (!provider) return;
+  const usesGrokLogin = provider.loginProvider === "grok";
   const apiKey = (provider.apiKeys || []).find((k) => k.trim()) ?? "";
-  if (!apiKey.trim()) {
+  if (!usesGrokLogin && !apiKey.trim()) {
     const errText = "API key is empty";
     connectionTestResults.value = [{ keyPreview: "-", success: false, error: errText }];
     props.setStatusAction(t("config.api.testConnectionFailed", { error: errText }));
@@ -2339,7 +2390,8 @@ async function runConnectionTestFirstKey() {
 async function runConnectionTestAllKeys() {
   const provider = selectedProvider.value;
   if (!provider) return;
-  const keys = (provider.apiKeys || []).filter((k) => k.trim());
+  const usesGrokLogin = provider.loginProvider === "grok";
+  const keys = usesGrokLogin ? [""] : (provider.apiKeys || []).filter((k) => k.trim());
   if (keys.length === 0) {
     const errText = "API key is empty";
     connectionTestResults.value = [{ keyPreview: "-", success: false, error: errText }];

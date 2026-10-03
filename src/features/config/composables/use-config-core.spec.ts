@@ -6,6 +6,13 @@ import { useConfigCore } from "./use-config-core";
 
 function createConfig(): AppConfig {
   const imageProvider = createImageGenerationProvider("openai", "test");
+  // 生图与生视频各自引用一个端点，用来验证两个字段都会被带出去。
+  imageProvider.models.push({
+    ...imageProvider.models[0],
+    id: "video-model",
+    name: "video",
+    model: "grok-imagine-video",
+  });
   return {
     hotkey: "Alt+·",
     uiLanguage: "zh-CN",
@@ -30,6 +37,7 @@ function createConfig(): AppConfig {
     expertApiConfigId: "",
     visionApiConfigId: undefined,
     imageGenerationModelId: imageGenerationEndpointId(imageProvider.id, imageProvider.models[0]?.id || ""),
+    imageToVideoModelId: imageGenerationEndpointId(imageProvider.id, "video-model"),
     toolReviewApiConfigId: undefined,
     sttApiConfigId: undefined,
     sttAutoSend: false,
@@ -44,7 +52,7 @@ function createConfig(): AppConfig {
 }
 
 describe("useConfigCore image generation", () => {
-  it("应在保存载荷和脏检查快照中保留独立生图配置", () => {
+  it("应在保存载荷和脏检查快照中保留独立生图与生视频配置", () => {
     const config = createConfig();
     const core = useConfigCore({
       config,
@@ -56,8 +64,10 @@ describe("useConfigCore image generation", () => {
 
     expect(payload.imageProviders).toHaveLength(1);
     expect(payload.imageGenerationModelId).toBe(config.imageGenerationModelId);
+    expect(payload.imageToVideoModelId).toBe(config.imageToVideoModelId);
     expect(snapshot.imageProviders[0]?.models[0]?.model).toBe("gpt-image-2");
     expect(snapshot.imageGenerationModelId).toBe(config.imageGenerationModelId);
+    expect(snapshot.imageToVideoModelId).toBe(config.imageToVideoModelId);
   });
 });
 

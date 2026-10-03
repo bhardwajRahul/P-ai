@@ -58,6 +58,7 @@ export function createToolCallPresentation(options: ToolCallPresentationOptions)
     "meme",
     "image_generate",
     "image_edit",
+    "image_to_video",
     "remember",
     "recall",
     "fetch",
@@ -731,6 +732,19 @@ export function createToolCallPresentation(options: ToolCallPresentationOptions)
       };
     }
 
+    if (toolName === "image_to_video") {
+      const action = toolTimelineText("actionImageToVideo");
+      const prompt = safeStringValue(obj, "prompt") || (typeof args === "string" ? args : "");
+      const image = fileNameFromPath(safeStringValue(obj, "image"));
+      const target = compactText(prompt || image || toCompactValue(args), 50);
+      return {
+        action,
+        target,
+        extra: image || undefined,
+        text: formatFullText(action, target, undefined, image || undefined),
+      };
+    }
+
     if (toolName === "image_edit") {
       const action = toolTimelineText("actionImageEdit");
       const prompt = safeStringValue(obj, "prompt") || (typeof args === "string" ? args : "");
@@ -820,6 +834,7 @@ export function createToolCallPresentation(options: ToolCallPresentationOptions)
     if (raw === "meme") return toolTimelineText("actionMeme");
     if (raw === "image_generate") return toolTimelineText("actionImageGenerate");
     if (raw === "image_edit") return toolTimelineText("actionImageEdit");
+    if (raw === "image_to_video") return toolTimelineText("actionImageToVideo");
     if (raw === "remember") return toolTimelineText("actionRemember");
     if (raw === "recall") return toolTimelineText("actionRecall");
     if (raw === "fetch") return toolTimelineText("actionFetch");

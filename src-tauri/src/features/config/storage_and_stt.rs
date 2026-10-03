@@ -52,6 +52,7 @@ fn read_config(path: &PathBuf) -> Result<AppConfig, String> {
 
     let content =
         fs::read_to_string(&resolved_path).map_err(|err| format!("Read config failed: {err}"))?;
+    let content = migrate_legacy_grok_request_format(&content);
     let missing_enable_audio = config_missing_enable_audio_field(&content);
     let mut parsed = toml::from_str::<AppConfig>(&content).map_err(|err| {
         runtime_log_error(format!(
@@ -189,6 +190,7 @@ fn consume_api_key_for_request(resolved_api: &ResolvedApiConfig) -> String {
         enable_tools: false,
         tools: Vec::new(),
         base_url: resolved_api.base_url.clone(),
+        login_provider: String::new(),
         codex_auth_mode: default_codex_auth_mode(),
         codex_local_auth_path: default_codex_local_auth_path(),
         codex_custom_url: None,
@@ -242,6 +244,7 @@ fn migrate_legacy_api_configs_into_providers(config: &mut AppConfig) {
                 enable_tools: legacy.enable_tools,
                 tools: legacy.tools.clone(),
                 base_url: legacy.base_url.clone(),
+                login_provider: String::new(),
                 codex_auth_mode: legacy.codex_auth_mode.clone(),
                 codex_local_auth_path: legacy.codex_local_auth_path.clone(),
                 codex_custom_url: legacy.codex_custom_url.clone(),
@@ -467,10 +470,33 @@ fn selected_reasoning_effort_for_runtime(selected: &ApiConfig) -> Option<String>
     }
 }
 
+fn migrate_legacy_grok_request_format(content: &str) -> String {
+    content
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            let (key, value) = trimmed.split_once('=').unwrap_or(("", ""));
+            if key.trim() == "requestFormat" && value.trim().trim_matches('"').eq_ignore_ascii_case("grok") {
+                let migrated = line.replacen("grok", "xai", 1);
+                format!("{migrated}\nloginProvider = \"grok\"")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn normalize_api_tools(config: &mut AppConfig) {
     for provider in &mut config.api_providers {
         provider.key_cursor = provider.key_cursor.min(1_000_000);
         provider.failure_retry_count = provider.failure_retry_count.clamp(0, 20);
+        if provider.login_provider.trim() != "grok" {
+            provider.login_provider.clear();
+        } else {
+            provider.login_provider = "grok".to_string();
+            provider.request_format = RequestFormat::Xai;
+        }
         provider.codex_auth_mode = normalize_codex_auth_mode(&provider.codex_auth_mode);
         provider.codex_local_auth_path =
             normalize_terminal_path_input_for_current_platform(&provider.codex_local_auth_path);
@@ -1326,6 +1352,14 @@ fn resolve_api_config(
     app_config: &AppConfig,
     requested_id: Option<&str>,
 ) -> Result<ResolvedApiConfig, String> {
+    resolve_api_config_with_data_path(app_config, requested_id, Path::new(""))
+}
+
+fn resolve_api_config_with_data_path(
+    app_config: &AppConfig,
+    requested_id: Option<&str>,
+    data_path: &Path,
+) -> Result<ResolvedApiConfig, String> {
     if let Some(debug_cfg) = read_debug_api_config()? {
         let enabled = debug_cfg.enabled.unwrap_or(true);
         let request_format_ok = debug_cfg
@@ -1338,6 +1372,7 @@ fn resolve_api_config(
                 return Err(".debug/api-key.json exists but apiKey is empty.".to_string());
             }
             return Ok(ResolvedApiConfig {
+                login_provider: String::new(),
                 provider_id: None,
                 provider_api_keys: Vec::new(),
                 provider_key_cursor: 0,
@@ -1378,6 +1413,7 @@ fn resolve_api_config(
             .iter()
             .find(|provider| provider.id == provider_id)
     });
+    let mut selected_base_url = selected.base_url.clone();
     let mut selected_api_key = selected_provider
         .map(peek_provider_api_key)
         .filter(|value| !value.trim().is_empty())
@@ -1422,12 +1458,29 @@ fn resolve_api_config(
         }
         extra_headers.push(("Session-Id".to_string(), Uuid::new_v4().to_string()));
     }
+    if selected_provider
+        .map(|provider| provider.login_provider.trim() == "grok")
+        .unwrap_or(false)
+    {
+        let provider_id = selected_provider
+            .map(|provider| provider.id.as_str())
+            .ok_or_else(|| "Grok 供应商不存在，请先保存供应商配置".to_string())?;
+        let (access_token, base_url) = tauri::async_runtime::block_on(resolve_grok_access_token(
+            data_path,
+            provider_id,
+        ))?;
+        selected_api_key = access_token;
+        selected_base_url = base_url;
+    }
 
     if selected_api_key.trim().is_empty() {
         return Err("Selected API config API key is empty. Please fill it in settings.".to_string());
     }
 
     Ok(ResolvedApiConfig {
+        login_provider: selected_provider
+            .map(|provider| provider.login_provider.clone())
+            .unwrap_or_default(),
         provider_id: selected_provider_id,
         provider_api_keys: selected_provider
             .map(|provider| provider.api_keys.clone())
@@ -1456,10 +1509,10 @@ fn resolve_api_config(
                         .unwrap_or(selected.base_url.trim())
                         .to_string()
                 } else {
-                    selected.base_url.trim().to_string()
+                    selected_base_url.trim().to_string()
                 }
             })
-            .unwrap_or_else(|| selected.base_url.trim().to_string()),
+            .unwrap_or_else(|| selected_base_url.trim().to_string()),
         api_key: selected_api_key,
         model: selected.model.trim().to_string(),
         reasoning_effort: selected_reasoning_effort_for_runtime(&selected),

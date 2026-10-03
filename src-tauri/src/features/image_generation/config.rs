@@ -180,6 +180,12 @@ fn normalize_image_generation_config(config: &mut AppConfig) {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .filter(|value| image_generation_model_exists(config, value));
+    config.image_to_video_model_id = config
+        .image_to_video_model_id
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .filter(|value| image_generation_model_exists(config, value));
 }
 
 #[cfg(test)]
@@ -196,6 +202,7 @@ mod image_generation_config_tests {
         provider.models.push(provider.models[0].clone());
         config.image_providers = vec![provider.clone(), provider];
         config.image_generation_model_id = Some("missing::model".to_string());
+        config.image_to_video_model_id = Some("missing::video".to_string());
 
         normalize_image_generation_config(&mut config);
 
@@ -205,6 +212,7 @@ mod image_generation_config_tests {
         assert_eq!(config.image_providers[0].timeout_seconds, 10);
         assert_eq!(config.image_providers[0].models.len(), 1);
         assert!(config.image_generation_model_id.is_none());
+        assert!(config.image_to_video_model_id.is_none());
     }
 
     #[test]

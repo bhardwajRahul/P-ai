@@ -1023,6 +1023,31 @@ fn graceful_restart_app(app: &AppHandle) {
     }
 }
 
+#[tauri::command(rename = "grok_auth_login")]
+async fn grok_auth_login_command(app: AppHandle, input: GrokProviderInput) -> Result<GrokAuthStatus, String> {
+    grok_auth_login(app, input).await
+}
+
+#[tauri::command(rename = "grok_auth_refresh")]
+async fn grok_auth_refresh_command(app: AppHandle, input: GrokProviderInput) -> Result<GrokAuthStatus, String> {
+    grok_auth_refresh(app, input).await
+}
+
+#[tauri::command(rename = "grok_auth_logout")]
+fn grok_auth_logout_command(app: AppHandle, input: GrokProviderInput) -> Result<GrokAuthStatus, String> {
+    grok_auth_logout(app, input)
+}
+
+#[tauri::command(rename = "grok_auth_status")]
+fn grok_auth_status_command(app: AppHandle, input: GrokProviderInput) -> Result<GrokAuthStatus, String> {
+    grok_auth_status(app, input)
+}
+
+#[tauri::command(rename = "grok_auth_import")]
+fn grok_auth_import_command(app: AppHandle, input: GrokImportInput) -> Result<GrokAuthStatus, String> {
+    grok_auth_import(app, input)
+}
+
 fn main() {
     // 用 args_os 兜住非 UTF-8 参数：std::env::args 在迭代时会 panic，会绕开退出码约定。
     let argv: Vec<String> = std::env::args_os()
@@ -1263,6 +1288,7 @@ fn main() {
             set_ui_language,
             load_config,
             generate_image,
+            test_image_to_video,
             check_message_store_migration,
             run_message_store_migration,
             get_message_store_migration_runtime_status,
@@ -1459,6 +1485,11 @@ fn main() {
             codex_consume_rate_limit_reset_credit,
             codex_start_oauth_login,
             codex_logout,
+            grok_auth_status_command,
+            grok_auth_login_command,
+            grok_auth_refresh_command,
+            grok_auth_logout_command,
+            grok_auth_import_command,
             check_tools_status,
             list_tool_catalog,
             list_permission_catalog,

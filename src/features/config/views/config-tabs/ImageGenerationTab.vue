@@ -3,14 +3,14 @@
     <div v-if="selectedProvider" class="grid gap-3">
       <ConfigTemplate v-model="providerTemplateValues" :groups="providerTemplateGroups" />
       <ApiKeyListCard
-        v-if="selectedProvider.providerType !== 'codex'"
+        v-if="selectedProvider.providerType !== 'codex' && !(selectedProvider.providerType === 'xai' && selectedProvider.codexApiProviderId)"
         :title="t('config.imageGeneration.apiKeys')"
         :key="selectedProvider.id"
         :model-value="selectedProvider.apiKeys"
         @update:model-value="updateSelectedApiKeys"
       />
       <div v-else class="rounded-box border border-info/30 bg-info/5 px-3 py-2 text-xs text-base-content/70">
-        {{ t("config.imageGeneration.codexCredentialHint") }}
+        {{ selectedProvider.providerType === "xai" ? t("config.imageGeneration.grokCredentialHint") : t("config.imageGeneration.codexCredentialHint") }}
       </div>
 
       <ConfigCard :title="t('config.api.modelCards')">
@@ -89,7 +89,15 @@
             <span>{{ t("config.imageGeneration.testSaveFirst") }}</span>
           </div>
 
-          <!-- 上：参数一排（与 image_generate 工具的可选参数对齐） -->
+          <!-- 操作：文生图 / 图像编辑 / 图生视频，切换后参数区与结果区随之变化 -->
+          <div class="grid gap-1 sm:max-w-64">
+            <span class="text-xs font-medium text-base-content/60">{{ t("config.imageGeneration.testOperation") }}</span>
+            <select v-model="testOperation" class="select select-bordered select-sm w-full">
+              <option v-for="option in testOperationOptions" :key="option.value" :value="option.value">{{ t(option.labelKey) }}</option>
+            </select>
+          </div>
+
+          <!-- 模型 + 尺寸（文生图 / 图像编辑）或 时长 + 分辨率（图生视频） -->
           <div class="flex flex-wrap gap-3">
             <div class="grid min-w-40 flex-1 content-start gap-1">
               <span class="text-xs font-medium text-base-content/60">{{ t("config.imageGeneration.testModel") }}</span>
@@ -98,22 +106,90 @@
                 <option v-for="option in testModelOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
               </select>
             </div>
-            <div class="grid content-start gap-1">
+            <div v-if="testOperation !== 'video'" class="grid content-start gap-1">
               <span class="text-xs font-medium text-base-content/60">{{ t("config.imageGeneration.testSize") }}</span>
               <select v-model="testResolution" class="select select-bordered select-sm w-40 font-mono">
                 <option value="">{{ t("config.imageGeneration.testOptionModelDefault") }}</option>
                 <option v-for="preset in testResolutionPresets" :key="preset" :value="preset">{{ preset }}</option>
               </select>
             </div>
+            <template v-else>
+              <div class="grid content-start gap-1">
+                <span class="text-xs font-medium text-base-content/60">{{ t("config.imageGeneration.testVideoDuration") }}</span>
+                <select v-model="testDuration" class="select select-bordered select-sm w-32">
+                  <option :value="6">6s</option>
+                  <option :value="10">10s</option>
+                </select>
+              </div>
+              <div class="grid content-start gap-1">
+                <span class="text-xs font-medium text-base-content/60">{{ t("config.imageGeneration.testVideoResolution") }}</span>
+                <select v-model="testVideoResolution" class="select select-bordered select-sm w-32 font-mono">
+                  <option value="480p">480p</option>
+                  <option value="720p">720p</option>
+                </select>
+              </div>
+            </template>
           </div>
 
-          <!-- 中：提示词，标题独立一行 + 全宽多行文本框 -->
+          <!-- 图像编辑：输入图与可选蒙版 -->
+          <div v-if="testOperation === 'edit'" class="grid gap-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-sm font-medium">{{ t("config.imageGeneration.testInputImages") }}</span>
+              <button class="btn btn-xs btn-ghost gap-1" type="button" :disabled="pickingTestImage" @click="pickTestImage('images')">
+                <span v-if="pickingTestImage" class="loading loading-spinner loading-xs" />
+                <Plus v-else class="h-3.5 w-3.5" />
+                {{ t("config.imageGeneration.testPickImage") }}
+              </button>
+            </div>
+            <div v-if="testImages.length" class="grid gap-1">
+              <div v-for="path in testImages" :key="path" class="flex items-center gap-2 text-xs">
+                <code class="min-w-0 flex-1 truncate rounded bg-base-200 px-2 py-1 text-caption" :title="path">{{ path }}</code>
+                <button class="btn btn-xs btn-ghost text-error shrink-0" type="button" @click="removeTestImage(path)">{{ t("common.delete") }}</button>
+              </div>
+            </div>
+            <div v-else class="rounded-box border border-dashed border-base-300 py-3 text-center text-xs text-base-content/55">
+              {{ t("config.imageGeneration.testInputImagesEmpty") }}
+            </div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-sm font-medium">{{ t("config.imageGeneration.testMask") }}</span>
+              <button class="btn btn-xs btn-ghost gap-1" type="button" :disabled="pickingTestImage" @click="pickTestImage('mask')">
+                {{ t("config.imageGeneration.testPickImage") }}
+              </button>
+            </div>
+            <div v-if="testMask" class="flex items-center gap-2 text-xs">
+              <code class="min-w-0 flex-1 truncate rounded bg-base-200 px-2 py-1 text-caption" :title="testMask">{{ testMask }}</code>
+              <button class="btn btn-xs btn-ghost text-error shrink-0" type="button" @click="testMask = ''">{{ t("common.delete") }}</button>
+            </div>
+          </div>
+
+          <!-- 图生视频：首帧 -->
+          <div v-if="testOperation === 'video'" class="grid gap-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-sm font-medium">{{ t("config.imageGeneration.testFirstFrame") }}</span>
+              <button class="btn btn-xs btn-ghost gap-1" type="button" :disabled="pickingTestImage" @click="pickTestImage('firstFrame')">
+                <span v-if="pickingTestImage" class="loading loading-spinner loading-xs" />
+                <Plus v-else class="h-3.5 w-3.5" />
+                {{ t("config.imageGeneration.testPickImage") }}
+              </button>
+            </div>
+            <div v-if="testFirstFrame" class="flex items-center gap-2 text-xs">
+              <code class="min-w-0 flex-1 truncate rounded bg-base-200 px-2 py-1 text-caption" :title="testFirstFrame">{{ testFirstFrame }}</code>
+              <button class="btn btn-xs btn-ghost text-error shrink-0" type="button" @click="testFirstFrame = ''">{{ t("common.delete") }}</button>
+            </div>
+            <div v-else class="rounded-box border border-dashed border-base-300 py-3 text-center text-xs text-base-content/55">
+              {{ t("config.imageGeneration.testFirstFrameEmpty") }}
+            </div>
+          </div>
+
+          <!-- 提示词，标题独立一行 + 全宽多行文本框 -->
           <div class="grid gap-1">
-            <span class="text-sm font-medium">{{ t("config.imageGeneration.testPrompt") }}</span>
+            <span class="text-sm font-medium">
+              {{ testOperation === "video" ? t("config.imageGeneration.testPromptOptional") : t("config.imageGeneration.testPrompt") }}
+            </span>
             <textarea v-model="testPrompt" class="textarea textarea-bordered min-h-24 w-full" :placeholder="t('config.imageGeneration.testPromptPlaceholder')" />
           </div>
 
-          <!-- 下：生成按钮 + 常驻预览 -->
+          <!-- 生成按钮 + 常驻预览 -->
           <button class="btn btn-primary w-full" type="button" :disabled="!canRunImageTest" @click="runImageTest">
             <span v-if="testingImage" class="loading loading-spinner loading-sm" />
             <ImageIcon v-else class="h-4 w-4" />
@@ -124,6 +200,13 @@
 
           <div class="overflow-hidden rounded-box border border-base-300 bg-base-200/40">
             <div v-if="testingImage" class="skeleton h-72 w-full rounded-none" />
+            <template v-else-if="testOperation === 'video'">
+              <video v-if="testVideoUrl" :src="testVideoUrl" class="mx-auto block max-h-96" controls />
+              <div v-else class="flex h-48 flex-col items-center justify-center gap-2 text-xs text-base-content/45">
+                <ImageIcon class="h-8 w-8 opacity-40" />
+                <span>{{ t("config.imageGeneration.previewVideoEmpty") }}</span>
+              </div>
+            </template>
             <img v-else-if="testPreviewDataUrl" :src="testPreviewDataUrl" :alt="firstTestImage?.revisedPrompt || testPrompt" class="mx-auto block max-h-96 object-contain" />
             <div v-else class="flex h-48 flex-col items-center justify-center gap-2 text-xs text-base-content/45">
               <ImageIcon class="h-8 w-8 opacity-40" />
@@ -131,7 +214,13 @@
             </div>
           </div>
 
-          <template v-if="!testingImage && testResult && firstTestImage">
+          <template v-if="!testingImage && testOperation === 'video' && testVideoPath">
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+              <code class="min-w-0 flex-1 truncate rounded bg-base-200 px-2 py-1 text-caption" :title="testVideoPath">{{ testVideoPath }}</code>
+            </div>
+          </template>
+
+          <template v-if="!testingImage && testOperation !== 'video' && testResult && firstTestImage">
             <div class="flex flex-wrap items-center gap-2 text-xs">
               <span class="badge badge-ghost badge-sm">{{ testResult.providerName }} · {{ testResult.model }}</span>
               <span class="badge badge-ghost badge-sm font-mono">{{ firstTestImage.width }}×{{ firstTestImage.height }}</span>
@@ -168,7 +257,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ChevronDown, Copy, Image as ImageIcon, Plus, Trash2 } from "@lucide/vue";
 import type {
@@ -181,8 +270,11 @@ import type {
 import {
   copyTransportChatImageToClipboard,
   getTransportCapabilities,
+  ingestTransportAttachmentSource,
   invokeTauri,
+  pickTransportAttachmentSources,
   readTransportChatImage,
+  resolveLocalVideoUrl,
 } from "../../../../services/tauri-api";
 import ConfigCard from "../../components/ConfigCard.vue";
 import ConfigTemplate from "../../components/ConfigTemplate.vue";
@@ -231,6 +323,23 @@ const copyingImage = ref(false);
 const testError = ref("");
 const testResult = ref<ImageGenerationResult | null>(null);
 const testPreviewDataUrl = ref("");
+
+// 测试操作：文生图 / 图像编辑 / 图生视频，切换后参数区与结果区随之变化
+type ImageTestOperation = "generate" | "edit" | "video";
+const testOperation = ref<ImageTestOperation>("generate");
+const testOperationOptions: Array<{ value: ImageTestOperation; labelKey: string }> = [
+  { value: "generate", labelKey: "config.imageGeneration.testOperationGenerate" },
+  { value: "edit", labelKey: "config.imageGeneration.testOperationEdit" },
+  { value: "video", labelKey: "config.imageGeneration.testOperationVideo" },
+];
+const testImages = ref<string[]>([]);
+const testMask = ref("");
+const testFirstFrame = ref("");
+const testDuration = ref(6);
+const testVideoResolution = ref("480p");
+const testVideoPath = ref("");
+const testVideoUrl = ref("");
+const pickingTestImage = ref(false);
 const firstTestImage = computed(() => testResult.value?.images[0] || null);
 const activeImageModelPickerId = ref("");
 const imageModelSearch = ref("");
@@ -253,7 +362,13 @@ const imageModelOptions = computed(() => {
     comfyui: [],
     codex: ["gpt-image-2"],
     openai: ["gpt-image-2"],
-    xai: ["grok-imagine-image-quality", "grok-imagine-image"],
+    xai: [
+      "grok-imagine-image",
+      "grok-imagine-image-2.0",
+      "grok-imagine-image-quality",
+      "grok-imagine-video",
+      "grok-imagine-video-1.5",
+    ],
     seedream: ["doubao-seedream-5-0-pro-260628"],
     gemini: ["gemini-3.1-flash-image"],
     sensenova: ["sensenova-u1-fast", "sensenova-u1.5-lite"],
@@ -285,12 +400,20 @@ const selectedProvider = computed(() => (
 const codexApiProviders = computed(() => (
   (props.config.apiProviders || []).filter((provider) => provider.requestFormat === "codex" && !provider.deprecated)
 ));
+const grokApiProviders = computed(() => (
+  (props.config.apiProviders || []).filter((provider) => provider.loginProvider === "grok" && !provider.deprecated)
+));
 
 const testModelOptions = computed(() => {
   const provider = selectedProvider.value;
   if (!provider) return [];
-  return provider.models
-    .filter((model) => !model.deprecated)
+  const enabled = provider.models.filter((model) => !model.deprecated);
+  // 图生视频只列视频模型；供应商没有明显视频命名时回退全部，避免下拉为空无法操作
+  const videoOnly = enabled.filter((model) =>
+    String(model.model || model.id || "").toLowerCase().includes("video"),
+  );
+  const source = testOperation.value === "video" && videoOnly.length ? videoOnly : enabled;
+  return source
     .map((model) => {
       const endpointId = imageGenerationEndpointId(provider.id, model.id);
       const display = String(model.name || "").trim();
@@ -368,9 +491,11 @@ const providerTemplateValues = computed<Record<string, unknown>>({
           provider.models = [model];
         }
         if (nextType === "codex" && !provider.codexApiProviderId) provider.codexApiProviderId = codexApiProviders.value[0]?.id;
+        if (nextType === "xai" && !provider.codexApiProviderId) provider.codexApiProviderId = grokApiProviders.value[0]?.id;
       } else {
         provider.providerType = nextType;
         if (provider.providerType === "codex" && !provider.codexApiProviderId) provider.codexApiProviderId = codexApiProviders.value[0]?.id;
+        if (provider.providerType === "xai" && !provider.codexApiProviderId) provider.codexApiProviderId = grokApiProviders.value[0]?.id;
       }
     }
     if (typeof values.providerName === "string") provider.name = values.providerName;
@@ -397,7 +522,9 @@ const providerTemplateGroups = computed<ConfigTemplateGroup[]>(() => {
   };
   const endpointField = provider.providerType === "codex"
     ? { key: "codexApiProviderId", label: t("config.imageGeneration.codexApiProvider"), description: t("config.imageGeneration.codexApiProviderHint"), type: "select" as const, options: [{ value: "", label: t("config.imageGeneration.codexApiProviderMissing") }, ...codexApiProviders.value.map((item) => ({ value: item.id, label: item.name }))] }
-    : { key: "baseUrl", label: t("config.imageGeneration.baseUrl"), type: "text" as const, stacked: true };
+    : provider.providerType === "xai"
+      ? { key: "codexApiProviderId", label: t("config.imageGeneration.grokApiProvider"), description: t("config.imageGeneration.grokApiProviderHint"), type: "select" as const, options: [{ value: "", label: t("config.imageGeneration.grokApiProviderMissing") }, ...grokApiProviders.value.map((item) => ({ value: item.id, label: item.name }))] }
+      : { key: "baseUrl", label: t("config.imageGeneration.baseUrl"), type: "text" as const, stacked: true };
   const timeoutField = {
     key: "timeoutSeconds",
     label: t("config.imageGeneration.timeoutSeconds"),
@@ -411,6 +538,17 @@ const providerTemplateGroups = computed<ConfigTemplateGroup[]>(() => {
     { items: [timeoutField] },
     { items: [endpointField] },
   ];
+  if (provider.providerType === "xai" && !provider.codexApiProviderId) {
+    rows.push({
+      items: [{
+        key: "baseUrl",
+        label: t("config.imageGeneration.baseUrl"),
+        description: t("config.imageGeneration.grokBaseUrlHint"),
+        type: "text" as const,
+        stacked: true,
+      }],
+    });
+  }
   if (provider.providerType === "seedream") {
     rows.push({
       items: [{
@@ -443,13 +581,16 @@ const currentImageSnapshot = computed(() => imageConfigSnapshot(props.config));
 const imageDirty = computed(() => (
   JSON.stringify(currentImageSnapshot.value) !== JSON.stringify(savedImageSnapshot.value)
 ));
-const canRunImageTest = computed(() => (
-  !imageDirty.value
-  && !testingImage.value
-  && testPrompt.value.trim().length > 0
-  && !!testModelId.value
-  && testModelOptions.value.some((option) => option.value === testModelId.value)
-));
+const canRunImageTest = computed(() => {
+  if (imageDirty.value || testingImage.value) return false;
+  if (!testModelId.value || !testModelOptions.value.some((option) => option.value === testModelId.value)) {
+    return false;
+  }
+  if (testOperation.value === "video") return !!testFirstFrame.value.trim();
+  if (!testPrompt.value.trim()) return false;
+  if (testOperation.value === "edit") return testImages.value.length > 0;
+  return true;
+});
 
 const workflowJsonError = computed(() => {
   const provider = selectedProvider.value;
@@ -701,20 +842,90 @@ defineExpose({
   saveImageConfig,
 });
 
+const TEST_IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "bmp", "gif"];
+
+async function pickTestImage(target: "images" | "mask" | "firstFrame") {
+  if (pickingTestImage.value) return;
+  pickingTestImage.value = true;
+  testError.value = "";
+  try {
+    const sources = await pickTransportAttachmentSources({
+      multiple: target === "images",
+      filters: [{ name: t("config.imageGeneration.testPickImageFilter"), extensions: TEST_IMAGE_EXTENSIONS }],
+    });
+    const paths: string[] = [];
+    for (const source of sources) {
+      const receipt = await ingestTransportAttachmentSource(source);
+      const path = String(receipt?.path || "").trim();
+      if (path) paths.push(path);
+    }
+    if (paths.length === 0) return;
+    if (target === "images") testImages.value = [...testImages.value, ...paths];
+    else if (target === "mask") testMask.value = paths[0];
+    else testFirstFrame.value = paths[0];
+  } catch (error) {
+    testError.value = String(error instanceof Error ? error.message : error || t("config.imageGeneration.testFailed"));
+  } finally {
+    pickingTestImage.value = false;
+  }
+}
+
+function removeTestImage(path: string) {
+  testImages.value = testImages.value.filter((item) => item !== path);
+}
+
+function releaseTestVideoUrl() {
+  const url = testVideoUrl.value;
+  if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+  testVideoUrl.value = "";
+}
+
+onUnmounted(releaseTestVideoUrl);
+
 async function runImageTest() {
   if (!canRunImageTest.value) return;
   testingImage.value = true;
   testError.value = "";
   testResult.value = null;
   testPreviewDataUrl.value = "";
-  const request: Record<string, unknown> = {
-    prompt: testPrompt.value.trim(),
-    n: 1,
-    modelId: testModelId.value,
-  };
-  const resolution = testResolution.value.trim();
-  if (resolution) request.size = resolution;
+  releaseTestVideoUrl();
+  testVideoPath.value = "";
   try {
+    if (testOperation.value === "video") {
+      const result = await invokeTauri<{ path: string; absolutePath: string }>("test_image_to_video", {
+        request: {
+          image: testFirstFrame.value,
+          modelId: testModelId.value,
+          prompt: testPrompt.value.trim(),
+          duration: testDuration.value,
+          resolution: testVideoResolution.value,
+        },
+      });
+      testVideoPath.value = String(result?.path || "");
+      const absolute = String(result?.absolutePath || "");
+      if (absolute) {
+        // 视频已生成成功，预览地址解析失败不应把整次测试判成失败，也不应丢掉已保存的 testVideoPath。
+        try {
+          testVideoUrl.value = await resolveLocalVideoUrl(absolute);
+        } catch (previewError) {
+          console.warn("[设置] 生视频预览地址解析失败:", previewError);
+        }
+      }
+      props.setStatusAction(t("config.imageGeneration.testCompleted"));
+      return;
+    }
+    const request: Record<string, unknown> = {
+      prompt: testPrompt.value.trim(),
+      n: 1,
+      modelId: testModelId.value,
+    };
+    const resolution = testResolution.value.trim();
+    if (resolution) request.size = resolution;
+    if (testOperation.value === "edit") {
+      request.operation = "edit";
+      request.images = [...testImages.value];
+      if (testMask.value.trim()) request.mask = testMask.value.trim();
+    }
     const result = await invokeTauri<ImageGenerationResult>("generate_image", { request });
     testResult.value = result;
     const firstImage = result.images?.[0];

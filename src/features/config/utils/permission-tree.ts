@@ -67,7 +67,7 @@ const BUILTIN_TOOL_GROUP_DEFS: readonly BuiltinToolGroupDef[] = [
   { key: "desktop", tools: ["operate", "windows"] },
   { key: "web", tools: ["fetch", "websearch"] },
   { key: "delegate", tools: ["delegate"] },
-  { key: "media", tools: ["image_generate", "image_edit", "meme"] },
+  { key: "media", tools: ["image_generate", "image_edit", "image_to_video", "meme"] },
 ];
 
 const OTHER_GROUP_KEY = "other";

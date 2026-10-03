@@ -1,82 +1,105 @@
 <template>
   <ConfigTemplate :model-value="templateValues" :groups="templateGroups">
     <template #row-vision-api>
-      <label class="grid min-w-0 gap-2">
-        <div>
-          <div class="text-sm">{{ t("config.chatSettings.visionApi") }}</div>
-          <div class="mt-1 text-xs text-base-content/60">{{ t("config.chatSettings.visionApiHint") }}</div>
-        </div>
+      <ConfigRowField
+        :label="t('config.chatSettings.visionApi')"
+        :hint="t('config.chatSettings.visionApiHint')"
+      >
         <ApiConfigPicker
+          class="w-52 max-w-full"
+          size="sm"
           :model-value="config.visionApiConfigId ?? ''"
           :api-configs="imageCapableApiConfigs"
           :placeholder="t('config.chatSettings.noVision')"
           @update:model-value="onVisionSelect"
         />
-      </label>
+      </ConfigRowField>
     </template>
 
     <template #row-tool-review-api>
-      <label class="grid min-w-0 gap-2">
-        <div>
-          <div class="text-sm">{{ t("config.chatSettings.toolReviewApi") }}</div>
-          <div class="mt-1 text-xs text-base-content/60">{{ t("config.chatSettings.toolReviewApiHint") }}</div>
-        </div>
+      <ConfigRowField
+        :label="t('config.chatSettings.toolReviewApi')"
+        :hint="t('config.chatSettings.toolReviewApiHint')"
+      >
         <ApiConfigPicker
+          class="w-52 max-w-full"
+          size="sm"
           :model-value="config.toolReviewApiConfigId ?? ''"
           :api-configs="textCapableApiConfigs"
           @update:model-value="onToolReviewSelect"
         />
-      </label>
+      </ConfigRowField>
     </template>
 
     <template #row-expert-chat-model>
-      <label class="grid min-w-0 gap-2">
-        <div>
-          <div class="text-sm">{{ t("config.chatSettings.expertChatModelTitle") }}</div>
-          <div class="mt-1 text-xs text-base-content/60">{{ t("config.chatSettings.expertChatModelHint") }}</div>
-        </div>
+      <ConfigRowField
+        :label="t('config.chatSettings.expertChatModelTitle')"
+        :hint="t('config.chatSettings.expertChatModelHint')"
+      >
         <ApiConfigPicker
+          class="w-52 max-w-full"
+          size="sm"
           :model-value="config.expertApiConfigId || ''"
           :api-configs="textCapableApiConfigs"
           @update:model-value="onExpertSelect"
         />
-      </label>
+      </ConfigRowField>
     </template>
 
     <template #row-image-generation-model>
-      <label class="grid min-w-0 gap-2">
-        <div>
-          <div class="text-sm">{{ t("config.imageGeneration.defaultModel") }}</div>
-          <div class="mt-1 text-xs text-base-content/60">{{ t("config.imageGeneration.defaultModelHint") }}</div>
-        </div>
-        <select :value="config.imageGenerationModelId || ''" class="select select-bordered select-sm w-full" @change="onImageGenerationSelectChange">
-          <option value="">{{ t("config.imageGeneration.noDefaultModel") }}</option>
-          <option v-for="option in imageGenerationModelOptions" :key="option.id" :value="option.id">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
+      <ConfigRowField
+        :label="t('config.imageGeneration.defaultModel')"
+        :hint="t('config.imageGeneration.defaultModelHint')"
+      >
+        <ConfigValueSelect
+          class="w-52 max-w-full"
+          size="sm"
+          :model-value="config.imageGenerationModelId || ''"
+          :options="imageGenerationSelectOptions"
+          :placeholder="t('config.imageGeneration.noDefaultModel')"
+          @update:model-value="onImageGenerationSelectChange"
+        />
+      </ConfigRowField>
+    </template>
+
+    <template #row-image-to-video-model>
+      <ConfigRowField
+        :label="t('config.imageGeneration.defaultVideoModel')"
+        :hint="t('config.imageGeneration.defaultVideoModelHint')"
+      >
+        <ConfigValueSelect
+          class="w-52 max-w-full"
+          size="sm"
+          :model-value="config.imageToVideoModelId || ''"
+          :options="imageToVideoSelectOptions"
+          :placeholder="t('config.imageGeneration.noDefaultModel')"
+          @update:model-value="onImageToVideoSelectChange"
+        />
+      </ConfigRowField>
     </template>
 
     <template #row-stt-api>
-      <label class="grid min-w-0 gap-2">
-        <div>
-          <div class="text-sm">{{ t("config.chatSettings.sttTitle") }}</div>
-          <div class="mt-1 text-xs text-base-content/60">{{ t("config.chatSettings.sttHint") }}</div>
-        </div>
-        <select :value="config.sttApiConfigId ?? ''" class="select select-bordered select-sm w-full" @change="onSttSelectChange">
-          <option value="">{{ t("config.chatSettings.sttLocalWebSpeech") }}</option>
-          <option v-for="a in sttCapableApiConfigs" :key="a.id" :value="a.id">{{ a.name }}</option>
-        </select>
-      </label>
+      <ConfigRowField
+        :label="t('config.chatSettings.sttTitle')"
+        :hint="t('config.chatSettings.sttHint')"
+      >
+        <ConfigValueSelect
+          class="w-52 max-w-full"
+          size="sm"
+          :model-value="config.sttApiConfigId ?? ''"
+          :options="sttSelectOptions"
+          :placeholder="t('config.chatSettings.sttLocalWebSpeech')"
+          @update:model-value="onSttSelectChange"
+        />
+      </ConfigRowField>
     </template>
 
     <template #row-stt-auto-send>
-      <div class="flex min-w-0 items-center justify-between gap-4" :class="{ 'opacity-50': !config.sttApiConfigId }">
-        <div class="min-w-0">
-          <div class="text-sm">{{ t("config.chatSettings.sttAutoSend") }}</div>
-          <p class="mt-1 text-xs text-base-content/60">{{ t("config.chatSettings.sttHint") }}</p>
-        </div>
+      <ConfigRowField
+        :label="t('config.chatSettings.sttAutoSend')"
+        :hint="t('config.chatSettings.sttHint')"
+        :row-class="config.sttApiConfigId ? '' : 'opacity-50'"
+      >
         <input
           :checked="!!config.sttAutoSend"
           type="checkbox"
@@ -84,7 +107,7 @@
           :disabled="!config.sttApiConfigId"
           @change="onSttAutoSendChange"
         />
-      </div>
+      </ConfigRowField>
     </template>
 
     <template #row-response-style>
@@ -259,6 +282,8 @@ import SegmentedControl from "../../components/SegmentedControl.vue";
 import ConfigTemplate from "../../components/ConfigTemplate.vue";
 import type { ConfigTemplateGroup } from "../../components/config-template";
 import ApiConfigPicker from "../../components/ApiConfigPicker.vue";
+import ConfigRowField from "../../components/ConfigRowField.vue";
+import ConfigValueSelect from "../../components/ConfigValueSelect.vue";
 import WorkspaceDirectoryPickerDialog from "../../../shared/components/WorkspaceDirectoryPickerDialog.vue";
 import type { AppConfig, ApiConfigItem, ChatSettingsPatch, ConversationApiSettingsPatch, PromptCommandPreset, ResponseStyleOption, ToolLoadStatus } from "../../../../types/app";
 import {
@@ -582,6 +607,7 @@ const templateGroups = computed<ConfigTemplateGroup[]>(() => [
       { key: "tool-review-api", items: [] },
       { key: "expert-chat-model", items: [] },
       { key: "image-generation-model", items: [] },
+      { key: "image-to-video-model", items: [] },
       { key: "stt-api", items: [] },
       { key: "stt-auto-send", items: [] },
     ],
@@ -614,6 +640,18 @@ const responseStyleSegmentOptions = computed(() =>
 const imageGenerationModelOptions = computed(() =>
   deriveImageGenerationModelOptions(props.config.imageProviders || []),
 );
+const imageToVideoModelOptions = computed(() =>
+  deriveImageGenerationModelOptions(props.config.imageProviders || []),
+);
+const imageGenerationSelectOptions = computed(() =>
+  imageGenerationModelOptions.value.map((option) => ({ value: option.id, label: option.label })),
+);
+const imageToVideoSelectOptions = computed(() =>
+  imageToVideoModelOptions.value.map((option) => ({ value: option.id, label: option.label })),
+);
+const sttSelectOptions = computed(() =>
+  props.sttCapableApiConfigs.map((item) => ({ value: item.id, label: item.name })),
+);
 const emit = defineEmits<{
   (e: "update:responseStyleId", value: string): void;
   (e: "update:pdfReadMode", value: "text" | "image"): void;
@@ -644,9 +682,8 @@ function onExpertSelect(value: string) {
 }
 
 // 图片生成模型没有独立保存按钮，改动后立即持久化，避免重启后配置丢失。
-async function onImageGenerationSelectChange(event: Event) {
-  const target = event.target as HTMLSelectElement | null;
-  const next = (target?.value || undefined) as string | undefined;
+async function onImageGenerationSelectChange(value: string) {
+  const next = value || undefined;
   const previous = props.config.imageGenerationModelId;
   props.config.imageGenerationModelId = next;
   try {
@@ -661,6 +698,22 @@ async function onImageGenerationSelectChange(event: Event) {
   }
 }
 
+async function onImageToVideoSelectChange(value: string) {
+  const next = value || undefined;
+  const previous = props.config.imageToVideoModelId;
+  props.config.imageToVideoModelId = next;
+  try {
+    const saved = await Promise.resolve(props.saveConfigAction());
+    if (!saved) {
+      props.config.imageToVideoModelId = previous;
+      console.warn("image to video model save rejected");
+    }
+  } catch {
+    props.config.imageToVideoModelId = previous;
+    console.warn("image to video model save failed");
+  }
+}
+
 function onResponseStyleChange(value: string) {
   emit("update:responseStyleId", value);
   emit("patchChatSettings", {
@@ -668,10 +721,10 @@ function onResponseStyleChange(value: string) {
   });
 }
 
-function onSttSelectChange(event: Event) {
-  const value = (event.target as HTMLSelectElement).value || undefined;
-  props.config.sttApiConfigId = value;
-  if (!value) {
+function onSttSelectChange(value: string) {
+  const selected = value || undefined;
+  props.config.sttApiConfigId = selected;
+  if (!selected) {
     props.config.sttAutoSend = false;
   }
   emit("patchConversationApiSettings", {

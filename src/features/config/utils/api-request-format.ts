@@ -59,6 +59,7 @@ const API_REQUEST_FORMAT_ALIASES: Record<string, ApiRequestFormat> = {
   qianfan: "baidu",
   openai_responses: "openai_responses",
   "openai-responses": "openai_responses",
+  grok: "xai",
   responses: "openai_responses",
   claude: "anthropic",
   google: "gemini",

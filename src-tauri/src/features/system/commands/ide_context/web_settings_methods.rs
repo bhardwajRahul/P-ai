@@ -467,6 +467,15 @@ async fn ide_chat_generate_image_for_web_settings(
     ide_chat_serialize(generate_images(state, request).await?)
 }
 
+async fn ide_chat_test_image_to_video_for_web_settings(
+    state: &AppState,
+    params: Value,
+) -> Result<Value, String> {
+    let request = ide_chat_parse_param_field::<ImageToVideoTestRequest>(params, "request")?;
+    ide_chat_serialize(test_image_to_video_inner(state, request).await?)
+    // 返回体带 path 与 absolutePath，Web 端用后者读取字节做播放器地址。
+}
+
 async fn ide_chat_get_storage_usage_overview_for_web_settings(
     state: &AppState,
 ) -> Result<Value, String> {
@@ -512,6 +521,31 @@ async fn ide_chat_codex_consume_rate_limit_reset_credit_for_web_settings(
 fn ide_chat_codex_logout_for_web_settings(params: Value) -> Result<Value, String> {
     let input = ide_chat_parse_param_field::<CodexLogoutInput>(params, "input")?;
     ide_chat_serialize(codex_logout(input)?)
+}
+
+fn ide_chat_grok_auth_status_for_web_settings(app: &AppHandle, params: Value) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<GrokProviderInput>(params, "input")?;
+    ide_chat_serialize(grok_auth_status(app.clone(), input)?)
+}
+
+async fn ide_chat_grok_auth_login_for_web_settings(app: &AppHandle, params: Value) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<GrokProviderInput>(params, "input")?;
+    ide_chat_serialize(grok_auth_login(app.clone(), input).await?)
+}
+
+async fn ide_chat_grok_auth_refresh_for_web_settings(app: &AppHandle, params: Value) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<GrokProviderInput>(params, "input")?;
+    ide_chat_serialize(grok_auth_refresh(app.clone(), input).await?)
+}
+
+fn ide_chat_grok_auth_logout_for_web_settings(app: &AppHandle, params: Value) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<GrokProviderInput>(params, "input")?;
+    ide_chat_serialize(grok_auth_logout(app.clone(), input)?)
+}
+
+fn ide_chat_grok_auth_import_for_web_settings(app: &AppHandle, params: Value) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<GrokImportInput>(params, "input")?;
+    ide_chat_serialize(grok_auth_import(app.clone(), input)?)
 }
 
 fn ide_chat_remote_im_default_group_response_guidance_for_web_settings() -> Result<Value, String> {

@@ -17,6 +17,7 @@ export function chatApiHasRequiredAuth(api: ApiConfigItem): boolean {
   if (format === "codex" && (authMode === "read_local" || authMode === "managed_oauth")) {
     return true;
   }
+  if (api.loginProvider === "grok") return true;
   return !!String(api.apiKey || "").trim();
 }
 

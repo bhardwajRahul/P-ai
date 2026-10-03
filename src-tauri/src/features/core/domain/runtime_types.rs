@@ -27,6 +27,7 @@ impl std::fmt::Debug for CodexRuntimeAuth {
 
 #[derive(Debug, Clone)]
 struct ResolvedApiConfig {
+    login_provider: String,
     provider_id: Option<String>,
     provider_api_keys: Vec<String>,
     provider_key_cursor: usize,

@@ -156,6 +156,92 @@ impl RuntimeValueTool for BuiltinImageEditTool {
     }
 }
 
+// ==================== Grok 图生视频 ====================
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ImageToVideoToolArgs {
+    image: String,
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    duration: Option<u32>,
+    #[serde(default)]
+    resolution: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BuiltinImageToVideoTool {
+    app_state: AppState,
+}
+
+impl RuntimeToolMetadata for BuiltinImageToVideoTool {
+    fn provider_tool_definition(&self) -> ProviderToolDefinition {
+        ProviderToolDefinition::new(
+            "image_to_video",
+            "把一张图作为第一帧生成视频，自动保存到 Assistant Space。没有文生视频，需要新画面时先用 image_generate 画第一帧，再用本工具描述动作。返回的 message 中包含本地视频路径，向用户展示时直接原样引用，不要改写路径。",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "image": {
+                        "type": "string",
+                        "description": "第一帧图片。支持 {Assistant Space} 相对路径、本地绝对路径或 data URL。"
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "可选，只描述动作或镜头，一两句现在时。不填则按画面自然运动。"
+                    },
+                    "duration": {
+                        "type": "integer",
+                        "enum": [6, 10],
+                        "description": "时长，只能是 6 或 10 秒，默认 6。"
+                    },
+                    "resolution": {
+                        "type": "string",
+                        "enum": ["480p", "720p"],
+                        "description": "分辨率，只能是 480p 或 720p，默认 480p。"
+                    }
+                },
+                "required": ["image"],
+                "additionalProperties": false
+            }),
+        )
+    }
+}
+
+impl RuntimeValueTool for BuiltinImageToVideoTool {
+    const NAME: &'static str = "image_to_video";
+    type Args = ImageToVideoToolArgs;
+    type Error = ToolInvokeError;
+
+    fn timeout_override(_args_json: &str) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_secs(360))
+    }
+
+    fn call_typed(&self, args: Self::Args) -> RuntimeToolValueFuture<'_, Self::Error> {
+        Box::pin(async move {
+            let image = load_image_edit_reference(&self.app_state, &args.image, "首帧").await?;
+            let path = generate_grok_image_to_video(
+                &self.app_state,
+                GrokImageToVideoRequest {
+                    image_url: image_edit_data_url(&image),
+                    model_id: None,
+                    prompt: args.prompt.unwrap_or_default(),
+                    duration: args.duration.unwrap_or(6),
+                    resolution: args.resolution.unwrap_or_else(|| "480p".to_string()),
+                },
+            )
+            .await?;
+            Ok(serde_json::json!({
+                "ok": true,
+                "message": format!("视频已生成并保存到 Assistant Space。最终回答必须原样包含这个路径，不要改写：\n\n{path}"),
+                "path": path,
+                "model": GROK_IMAGE_TO_VIDEO_MODEL
+            }))
+        })
+    }
+}
+
 #[cfg(test)]
 mod image_generate_tool_tests {
     use super::*;
@@ -204,5 +290,24 @@ mod image_generate_tool_tests {
         assert!(!properties.contains_key("model_id"));
         assert!(!properties.contains_key("quality"));
         assert!(!properties.contains_key("seed"));
+    }
+
+    #[test]
+    fn image_to_video_definition_requires_only_the_first_frame() {
+        let state = AppState::new().ok();
+        let Some(state) = state else {
+            return;
+        };
+        let definition = BuiltinImageToVideoTool { app_state: state }.provider_tool_definition();
+        assert_eq!(definition.name, "image_to_video");
+        assert_eq!(
+            definition.parameters["required"].as_array().and_then(|items| items.first()).and_then(Value::as_str),
+            Some("image")
+        );
+        let properties = definition.parameters["properties"].as_object().cloned().unwrap_or_default();
+        assert!(properties.contains_key("prompt"));
+        assert_eq!(properties["duration"]["enum"], serde_json::json!([6, 10]));
+        assert_eq!(properties["resolution"]["enum"], serde_json::json!(["480p", "720p"]));
+        assert!(definition.description.contains("image_generate"));
     }
 }

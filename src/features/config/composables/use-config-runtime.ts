@@ -132,20 +132,20 @@ export function useConfigRuntime(options: UseConfigRuntimeOptions) {
     const effectiveBaseUrl = String(provider.baseUrl || "").trim();
     const effectiveCodexAuthMode = String(provider.codexAuthMode || "read_local").trim() || "read_local";
     const effectiveCodexLocalAuthPath = String(provider.codexLocalAuthPath || "~/.codex/auth.json").trim() || "~/.codex/auth.json";
-    const isCodex = effectiveRequestFormat === "codex";
-    if (isCodex) {
-      console.warn(`[API] 检测到 Codex 模式：跳过 API Key 校验，使用空候选 API Key`);
+    const usesStoredLogin = effectiveRequestFormat === "codex" || provider.loginProvider === "grok";
+    if (usesStoredLogin) {
+      console.warn(`[API] 检测到登录凭证模式：跳过 API Key 校验，使用空候选 API Key`);
     }
     const apiKeys = Array.isArray(provider.apiKeys)
       ? provider.apiKeys.map((value) => String(value || "").trim()).filter(Boolean)
       : [];
-    const candidateApiKeys = isCodex
+    const candidateApiKeys = usesStoredLogin
       ? [""]
       : Array.from(new Set(apiKeys.filter(Boolean)));
     options.refreshingModels.value = true;
     options.modelRefreshError.value = "";
     try {
-      if (!isCodex && candidateApiKeys.length === 0) {
+      if (!usesStoredLogin && candidateApiKeys.length === 0) {
         throw new Error("API Key 为空，无法刷新模型列表。");
       }
       const errors: string[] = [];
@@ -154,6 +154,7 @@ export function useConfigRuntime(options: UseConfigRuntimeOptions) {
         try {
           models = await invokeTauri<string[]>("refresh_models", {
             input: {
+              loginProvider: provider.loginProvider === "grok" ? "grok" : "",
               baseUrl: effectiveBaseUrl,
               apiKey,
               requestFormat: effectiveRequestFormat,

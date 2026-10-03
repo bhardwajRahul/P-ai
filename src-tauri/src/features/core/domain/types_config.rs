@@ -272,6 +272,7 @@ fn support_permission_control() -> AgentPermissionControl {
             "meme",
             "image_generate",
             "image_edit",
+            "image_to_video",
         ],
         &["news-analyst", "memory-generation"],
     )
@@ -612,6 +613,8 @@ struct ApiProviderConfig {
     #[serde(default = "default_api_tools")]
     tools: Vec<ApiToolConfig>,
     base_url: String,
+    #[serde(default)]
+    login_provider: String,
     #[serde(default = "default_codex_auth_mode")]
     codex_auth_mode: String,
     #[serde(default = "default_codex_local_auth_path")]
@@ -652,6 +655,7 @@ impl Default for ApiProviderConfig {
             enable_tools: true,
             tools: default_api_tools(),
             base_url: "https://api.openai.com/v1".to_string(),
+            login_provider: String::new(),
             codex_auth_mode: default_codex_auth_mode(),
             codex_local_auth_path: default_codex_local_auth_path(),
             codex_custom_url: None,
@@ -1086,6 +1090,8 @@ struct AppConfig {
     #[serde(default)]
     image_generation_model_id: Option<String>,
     #[serde(default)]
+    image_to_video_model_id: Option<String>,
+    #[serde(default)]
     stt_auto_send: bool,
     #[serde(default = "default_terminal_shell_kind")]
     terminal_shell_kind: String,
@@ -1137,6 +1143,7 @@ impl Default for AppConfig {
             tool_review_api_config_id: None,
             stt_api_config_id: None,
             image_generation_model_id: None,
+            image_to_video_model_id: None,
             stt_auto_send: false,
             terminal_shell_kind: default_terminal_shell_kind(),
             simple_setup_mode: true,

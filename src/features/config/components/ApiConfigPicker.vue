@@ -4,7 +4,7 @@
       ref="triggerButtonRef"
       type="button"
       :class="variant === 'field'
-        ? 'select select-bordered bg-none flex w-full items-center justify-between gap-2 pr-3 text-left'
+        ? ['select select-bordered bg-none flex w-full items-center justify-between gap-2 pr-3 text-left', size === 'sm' ? 'select-sm' : '']
         : 'btn btn-sm h-8 min-h-8 w-full min-w-0 justify-start text-left border-0 bg-transparent text-base-content shadow-none hover:bg-base-200/60'"
       :disabled="disabled || (normalizedOptions.length === 0 && extraOptions.length === 0 && !placeholder)"
       :title="selectedModelTitle"
@@ -92,6 +92,8 @@ const props = withDefaults(defineProps<{
   apiConfigs: ApiConfigItem[];
   /** 触发器形态：chip = 聊天输入面板小按钮；field = 配置表单整行选择框 */
   variant?: "chip" | "field";
+  /** field 形态的尺寸档：sm 与原生 select-sm 对齐，md 为默认高度 */
+  size?: "sm" | "md";
   placeholder?: string;
   extraOptions?: Array<{ id: string; label: string }>;
   disabled?: boolean;
@@ -100,6 +102,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   modelValue: "",
   variant: "field",
+  size: "md",
   placeholder: "",
   extraOptions: () => [],
   disabled: false,

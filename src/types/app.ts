@@ -101,6 +101,7 @@ export type ApiConfigItem = {
   enableTools: boolean;
   tools: ApiToolItem[];
   baseUrl: string;
+  loginProvider?: string;
   apiKey: string;
   codexAuthMode?: CodexAuthMode;
   codexLocalAuthPath?: string;
@@ -149,6 +150,7 @@ export type ApiProviderConfigItem = {
   enableTools: boolean;
   tools: ApiToolItem[];
   baseUrl: string;
+  loginProvider?: "" | "grok";
   codexAuthMode?: CodexAuthMode;
   codexLocalAuthPath?: string;
   codexCustomUrl?: string;
@@ -389,6 +391,7 @@ export type AppConfig = {
   expertApiConfigId: string;
   visionApiConfigId?: string;
   imageGenerationModelId?: string;
+  imageToVideoModelId?: string;
   toolReviewApiConfigId?: string;
   sttApiConfigId?: string;
   sttAutoSend?: boolean;

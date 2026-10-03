@@ -122,6 +122,14 @@ export function applyConfigBootstrapUpdate(bindings: {
       bindings.config.imageProviders,
     );
   }
+  if ("imageToVideoModelId" in payload || "imageProviders" in payload) {
+    bindings.config.imageToVideoModelId = normalizeImageGenerationModelId(
+      "imageToVideoModelId" in payload
+        ? payload.imageToVideoModelId
+        : bindings.config.imageToVideoModelId,
+      bindings.config.imageProviders,
+    );
+  }
   if ("toolReviewApiConfigId" in payload) bindings.config.toolReviewApiConfigId = payload.toolReviewApiConfigId as string | undefined;
   if ("sttApiConfigId" in payload) bindings.config.sttApiConfigId = payload.sttApiConfigId as string | undefined;
   if ("sttAutoSend" in payload) bindings.config.sttAutoSend = !!payload.sttAutoSend;

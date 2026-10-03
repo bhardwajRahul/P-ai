@@ -705,8 +705,14 @@ async fn refresh_models(
 
 async fn refresh_models_inner(
     state: &AppState,
-    input: RefreshModelsInput,
+    mut input: RefreshModelsInput,
 ) -> Result<Vec<String>, String> {
+    if input.login_provider.trim() == "grok" && input.api_key.trim().is_empty() {
+        let provider_id = input.provider_id.clone().unwrap_or_default();
+        let (token, stored_base_url) = resolve_grok_access_token(Path::new(""), &provider_id).await?;
+        input.api_key = token;
+        input.base_url = grok_oauth_chat_endpoint(&stored_base_url);
+    }
     let inferred_strategy = inferred_model_refresh_strategy_from_base_url(&input.base_url);
     let can_refresh_without_api_key = input.request_format.is_codex()
         || matches!(inferred_strategy, Some(ModelRefreshStrategy::CodexBuiltin));
@@ -768,14 +774,15 @@ async fn quick_genai_chat_inner(
     state: &AppState,
     input: QuickGenaiChatInput,
 ) -> Result<String, String> {
+    let uses_grok_login = input.login_provider.trim() == "grok";
     let base_url = input.base_url.trim();
     let api_key = input.api_key.trim();
     let model = input.model.trim();
     let prompt = input.prompt.trim();
-    if base_url.is_empty() {
+    if base_url.is_empty() && !uses_grok_login {
         return Err("Base URL is empty.".to_string());
     }
-    if api_key.is_empty() {
+    if api_key.is_empty() && !uses_grok_login {
         return Err("API key is empty.".to_string());
     }
     if model.is_empty() {
@@ -792,6 +799,7 @@ async fn quick_genai_chat_inner(
     }
 
     let resolved_api = ResolvedApiConfig {
+        login_provider: if uses_grok_login { "grok".to_string() } else { String::new() },
         provider_id: input.provider_id,
         provider_api_keys: vec![api_key.to_string()],
         provider_key_cursor: 0,

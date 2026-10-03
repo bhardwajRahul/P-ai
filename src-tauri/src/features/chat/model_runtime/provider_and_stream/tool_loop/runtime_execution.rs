@@ -145,6 +145,7 @@ fn runtime_tool_call_requires_serial_execution(
             | "plan"
             | "image_generate"
             | "image_edit"
+            | "image_to_video"
             | "remote_im_send"
             | "contact_send_files"
     ) {

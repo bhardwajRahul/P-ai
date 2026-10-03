@@ -290,12 +290,13 @@ async fn edit_xai_image_once(
     for input in &inputs.images {
         data_urls.push(image_edit_data_url(&compress_image_for_xai_edit(input)?));
     }
-    let endpoint = append_image_generation_endpoint(&resolved.provider.base_url, "/images/edits");
+    let (api_key, base_url) = resolve_xai_image_auth(state, &resolved.provider, api_key).await?;
+    let endpoint = append_image_generation_endpoint(&base_url, "/images/edits");
     let payload = xai_image_edit_payload(request, &resolved.model, &data_urls);
     let value = post_bearer_image_generation_json(
         state,
         &resolved.provider,
-        api_key,
+        &api_key,
         &endpoint,
         &payload,
     )

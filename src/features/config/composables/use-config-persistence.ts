@@ -290,6 +290,10 @@ export function useConfigPersistence(options: UseConfigPersistenceOptions) {
       (cfg as Partial<AppConfig>).imageGenerationModelId,
       options.config.imageProviders,
     );
+    options.config.imageToVideoModelId = normalizeImageGenerationModelId(
+      (cfg as Partial<AppConfig>).imageToVideoModelId,
+      options.config.imageProviders,
+    );
     options.config.toolReviewApiConfigId = cfg.toolReviewApiConfigId ?? undefined;
     options.config.sttApiConfigId = cfg.sttApiConfigId ?? undefined;
     options.config.sttAutoSend = !!cfg.sttAutoSend;
@@ -363,6 +367,7 @@ export function useConfigPersistence(options: UseConfigPersistenceOptions) {
               }))
             : [],
           baseUrl: String((provider as { baseUrl?: unknown }).baseUrl || "").trim(),
+          loginProvider: (provider as { loginProvider?: unknown }).loginProvider === "grok" || (provider as { requestFormat?: unknown }).requestFormat === "grok" ? "grok" : "",
           codexAuthMode: normalizeCodexAuthMode((provider as { codexAuthMode?: unknown }).codexAuthMode),
           codexLocalAuthPath: String((provider as { codexLocalAuthPath?: unknown }).codexLocalAuthPath || DEFAULT_CODEX_LOCAL_AUTH_PATH).trim()
             || DEFAULT_CODEX_LOCAL_AUTH_PATH,
@@ -536,6 +541,10 @@ export function useConfigPersistence(options: UseConfigPersistenceOptions) {
       );
       options.config.imageGenerationModelId = normalizeImageGenerationModelId(
         (saved as Partial<AppConfig>).imageGenerationModelId,
+        options.config.imageProviders,
+      );
+      options.config.imageToVideoModelId = normalizeImageGenerationModelId(
+        (saved as Partial<AppConfig>).imageToVideoModelId,
         options.config.imageProviders,
       );
       options.config.toolReviewApiConfigId = saved.toolReviewApiConfigId ?? undefined;

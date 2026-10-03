@@ -1377,6 +1377,26 @@ export function resolveLocalFileUrl(path: string): string {
   return convertFileSrc(normalized);
 }
 
+/**
+ * 本机视频可播放地址：桌面走本机资源协议，Web/VS Code 取原始字节转对象 URL。
+ * 返回对象 URL 时调用方需在替换或卸载时 revokeObjectURL。
+ */
+export async function resolveLocalVideoUrl(path: string): Promise<string> {
+  const normalized = String(path || "").trim();
+  if (!normalized) return "";
+  if (isTauriRuntimeAvailable()) return convertFileSrc(normalized);
+  // 整段视频经 base64 回传，默认 30 秒超时不够用；读取失败要抛给调用方，不能静默返回空地址。
+  const payload = await invokeTauri<TransportFileRawPayload>(
+    "fileReader.readRawFile",
+    { path: normalized },
+    WEB_BRIDGE_LONG_TIMEOUT_MS,
+  );
+  const encoded = String(payload?.bytesBase64 || "");
+  if (!encoded) throw new Error("视频文件读取为空");
+  const url = URL.createObjectURL(new Blob([base64ToBytes(encoded)], { type: "video/mp4" }));
+  return url;
+}
+
 export async function getCurrentTransportWindowInnerSize(): Promise<{ width: number; height: number }> {
   if (!isTauriRuntimeAvailable()) {
     return {

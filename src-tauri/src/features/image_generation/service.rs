@@ -167,7 +167,7 @@ async fn generate_images(
     let api_key = select_image_generation_api_key(&resolved.provider);
     if !matches!(
         resolved.provider.provider_type,
-        ImageGenerationProviderKind::Comfyui | ImageGenerationProviderKind::Codex
+        ImageGenerationProviderKind::Comfyui | ImageGenerationProviderKind::Codex | ImageGenerationProviderKind::Xai
     )
         && api_key.trim().is_empty()
     {

@@ -12,6 +12,7 @@
         });
 
         let input = RefreshModelsInput {
+            login_provider: String::new(),
             base_url: server.base_url(),
             api_key: "test-key".to_string(),
             request_format: RequestFormat::OpenAI,
@@ -47,6 +48,7 @@
         });
 
         let input = RefreshModelsInput {
+            login_provider: String::new(),
             base_url: server.base_url(),
             api_key: "test-key".to_string(),
             request_format: RequestFormat::OpenAI,
@@ -68,6 +70,7 @@
     #[test]
     fn model_refresh_strategies_should_prefer_native_provider_from_format() {
         let input = RefreshModelsInput {
+            login_provider: String::new(),
             base_url: "https://generativelanguage.googleapis.com".to_string(),
             api_key: "test-key".to_string(),
             request_format: RequestFormat::Gemini,
@@ -90,6 +93,7 @@
     #[test]
     fn model_refresh_strategies_should_infer_native_provider_for_auto_base_url() {
         let input = RefreshModelsInput {
+            login_provider: String::new(),
             base_url: "https://api.anthropic.com".to_string(),
             api_key: "test-key".to_string(),
             request_format: RequestFormat::Auto,
@@ -111,6 +115,7 @@
     #[test]
     fn model_refresh_strategies_should_only_use_codex_builtin_when_selected_or_inferred() {
         let codex_input = RefreshModelsInput {
+            login_provider: String::new(),
             base_url: DEFAULT_CODEX_BASE_URL.to_string(),
             api_key: String::new(),
             request_format: RequestFormat::Auto,
@@ -119,6 +124,7 @@
             codex_local_auth_path: default_codex_local_auth_path(),
         };
         let openai_input = RefreshModelsInput {
+            login_provider: String::new(),
             base_url: "https://api.openai.com/v1".to_string(),
             api_key: "test-key".to_string(),
             request_format: RequestFormat::OpenAI,

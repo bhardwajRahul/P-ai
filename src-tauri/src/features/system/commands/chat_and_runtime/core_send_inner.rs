@@ -3748,6 +3748,7 @@ mod core_send_inner_tests {
     #[test]
     fn sync_codex_conversation_request_key_should_use_stable_conversation_id() {
         let mut resolved_api = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("codex-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -3787,6 +3788,7 @@ mod core_send_inner_tests {
     #[test]
     fn sync_codex_conversation_request_key_should_skip_prompt_cache_key_for_openai_compatible() {
         let mut resolved_api = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("openai-compatible-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,

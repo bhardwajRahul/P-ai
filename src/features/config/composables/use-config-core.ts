@@ -107,6 +107,7 @@ export function useConfigCore(options: UseConfigCoreOptions) {
       enableTools: true,
       tools: defaultApiTools(),
       baseUrl: "https://api.openai.com/v1",
+      loginProvider: "",
       codexAuthMode: DEFAULT_CODEX_AUTH_MODE,
       codexLocalAuthPath: DEFAULT_CODEX_LOCAL_AUTH_PATH,
       codexCustomUrl: "",
@@ -173,6 +174,7 @@ export function useConfigCore(options: UseConfigCoreOptions) {
           enableTools: !!api.enableTools,
           tools: (api.tools || []).map((tool) => ({ ...tool, args: [...(tool.args || [])], values: { ...(tool.values || {}) } })),
           baseUrl: api.baseUrl,
+          loginProvider: "",
           codexAuthMode: normalizeCodexAuthMode(api.codexAuthMode),
           codexLocalAuthPath: String(api.codexLocalAuthPath || DEFAULT_CODEX_LOCAL_AUTH_PATH).trim() || DEFAULT_CODEX_LOCAL_AUTH_PATH,
           codexCustomUrl: String(api.codexCustomUrl || "").trim(),
@@ -308,6 +310,10 @@ export function useConfigCore(options: UseConfigCoreOptions) {
       options.config.imageGenerationModelId,
       imageProviders,
     );
+    const imageToVideoModelId = normalizeImageGenerationModelId(
+      options.config.imageToVideoModelId,
+      imageProviders,
+    );
     return {
       hotkey: options.config.hotkey,
       uiLanguage: options.config.uiLanguage,
@@ -332,6 +338,7 @@ export function useConfigCore(options: UseConfigCoreOptions) {
       expertApiConfigId: options.config.expertApiConfigId,
       ...(options.config.visionApiConfigId ? { visionApiConfigId: options.config.visionApiConfigId } : {}),
       ...(imageGenerationModelId ? { imageGenerationModelId } : {}),
+      ...(imageToVideoModelId ? { imageToVideoModelId } : {}),
       ...(options.config.toolReviewApiConfigId ? { toolReviewApiConfigId: options.config.toolReviewApiConfigId } : {}),
       ...(options.config.sttApiConfigId ? { sttApiConfigId: options.config.sttApiConfigId } : {}),
       ...(options.config.sttAutoSend ? { sttAutoSend: true } : {}),
@@ -384,6 +391,7 @@ export function useConfigCore(options: UseConfigCoreOptions) {
           values: t.values ?? {},
         })),
         baseUrl: effectiveProviderBaseUrl(provider),
+        loginProvider: provider.loginProvider === "grok" ? "grok" : "",
         codexAuthMode: normalizeCodexAuthMode(provider.codexAuthMode),
         codexLocalAuthPath: String(provider.codexLocalAuthPath || DEFAULT_CODEX_LOCAL_AUTH_PATH).trim() || DEFAULT_CODEX_LOCAL_AUTH_PATH,
         codexCustomUrl: String(provider.codexCustomUrl || "").trim() || undefined,
@@ -481,6 +489,10 @@ export function useConfigCore(options: UseConfigCoreOptions) {
       visionApiConfigId: options.config.visionApiConfigId,
       imageGenerationModelId: normalizeImageGenerationModelId(
         options.config.imageGenerationModelId,
+        imageProviders,
+      ),
+      imageToVideoModelId: normalizeImageGenerationModelId(
+        options.config.imageToVideoModelId,
         imageProviders,
       ),
       toolReviewApiConfigId: options.config.toolReviewApiConfigId,

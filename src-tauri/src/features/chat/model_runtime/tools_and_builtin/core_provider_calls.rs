@@ -809,6 +809,20 @@ async fn resolve_request_api_config(
         }
     }
     
+    if api_config.login_provider.trim() == "grok" {
+        let provider_id = api_config.provider_id.as_deref().unwrap_or_default();
+        let (access_token, stored_base_url) = resolve_grok_access_token(Path::new(""), provider_id).await?;
+        let base_url = grok_oauth_chat_endpoint(&stored_base_url);
+        let mut next = api_config.clone();
+        next.api_key = access_token;
+        next.base_url = base_url.clone();
+        for (key, value) in grok_oauth_chat_headers(&base_url) {
+            next.extra_headers
+                .retain(|(existing, _)| !existing.eq_ignore_ascii_case(&key));
+            next.extra_headers.push((key, value));
+        }
+        return Ok(next);
+    }
     let Some(codex_auth) = &api_config.codex_auth else {
         return Ok(api_config.clone());
     };
@@ -1705,6 +1719,7 @@ mod openai_responses_genai_request_tests {
 
     fn session_header_test_fixture() -> ResolvedApiConfig {
         ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: None,
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -1780,6 +1795,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_skip_prompt_cache_key_for_openai_compatible() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: None,
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -1809,6 +1825,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_use_prompt_cache_key_for_openai_responses() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("responses-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -1841,6 +1858,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_use_prompt_cache_key_for_codex() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("codex-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -1870,6 +1888,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_set_low_verbosity_for_codex() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("codex-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -1918,6 +1937,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_disable_reasoning_for_codex_spark() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("codex-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -1947,6 +1967,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_disable_reasoning_capture_for_deepseek_none() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("deepseek-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -1982,6 +2003,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_pass_zero_effort_for_deepseek_responses_none() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("deepseek-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -2022,6 +2044,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_set_thinking_disabled_for_moonshot_none() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("moonshot-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -2058,6 +2081,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_set_thinking_disabled_for_doubao_none() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("doubao-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -2094,6 +2118,7 @@ mod openai_responses_genai_request_tests {
     #[test]
     fn build_provider_genai_chat_options_should_not_set_thinking_disabled_for_generic_openai_none() {
         let api_config = ResolvedApiConfig {
+            login_provider: String::new(),
             provider_id: Some("openai-provider".to_string()),
             provider_api_keys: Vec::new(),
             provider_key_cursor: 0,
@@ -2393,6 +2418,7 @@ mod openai_responses_genai_request_tests {
         let prepared = prepared_prompt_with_single_image_path_and_base64();
         let adapter_kind = resolve_provider_genai_adapter_kind(
             &ResolvedApiConfig {
+                login_provider: String::new(),
                 provider_id: Some("gemini-provider".to_string()),
                 provider_api_keys: Vec::new(),
                 provider_key_cursor: 0,
@@ -2429,6 +2455,7 @@ mod openai_responses_genai_request_tests {
         let prepared = prepared_prompt_with_single_image_path_and_base64();
         let adapter_kind = resolve_provider_genai_adapter_kind(
             &ResolvedApiConfig {
+                login_provider: String::new(),
                 provider_id: Some("anthropic-provider".to_string()),
                 provider_api_keys: Vec::new(),
                 provider_key_cursor: 0,

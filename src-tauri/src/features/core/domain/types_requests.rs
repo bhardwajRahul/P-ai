@@ -352,6 +352,8 @@ struct SystemPromptPreview {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RefreshModelsInput {
+    #[serde(default)]
+    login_provider: String,
     base_url: String,
     api_key: String,
     request_format: RequestFormat,
@@ -366,6 +368,8 @@ struct RefreshModelsInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct QuickGenaiChatInput {
+    #[serde(default)]
+    login_provider: String,
     base_url: String,
     api_key: String,
     request_format: RequestFormat,
