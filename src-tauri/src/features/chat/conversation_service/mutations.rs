@@ -442,11 +442,7 @@ fn create_unarchived_conversation_shared(
     let mut conversation = if let Some(source_conversation_id) = copy_source_conversation_id.as_deref() {
         let source_conversation = conversation_service_v2()
             .try_get_conversation_snapshot(state, source_conversation_id)?
-            .filter(|conversation| {
-                conversation.status.trim() != "archived"
-                    && conversation_visible_in_foreground_lists(conversation)
-                    && conversation_is_local_normal_chat(conversation)
-            })
+            .filter(|conversation| conversation_is_unarchived_local_normal_chat(conversation))
             .ok_or_else(|| "要复制的当前会话不存在或已归档".to_string())?;
         clone_foreground_conversation_for_copy(
             &source_conversation,

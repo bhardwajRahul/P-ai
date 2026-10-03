@@ -1709,11 +1709,7 @@ async fn branch_unarchived_conversation_from_current_internal(
 
     let source_conversation = conversation_service_v2()
         .try_get_conversation_snapshot(state, source_conversation_id)?
-        .filter(|conversation| {
-            !conversation_is_archived(conversation)
-                && conversation_visible_in_foreground_lists(conversation)
-                && conversation_is_local_normal_chat(conversation)
-        })
+        .filter(|conversation| conversation_is_unarchived_local_normal_chat(conversation))
         .ok_or_else(|| "源会话不存在或已归档，无法创建会话分支".to_string())?;
     let branch_summary_title = build_branch_conversation_summary_title(
         &source_conversation.title,
@@ -1782,11 +1778,7 @@ async fn create_conversation_branch_from_message_internal(
 
     let source_conversation = conversation_service_v2()
         .try_get_conversation_snapshot(state, source_conversation_id)?
-        .filter(|conversation| {
-            !conversation_is_archived(conversation)
-                && conversation_visible_in_foreground_lists(conversation)
-                && conversation_is_local_normal_chat(conversation)
-        })
+        .filter(|conversation| conversation_is_unarchived_local_normal_chat(conversation))
         .ok_or_else(|| "源会话不存在或已归档，无法创建会话分支".to_string())?;
     let target_message_index = resolve_branch_from_message_target_index(
         &source_conversation.messages,

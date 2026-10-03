@@ -777,7 +777,8 @@ export function useChatWindowApp() {
       await syncUnarchivedConversationOverviewChangedSinceWatermark("side_chat_branch_created").catch((error) => {
         setStatusError("status.requestFailed", error);
       });
-      selectSideChatConversation(conversationId);
+      // 分支产出的会话是普通会话，不属于追问列表，切到主会话视图打开
+      await switchUnarchivedConversation(conversationId);
     } catch (error) {
       setStatusError("status.createBranchFailed", error);
     }

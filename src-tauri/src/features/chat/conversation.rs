@@ -318,6 +318,12 @@ fn conversation_is_local_normal_chat(conversation: &Conversation) -> bool {
         && !conversation_is_remote_im_contact(conversation)
 }
 
+/// 是否可作为分支、复制等会话操作的源：未归档的本地普通会话。
+/// 追问（side_chat）不出现在前台列表，但仍由普通 Conversation runtime 处理，因此与普通会话同等可作源。
+fn conversation_is_unarchived_local_normal_chat(conversation: &Conversation) -> bool {
+    conversation_is_unarchived(conversation) && conversation_is_local_normal_chat(conversation)
+}
+
 fn summary_context_message_kind(message: &ChatMessage) -> Option<&str> {
     let meta = message.provider_meta.as_ref()?;
     meta.get("message_meta")
@@ -740,6 +746,29 @@ mod summary_context_title_tests {
 
         assert!(conversation_is_local_normal_chat(&conversation));
         assert!(!conversation_visible_in_foreground_lists(&conversation));
+        assert!(conversation_is_unarchived_local_normal_chat(&conversation));
+    }
+
+    #[test]
+    fn conversation_source_requires_unarchived_local_normal_chat() {
+        assert!(conversation_is_unarchived_local_normal_chat(&test_conversation(Vec::new())));
+
+        let mut side_chat = test_conversation(Vec::new());
+        side_chat.conversation_kind = CONVERSATION_KIND_SIDE_CHAT.to_string();
+        assert!(conversation_is_unarchived_local_normal_chat(&side_chat));
+
+        let mut archived_side_chat = test_conversation(Vec::new());
+        archived_side_chat.conversation_kind = CONVERSATION_KIND_SIDE_CHAT.to_string();
+        archived_side_chat.status = "archived".to_string();
+        assert!(!conversation_is_unarchived_local_normal_chat(&archived_side_chat));
+
+        let mut delegate = test_conversation(Vec::new());
+        delegate.conversation_kind = CONVERSATION_KIND_DELEGATE.to_string();
+        assert!(!conversation_is_unarchived_local_normal_chat(&delegate));
+
+        let mut remote_contact = test_conversation(Vec::new());
+        remote_contact.conversation_kind = CONVERSATION_KIND_REMOTE_IM_CONTACT.to_string();
+        assert!(!conversation_is_unarchived_local_normal_chat(&remote_contact));
     }
 
     #[test]
