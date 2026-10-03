@@ -142,8 +142,6 @@ export function buildRecentConversationSections(
     grouping?: ConversationSectionGrouping;
     personaNameMap?: Record<string, string>;
     maxCount?: number;
-    /** 最近时间窗口（小时），仅保留该时间内活跃的会话；默认不限制 */
-    recentHours?: number;
   },
 ): ConversationSection[] {
   const { titles, locale } = options;
@@ -154,10 +152,6 @@ export function buildRecentConversationSections(
     if (String(item.kind || "local_unarchived").trim() === "remote_im_contact") return false;
     if (item.isSystemNotificationConversation) return false;
     if (item.isDraft && String(item.conversationId || "").trim() !== normalizedActiveId) return false;
-    if (options.recentHours != null && options.recentHours > 0) {
-      const cutoff = Date.now() - options.recentHours * 3600 * 1000;
-      if (conversationRecencyMs(item) < cutoff) return false;
-    }
     return true;
   });
 
@@ -370,19 +364,19 @@ function conversationRecencyMs(item: ChatConversationOverviewItem): number {
 }
 
 /**
- * 统计「最近一个凌晨 4 点至今」活跃过的会话数。
- * items 需按最近活跃降序；计数从头部开始，遇到早于阈值的条目即停止。
+ * 统计最近 activeHours 小时内活跃过的会话数，用于决定「最近」大区的初始展示量。
+ * items 需按最近活跃降序；计数从头部开始，遇到早于窗口的条目即停止。
  */
-export function conversationCountSinceDayStart(items: ChatConversationOverviewItem[], nowMs: number = Date.now()): number {
-  const dayStart = new Date(nowMs);
-  dayStart.setHours(4, 0, 0, 0);
-  if (dayStart.getTime() > nowMs) {
-    dayStart.setDate(dayStart.getDate() - 1);
-  }
-  const dayStartMs = dayStart.getTime();
+export function conversationCountWithinHours(
+  items: ChatConversationOverviewItem[],
+  activeHours: number,
+  nowMs: number = Date.now(),
+): number {
+  if (!(activeHours > 0)) return items.length;
+  const cutoffMs = nowMs - activeHours * 3600 * 1000;
   let count = 0;
   for (const item of items) {
-    if (conversationRecencyMs(item) < dayStartMs) break;
+    if (conversationRecencyMs(item) < cutoffMs) break;
     count += 1;
   }
   return count;

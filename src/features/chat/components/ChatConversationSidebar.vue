@@ -646,7 +646,7 @@ import {
   buildRecentConversationSections,
   buildRemoteConversationSections,
   canonicalWorkspaceRootForComparison,
-  conversationCountSinceDayStart,
+  conversationCountWithinHours,
   CURRENT_PROJECT_SECTION_KEY,
   RECENT_CONVERSATION_SECTION_KEY,
   workspaceNameFromPath,
@@ -921,10 +921,6 @@ const allRecentCandidateItems = computed<ChatConversationOverviewItem[]>(() => {
       if (String(item.kind || "local_unarchived").trim() === "remote_im_contact") return false;
       if (item.isSystemNotificationConversation) return false;
       if (item.isDraft && String(item.conversationId || "").trim() !== normalizedActiveId) return false;
-      if (recentTimeFilterHours.value > 0) {
-        const cutoff = Date.now() - recentTimeFilterHours.value * 3600 * 1000;
-        if (recentCandidateRecencyMs(item) < cutoff) return false;
-      }
       return true;
     })
     .sort((left, right) => recentCandidateRecencyMs(right) - recentCandidateRecencyMs(left))
@@ -936,8 +932,13 @@ const allRecentCandidateItems = computed<ChatConversationOverviewItem[]>(() => {
     });
 });
 
+// 初始展示量 = 时间窗口内活跃的会话，至少 CONVERSATION_SECTION_MIN_VISIBLE 条；
+// 窗口之外更早的会话仍留在候选里，由「加载更多」逐步放出。
 const recentBaseCount = computed(() =>
-  Math.max(CONVERSATION_SECTION_MIN_VISIBLE, conversationCountSinceDayStart(allRecentCandidateItems.value)),
+  Math.max(
+    CONVERSATION_SECTION_MIN_VISIBLE,
+    conversationCountWithinHours(allRecentCandidateItems.value, recentTimeFilterHours.value),
+  ),
 );
 const recentExtraCount = computed(() =>
   Math.max(0, Number(conversationSectionLoadMoreCounts.value["local:recent"] || 0)),
@@ -985,7 +986,6 @@ const rawRecentSections = computed<ConversationSection[]>(() => {
     grouping: conversationGrouping.value,
     personaNameMap: props.personaNameMap,
     maxCount: recentVisibleLimit.value,
-    recentHours: recentTimeFilterHours.value,
   });
 });
 
@@ -1330,8 +1330,9 @@ function defaultVisibleConversationCount(section: ConversationSection): number {
   if (normalizedConversationSearchQuery.value) return items.length;
   if (section.key === "pinned") return items.length;
   if (section.key.startsWith("recent:") || section.key === RECENT_CONVERSATION_SECTION_KEY) {
-    // 基础展示量 = 至少 5 条 + 凌晨 4 点至今活跃过的会话，超出部分通过「加载更多」逐步展开。
-    return Math.max(CONVERSATION_SECTION_MIN_VISIBLE, conversationCountSinceDayStart(items));
+    // 「最近」大区的可见量在上游按 maxCount（窗口内条数 + 加载更多步进）统一截断，
+    // 这里不再二次截断，否则「加载更多」放出来的条目会被重新砍回去。
+    return items.length;
   }
   const thresholdMs = Date.now() - CONVERSATION_SECTION_UNUSED_DAYS * 24 * 60 * 60 * 1000;
   const recentCount = items.reduce((count, item) => (

@@ -5,7 +5,7 @@ import {
   buildConversationSections,
   buildRecentConversationSections,
   canonicalWorkspaceRootForComparison,
-  conversationCountSinceDayStart,
+  conversationCountWithinHours,
   type ConversationSection,
   type ConversationSectionTitles,
 } from "./conversation-sections";
@@ -295,33 +295,31 @@ describe("canonicalWorkspaceRootForComparison", () => {
   });
 });
 
-describe("conversationCountSinceDayStart", () => {
-  it("统计当天凌晨 4 点至今活跃的会话数，早于阈值的条目不计数", () => {
+describe("conversationCountWithinHours", () => {
+  it("只统计时间窗口内活跃的会话，早于窗口的条目即停止计数", () => {
     const now = new Date(2026, 7, 17, 17, 0, 0);
     const items = [
       item({ conversationId: "a", lastMessageAt: new Date(2026, 7, 17, 15, 0, 0).toISOString() }),
       item({ conversationId: "b", lastMessageAt: new Date(2026, 7, 17, 5, 0, 0).toISOString() }),
       item({ conversationId: "c", lastMessageAt: new Date(2026, 7, 17, 3, 0, 0).toISOString() }),
     ];
-    expect(conversationCountSinceDayStart(items, now.getTime())).toBe(2);
+    expect(conversationCountWithinHours(items, 12, now.getTime())).toBe(2);
   });
 
-  it("当前时间在凌晨 4 点前时回退到昨天凌晨 4 点", () => {
-    const now = new Date(2026, 7, 17, 2, 0, 0);
-    const items = [
-      item({ conversationId: "a", lastMessageAt: new Date(2026, 7, 17, 1, 30, 0).toISOString() }),
-      item({ conversationId: "b", lastMessageAt: new Date(2026, 7, 16, 5, 0, 0).toISOString() }),
-      item({ conversationId: "c", lastMessageAt: new Date(2026, 7, 16, 3, 0, 0).toISOString() }),
-    ];
-    expect(conversationCountSinceDayStart(items, now.getTime())).toBe(2);
-  });
-
-  it("凌晨 4 点至今没有活跃会话时返回 0，由调用方以至少 5 条兜底", () => {
+  it("窗口内没有活跃会话时返回 0，由调用方以至少 5 条兜底", () => {
     const now = new Date(2026, 7, 17, 17, 0, 0);
     const items = [
       item({ conversationId: "a", lastMessageAt: new Date(2026, 7, 16, 12, 0, 0).toISOString() }),
     ];
-    expect(conversationCountSinceDayStart(items, now.getTime())).toBe(0);
+    expect(conversationCountWithinHours(items, 12, now.getTime())).toBe(0);
+  });
+
+  it("小时数非正时视为不限制，返回全部条数", () => {
+    const items = [
+      item({ conversationId: "a", lastMessageAt: new Date(2026, 7, 16, 12, 0, 0).toISOString() }),
+      item({ conversationId: "b", lastMessageAt: new Date(2026, 7, 10, 12, 0, 0).toISOString() }),
+    ];
+    expect(conversationCountWithinHours(items, 0)).toBe(2);
   });
 });
 
