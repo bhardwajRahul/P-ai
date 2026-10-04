@@ -39,6 +39,51 @@ fn current_prompt_tokens_for_preserved_gate(
         .unwrap_or(0)
 }
 
+const CONTEXT_EXHAUSTED_CLOSE_PROMPT: &str =
+    "上下文已经耗尽。请立刻汇报，并说明工作未能彻底完成以及原因。不要再调用任何工具。";
+const CONTEXT_EXHAUSTED_NO_REPORT_PROMPT: &str =
+    "上下文耗尽依然未能完成任务并且没有进行阶段性汇报";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolRoundCompactionGate {
+    Continue,
+    RestartAfterCompaction,
+    ContextExhausted,
+}
+
+/// 只决定超限后走哪条路，不触发整理。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolRoundGateIntent {
+    WriteThrough,
+    CompactThenRestart,
+    DisableToolsAndClose,
+}
+
+fn classify_tool_round_gate(should_compact: bool, has_compaction_context: bool) -> ToolRoundGateIntent {
+    if !should_compact {
+        ToolRoundGateIntent::WriteThrough
+    } else if has_compaction_context {
+        ToolRoundGateIntent::CompactThenRestart
+    } else {
+        ToolRoundGateIntent::DisableToolsAndClose
+    }
+}
+
+/// 上下文耗尽后的收口轮：有正文就结束，没正文就退回给模型。两种都不执行工具。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContextExhaustedRoundAction {
+    FinishWithReport,
+    RequestReport,
+}
+
+fn decide_context_exhausted_round(turn_text: &str) -> ContextExhaustedRoundAction {
+    if turn_text.trim().is_empty() {
+        ContextExhaustedRoundAction::RequestReport
+    } else {
+        ContextExhaustedRoundAction::FinishWithReport
+    }
+}
+
 /// 工具整轮执行完立刻判定。判定前不得写正式历史，也不得写临时账本。
 async fn apply_compaction_preserved_gate_after_tool_round(
     state: Option<&AppState>,
@@ -54,10 +99,9 @@ async fn apply_compaction_preserved_gate_after_tool_round(
     assistant_tool_group_history_event: &Value,
     round_history_events: &[Value],
     completed_tool_result_events: &[Value],
-) -> Result<bool, String> {
-    // 返回 true = 应走原压缩重启路径。
+) -> Result<ToolRoundCompactionGate, String> {
     if completed_tool_result_events.is_empty() {
-        return Ok(false);
+        return Ok(ToolRoundCompactionGate::Continue);
     }
     // 本轮完整事件切片：assistant tool_calls、tool results、以及本轮旁路注入事件。
     let preserved = CompactionPreservedMessages::new(
@@ -79,22 +123,34 @@ async fn apply_compaction_preserved_gate_after_tool_round(
         selected_api.context_window_tokens
     ));
 
-    if !should_compact {
-        // 只有判定可写，才写正式历史，并同步临时账本。
-        for tool_result_event in completed_tool_result_events {
-            persist_completed_tool_group_result(
-                state,
-                context,
-                selected_api,
-                trusted_input_tokens,
-                chat_session_key,
-                assistant_tool_group_history_event.clone(),
-                tool_result_event.clone(),
-            )?;
+    match classify_tool_round_gate(should_compact, context.is_some()) {
+        ToolRoundGateIntent::WriteThrough => {
+            // 只有判定可写，才写正式历史。临时账本由调用方同步。
+            for tool_result_event in completed_tool_result_events {
+                persist_completed_tool_group_result(
+                    state,
+                    context,
+                    selected_api,
+                    trusted_input_tokens,
+                    chat_session_key,
+                    assistant_tool_group_history_event.clone(),
+                    tool_result_event.clone(),
+                )?;
+            }
+            return Ok(ToolRoundCompactionGate::Continue);
         }
-        // 正式写入后，临时账本与旧语义一致：记录“已正式接住”的完整工具历史。
-        // 这里由调用方在拿到完整 tool_history_events 后 sync；本函数只负责正式写入。
-        return Ok(false);
+        ToolRoundGateIntent::DisableToolsAndClose => {
+            // 委托等没有调度上下文的路径无法整理。本轮工具结果留在内存里交给模型，不报错。
+            runtime_log_info(format!(
+                "[聊天] 上下文耗尽且无法整理，禁用后续工具 session={} current_tokens={} group_tokens={} context_window={}",
+                chat_session_key,
+                current_tokens,
+                group_tokens,
+                selected_api.context_window_tokens
+            ));
+            return Ok(ToolRoundCompactionGate::ContextExhausted);
+        }
+        ToolRoundGateIntent::CompactThenRestart => {}
     }
 
     // 超限：不写正式历史，不写临时账本；只把本轮工具组交给压缩后的新调度。
@@ -153,7 +209,7 @@ async fn apply_compaction_preserved_gate_after_tool_round(
                     context.conversation_id, reason
                 ));
             }
-            Ok(true)
+            Ok(ToolRoundCompactionGate::RestartAfterCompaction)
         }
         Err(err) => Err(format!("自动整理失败：{err}")),
     }

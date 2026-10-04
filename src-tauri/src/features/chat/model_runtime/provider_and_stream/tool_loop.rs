@@ -570,6 +570,7 @@ async fn run_genai_tool_loop(
         genai_request_context_chars(system_prompt.as_deref(), &genai_tools, &messages);
 
     let mut auto_compaction_applied = false;
+    let mut tools_disabled_for_context_exhaustion = false;
     let mut tool_repeat_guard = ToolRepeatGuard::default();
     for round_index in 0..INTERNAL_MAX_TOOL_LOOP_ROUNDS {
         let round_started_at = std::time::Instant::now();
@@ -603,7 +604,11 @@ async fn run_genai_tool_loop(
             chat_session_key,
             selected_api.name.as_str(),
             model_name,
-            runtime_tool_names_for_log(&tool_assembly),
+            if tools_disabled_for_context_exhaustion {
+                None
+            } else {
+                runtime_tool_names_for_log(&tool_assembly)
+            },
         );
         let round_output = async {
             let _provider_concurrency_guard = maybe_acquire_provider_concurrency_guard(
@@ -631,7 +636,7 @@ async fn run_genai_tool_loop(
                 {
                     request = request.with_system(system.to_string());
                 }
-                if !genai_tools.is_empty() {
+                if !tools_disabled_for_context_exhaustion && !genai_tools.is_empty() {
                     request = request.with_tools(genai_tools.clone());
                 }
                 client
@@ -802,6 +807,40 @@ async fn run_genai_tool_loop(
 
         let turn_tool_calls = reorder_turn_tool_calls_for_contact_tail(turn_tool_calls);
         let turn_tool_calls = clean_turn_tool_calls(turn_tool_calls);
+
+        if tools_disabled_for_context_exhaustion {
+            match decide_context_exhausted_round(&turn_text) {
+                ContextExhaustedRoundAction::RequestReport => {
+                    runtime_log_info(format!(
+                        "[聊天] 上下文耗尽收口没有正文，退回模型 session={} tool_calls={}",
+                        chat_session_key,
+                        turn_tool_calls.len()
+                    ));
+                    insert_before_trailing_user_messages(
+                        &mut messages,
+                        genai::chat::ChatMessage::user(CONTEXT_EXHAUSTED_NO_REPORT_PROMPT),
+                    );
+                    continue;
+                }
+                ContextExhaustedRoundAction::FinishWithReport => {
+                    if !full_assistant_text.trim().is_empty() {
+                        full_assistant_text.push_str("\n\n");
+                    }
+                    full_assistant_text.push_str(&turn_text);
+                    return Ok(ModelReply {
+                        assistant_text: full_assistant_text,
+                        final_response_text: turn_text,
+                        activity_reasoning_text: full_activity_reasoning_text,
+                        assistant_provider_meta: final_assistant_provider_meta_override.clone(),
+                        tool_history_events,
+                        suppress_assistant_message: false,
+                        trusted_input_tokens,
+                        usage: latest_usage,
+                        round_logs_recorded_internally: true,
+                    });
+                }
+            }
+        }
 
         if turn_tool_calls.is_empty() {
             if !turn_text.is_empty() {
@@ -1083,7 +1122,7 @@ async fn run_genai_tool_loop(
             })
             .unwrap_or(0);
         let round_history_events = tool_history_events[round_history_start..].to_vec();
-        if apply_compaction_preserved_gate_after_tool_round(
+        match apply_compaction_preserved_gate_after_tool_round(
             tool_abort_state,
             auto_compaction_context,
             selected_api,
@@ -1100,9 +1139,19 @@ async fn run_genai_tool_loop(
         )
         .await?
         {
-            return Err(CHAT_DISPATCH_RESTART_AFTER_COMPACTION.to_string());
+            ToolRoundCompactionGate::RestartAfterCompaction => {
+                return Err(CHAT_DISPATCH_RESTART_AFTER_COMPACTION.to_string());
+            }
+            ToolRoundCompactionGate::ContextExhausted => {
+                tools_disabled_for_context_exhaustion = true;
+                insert_before_trailing_user_messages(
+                    &mut messages,
+                    genai::chat::ChatMessage::user(CONTEXT_EXHAUSTED_CLOSE_PROMPT),
+                );
+            }
+            ToolRoundCompactionGate::Continue => {}
         }
-        // 判定为直写后，才同步临时账本（与旧语义一致）。
+        // 直写或上下文耗尽收口后同步临时账本。控制提示只在本次请求里，不进账本。
         sync_completed_tool_history_cache(
             tool_abort_state,
             chat_session_key,
@@ -1270,6 +1319,7 @@ async fn run_genai_tool_loop_non_stream(
         genai_request_context_chars(system_prompt.as_deref(), &genai_tools, &messages);
 
     let mut auto_compaction_applied = false;
+    let mut tools_disabled_for_context_exhaustion = false;
     let mut tool_repeat_guard = ToolRepeatGuard::default();
     for round_index in 0..INTERNAL_MAX_TOOL_LOOP_ROUNDS {
         let round_started_at = std::time::Instant::now();
@@ -1302,7 +1352,11 @@ async fn run_genai_tool_loop_non_stream(
             chat_session_key,
             selected_api.name.as_str(),
             model_name,
-            runtime_tool_names_for_log(&tool_assembly),
+            if tools_disabled_for_context_exhaustion {
+                None
+            } else {
+                runtime_tool_names_for_log(&tool_assembly)
+            },
         );
         let round = {
             let mut request = genai::chat::ChatRequest::from_messages(
@@ -1315,7 +1369,7 @@ async fn run_genai_tool_loop_non_stream(
             {
                 request = request.with_system(system.to_string());
             }
-            if !genai_tools.is_empty() {
+            if !tools_disabled_for_context_exhaustion && !genai_tools.is_empty() {
                 request = request.with_tools(genai_tools.clone());
             }
             let _provider_concurrency_guard = maybe_acquire_provider_concurrency_guard(
@@ -1402,6 +1456,40 @@ async fn run_genai_tool_loop_non_stream(
         let turn_tool_calls = clean_turn_tool_calls(turn_tool_calls);
         if !turn_reasoning.is_empty() {
             full_activity_reasoning_text.push_str(&turn_reasoning);
+        }
+
+        if tools_disabled_for_context_exhaustion {
+            match decide_context_exhausted_round(&turn_text) {
+                ContextExhaustedRoundAction::RequestReport => {
+                    runtime_log_info(format!(
+                        "[聊天] 上下文耗尽收口没有正文，退回模型 session={} tool_calls={}",
+                        chat_session_key,
+                        turn_tool_calls.len()
+                    ));
+                    insert_before_trailing_user_messages(
+                        &mut messages,
+                        genai::chat::ChatMessage::user(CONTEXT_EXHAUSTED_NO_REPORT_PROMPT),
+                    );
+                    continue;
+                }
+                ContextExhaustedRoundAction::FinishWithReport => {
+                    if !full_assistant_text.trim().is_empty() {
+                        full_assistant_text.push_str("\n\n");
+                    }
+                    full_assistant_text.push_str(&turn_text);
+                    return Ok(ModelReply {
+                        assistant_text: full_assistant_text,
+                        final_response_text: turn_text,
+                        activity_reasoning_text: full_activity_reasoning_text,
+                        assistant_provider_meta: final_assistant_provider_meta_override.clone(),
+                        tool_history_events,
+                        suppress_assistant_message: false,
+                        trusted_input_tokens,
+                        usage: latest_usage,
+                        round_logs_recorded_internally: true,
+                    });
+                }
+            }
         }
 
         if turn_tool_calls.is_empty() {
@@ -1695,7 +1783,7 @@ async fn run_genai_tool_loop_non_stream(
             })
             .unwrap_or(0);
         let round_history_events = tool_history_events[round_history_start..].to_vec();
-        if apply_compaction_preserved_gate_after_tool_round(
+        match apply_compaction_preserved_gate_after_tool_round(
             tool_abort_state,
             auto_compaction_context,
             selected_api,
@@ -1712,9 +1800,19 @@ async fn run_genai_tool_loop_non_stream(
         )
         .await?
         {
-            return Err(CHAT_DISPATCH_RESTART_AFTER_COMPACTION.to_string());
+            ToolRoundCompactionGate::RestartAfterCompaction => {
+                return Err(CHAT_DISPATCH_RESTART_AFTER_COMPACTION.to_string());
+            }
+            ToolRoundCompactionGate::ContextExhausted => {
+                tools_disabled_for_context_exhaustion = true;
+                insert_before_trailing_user_messages(
+                    &mut messages,
+                    genai::chat::ChatMessage::user(CONTEXT_EXHAUSTED_CLOSE_PROMPT),
+                );
+            }
+            ToolRoundCompactionGate::Continue => {}
         }
-        // 判定为直写后，才同步临时账本（与旧语义一致）。
+        // 直写或上下文耗尽收口后同步临时账本。控制提示只在本次请求里，不进账本。
         sync_completed_tool_history_cache(
             tool_abort_state,
             chat_session_key,
@@ -1796,6 +1894,121 @@ mod tool_loop_tests {
 
     fn test_tool(name: &'static str, mcp: bool) -> Box<dyn RuntimeToolDyn> {
         Box::new(TestRuntimeTool { name, mcp })
+    }
+
+    fn resolved_api_for_gate() -> ResolvedApiConfig {
+        ResolvedApiConfig {
+            login_provider: String::new(),
+            provider_id: None,
+            provider_api_keys: Vec::new(),
+            provider_key_cursor: 0,
+            request_format: RequestFormat::OpenAI,
+            allow_concurrent_requests: false,
+            max_concurrent_requests: None,
+            base_url: "https://api.openai.com/v1".to_string(),
+            api_key: String::new(),
+            model: "gpt-4o-mini".to_string(),
+            reasoning_effort: None,
+            temperature: None,
+            max_output_tokens: None,
+            prompt_cache_key: None,
+            extra_headers: Vec::new(),
+            codex_auth: None,
+            codex_custom_api_key: None,
+            codex_originator: None,
+            codex_residency_requirement: None,
+        }
+    }
+
+    async fn run_gate_without_context(
+        context_window_tokens: u32,
+        trusted_input_tokens: u64,
+    ) -> Result<ToolRoundCompactionGate, String> {
+        let selected_api = ApiConfig {
+            context_window_tokens,
+            ..ApiConfig::default()
+        };
+        let resolved_api = resolved_api_for_gate();
+        let on_delta = tauri::ipc::Channel::new(|_| Ok(()));
+        let mut pending = Vec::new();
+        apply_compaction_preserved_gate_after_tool_round(
+            None,
+            None,
+            &selected_api,
+            &resolved_api,
+            &on_delta,
+            "delegate-session",
+            &mut pending,
+            Some(trusted_input_tokens),
+            "",
+            "",
+            &serde_json::json!({}),
+            &[],
+            &[serde_json::json!({
+                "role": "tool",
+                "tool_call_id": "call-1",
+                "content": "ok"
+            })],
+        )
+        .await
+    }
+
+    #[test]
+    fn missing_compaction_context_over_limit_closes_instead_of_error() {
+        let gate = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(run_gate_without_context(1_000, 900))
+            .expect("缺少调度上下文且超限时不应失败");
+        assert_eq!(gate, ToolRoundCompactionGate::ContextExhausted);
+    }
+
+    #[test]
+    fn under_limit_without_context_continues() {
+        let gate = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(run_gate_without_context(10_000, 100))
+            .expect("未超限时不应失败");
+        assert_eq!(gate, ToolRoundCompactionGate::Continue);
+    }
+
+    #[test]
+    fn over_limit_with_context_still_compacts() {
+        assert_eq!(
+            classify_tool_round_gate(true, true),
+            ToolRoundGateIntent::CompactThenRestart
+        );
+        assert_eq!(
+            classify_tool_round_gate(true, false),
+            ToolRoundGateIntent::DisableToolsAndClose
+        );
+        assert_eq!(
+            classify_tool_round_gate(false, false),
+            ToolRoundGateIntent::WriteThrough
+        );
+    }
+
+    #[test]
+    fn exhausted_round_ignores_tools_and_missing_text_returns_notice() {
+        assert_eq!(
+            decide_context_exhausted_round("工作停在一半"),
+            ContextExhaustedRoundAction::FinishWithReport
+        );
+        assert_eq!(
+            decide_context_exhausted_round("   "),
+            ContextExhaustedRoundAction::RequestReport
+        );
+        assert_eq!(
+            CONTEXT_EXHAUSTED_CLOSE_PROMPT,
+            "上下文已经耗尽。请立刻汇报，并说明工作未能彻底完成以及原因。不要再调用任何工具。"
+        );
+        assert_eq!(
+            CONTEXT_EXHAUSTED_NO_REPORT_PROMPT,
+            "上下文耗尽依然未能完成任务并且没有进行阶段性汇报"
+        );
     }
 
     struct TimeoutReadMediaTool;
