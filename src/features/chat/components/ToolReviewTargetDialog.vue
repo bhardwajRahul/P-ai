@@ -229,8 +229,6 @@ watch(
     const nextAgentId = String(selectedOption?.agentId || "").trim();
     if (selectedAgentId.value !== nextAgentId) {
       selectedAgentId.value = nextAgentId;
-      selectedApiConfigId.value = String(selectedOption?.apiConfigId || "").trim();
-      return;
     }
     if (!selectedApiConfigId.value) {
       selectedApiConfigId.value = String(selectedOption?.apiConfigId || "").trim();
@@ -318,8 +316,10 @@ function applyRecentGoal(item: RecentGoal) {
   goalText.value = item.goal;
   if (agentSelectOptions.value.some((option) => option.agentId === item.agentId)) {
     selectedAgentId.value = item.agentId;
-    const option = agentSelectOptions.value.find((entry) => entry.agentId === item.agentId);
-    selectedApiConfigId.value = String(option?.apiConfigId || selectedApiConfigId.value || "").trim();
+    if (!selectedApiConfigId.value) {
+      const option = agentSelectOptions.value.find((entry) => entry.agentId === item.agentId);
+      selectedApiConfigId.value = String(option?.apiConfigId || "").trim();
+    }
   }
 }
 

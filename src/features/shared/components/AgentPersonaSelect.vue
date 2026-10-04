@@ -231,9 +231,12 @@ function emitSelection(option: AgentPersonaOption | null) {
 
 function selectOption(option: AgentPersonaOption) {
   emitSelection(option);
-  const configId = String(option.apiConfigId || "").trim();
-  if (configId) {
-    emit("update:apiConfigId", configId);
+  // 独立模型选择器可见时，人格和模型是两个控件，换人格不得改掉当前模型。
+  if (!showModelSelector.value) {
+    const configId = String(option.apiConfigId || "").trim();
+    if (configId) {
+      emit("update:apiConfigId", configId);
+    }
   }
   dropdownOpen.value = false;
 }
