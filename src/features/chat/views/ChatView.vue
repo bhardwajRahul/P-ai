@@ -645,6 +645,7 @@
           :commit-total="commitTotal"
           :commit-page="commitPage"
           :commit-page-size="commitPageSize"
+          :commit-source-key="codeReviewCommitSourceKey"
           @close="closeCodeReviewDialog"
           @panel-change="writeLaunchPanel"
           @pick-commit-review="loadCodeReviewCommitOptions"
@@ -3785,23 +3786,43 @@ function closeCodeReviewDialog() {
   codeReviewDialogOpen.value = false;
   codeReviewErrorText.value = "";
 }
+const codeReviewCommitSourceKey = computed(() =>
+  `${String(props.activeConversationId || "").trim()}\n${String(effectiveSessionRootPath.value || "").trim()}`,
+);
+let codeReviewCommitRequestSeq = 0;
+
+watch(codeReviewCommitSourceKey, () => {
+  codeReviewCommitRequestSeq += 1;
+  commitOptions.value = [];
+  commitTotal.value = 0;
+  commitPage.value = 1;
+  commitOptionsLoading.value = false;
+});
+
 async function loadCodeReviewCommitOptions(page = 1) {
   const conversationId = String(props.activeConversationId || "").trim();
   if (!conversationId) return;
+  const requestSeq = codeReviewCommitRequestSeq + 1;
+  codeReviewCommitRequestSeq = requestSeq;
+  const requestKey = codeReviewCommitSourceKey.value;
   commitOptionsLoading.value = true;
   try {
     const result = await listToolReviewCommitOptions(conversationId, page, commitPageSize.value);
+    if (requestSeq !== codeReviewCommitRequestSeq || requestKey !== codeReviewCommitSourceKey.value) return;
     commitOptions.value = Array.isArray(result.commits) ? result.commits : [];
     commitTotal.value = Number(result.total || 0);
     commitPage.value = Number(result.page || page);
     commitPageSize.value = Number(result.pageSize || commitPageSize.value);
     codeReviewErrorText.value = "";
   } catch (error) {
+    if (requestSeq !== codeReviewCommitRequestSeq || requestKey !== codeReviewCommitSourceKey.value) return;
     commitOptions.value = [];
     codeReviewErrorText.value = t("chat.readCommitFailed");
     console.error("[代码审查] 读取 commit 失败", error);
   } finally {
-    commitOptionsLoading.value = false;
+    if (requestSeq === codeReviewCommitRequestSeq) {
+      commitOptionsLoading.value = false;
+    }
   }
 }
 async function handleSubmitCodeReview(input: { scope: ToolReviewCodeReviewScope; target?: string; agentId: string; apiConfigId?: string }) {

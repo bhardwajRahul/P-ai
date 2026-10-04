@@ -72,18 +72,33 @@ async fn list_tool_review_commit_options_internal_command(
     Ok(ListToolReviewCommitOptionsOutput { total, page, page_size, commits })
 }
 
-async fn tool_review_list_commit_options_internal(
+fn tool_review_commit_list_cwd(
     state: &AppState,
     conversation: &Conversation,
-    page: usize,
-    page_size: usize,
-) -> Result<(usize, Vec<ToolReviewCommitOption>), String> {
+) -> Result<PathBuf, String> {
     let workspace_path = terminal_default_workspace_for_conversation_resolved(
         state,
         Some(conversation),
     )
     .map(|workspace| workspace.path)
     .map_err(|err| format!("当前会话缺少可用主工作区，无法读取 commit 列表：{}", err))?;
+    if normalize_shell_work_mode_text(&conversation.shell_work_mode) == SHELL_WORK_MODE_WORKTREE {
+        if let Some(worktree) =
+            terminal_conversation_worktree_dir_for_conversation(conversation, &workspace_path)
+        {
+            return Ok(worktree);
+        }
+    }
+    Ok(workspace_path)
+}
+
+async fn tool_review_list_commit_options_internal(
+    state: &AppState,
+    conversation: &Conversation,
+    page: usize,
+    page_size: usize,
+) -> Result<(usize, Vec<ToolReviewCommitOption>), String> {
+    let workspace_path = tool_review_commit_list_cwd(state, conversation)?;
     let workspace_text = workspace_path.to_string_lossy().to_string();
     let total_command = "git rev-list --count HEAD";
     runtime_log_info(format!(
@@ -1577,7 +1592,16 @@ async fn tool_review_exec_git_readonly(
         let root = terminal_session_root_canonical(&state_for_blocking, &session_id_for_blocking)
             .map_err(|err| format!("解析 tool-review 会话根目录失败：{err}"))?;
         let normalized = normalize_target_for_access_check(&cwd_for_blocking);
-        if !exec_path_is_within(&root, &normalized) {
+        let bound_worktree = terminal_default_cwd_for_conversation(
+            &state_for_blocking,
+            &session_id_for_blocking,
+            &root,
+        );
+        let is_bound_worktree = bound_worktree.as_ref().is_some_and(|worktree| {
+            normalize_terminal_path_for_compare(worktree)
+                == normalize_terminal_path_for_compare(&normalized)
+        });
+        if !exec_path_is_within(&root, &normalized) && !is_bound_worktree {
             return Err(format!(
                 "tool-review 工作区不在会话根目录内：cwd={} root={}",
                 cwd_for_blocking.to_string_lossy(),

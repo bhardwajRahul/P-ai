@@ -125,6 +125,8 @@ const props = defineProps<{
   commitTotal: number;
   commitPage: number;
   commitPageSize: number;
+  /** 会话或工作树一变，旧 commit 就不能再留 */
+  commitSourceKey?: string;
 }>();
 
 const emit = defineEmits<{
@@ -255,6 +257,16 @@ watch(
   (value) => {
     if (!props.open) return;
     panel.value = value === "delegate" ? "delegate" : "review";
+  },
+);
+
+watch(
+  () => props.commitSourceKey,
+  (next, previous) => {
+    if (next === previous) return;
+    selectedCommitHashes.value = [];
+    if (!props.open || scope.value !== "commit") return;
+    emit("pickCommitReview", 1);
   },
 );
 
