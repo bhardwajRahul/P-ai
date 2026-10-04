@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-10-03T07:47:51.369Z",
-  "latestVersion": "v0.96.3",
+  "generatedAt": "2026-10-04T03:39:39.712Z",
+  "latestVersion": "v0.96.4",
   "releases": [
+    {
+      "version": "v0.96.4",
+      "path": "docs/changelog/releases/v0.96.4.md",
+      "summary": "**联系人改为按分组管理**：渠道设置收在上方，联系人按自定义分组列在下方，可新建、重命名、删除分组，也可以把联系人移动到分组。组内按平台账号排序，不再跟着最近消息来回跳动。每个联系人的详细设置在卡片里展开，同时只展开一个；也可以按分组批量设置，或整组移动。渠道没连上时，这些设置仍然可以改。"
+    },
     {
       "version": "v0.96.3",
       "path": "docs/changelog/releases/v0.96.3.md",
