@@ -95,8 +95,9 @@
               <div class="flex flex-col">
                 <TransitionGroup name="ecall-activity-item" tag="ul" class="ecall-activity-timeline" :appear="false">
                   <li
-                    v-for="(item, itemIndex) in resolvedActivityItems(block)"
+                    v-for="(item, itemIndex) in presentedActivityItems"
                     :key="`${block.id}-activity-${activityItemKey(item)}`"
+                    v-memo="activityItemMemo(item)"
                     :class="[
                       activityItemNodeClass(item),
                       item.kind === 'reasoning' ? 'ecall-activity-reasoning-item relative flex flex-col min-w-0' : 'flex gap-1.5',
@@ -149,11 +150,10 @@
                           />
                         </button>
 
-                        <!-- 底沿平滑淡出渐变遮罩：仅在展开且真正吸顶时才显现，未吸顶时不遮挡首行文字 -->
+                        <!-- 底沿淡出：只有标题行真的贴住滚动区顶部才挂上，避免没贴顶时盖住正文 -->
                         <div
-                          v-if="activityItemExpanded(item) && activityItemCanExpand(item)"
-                          class="ecall-reasoning-sticky-fade absolute top-full inset-x-0 h-3 pointer-events-none transition-opacity duration-150"
-                          :class="isReasoningItemStuck(item) ? 'opacity-100' : 'opacity-0'"
+                          v-if="activityItemExpanded(item) && activityItemCanExpand(item) && isReasoningItemStuck(item)"
+                          class="ecall-reasoning-sticky-fade absolute top-full inset-x-0 h-3 pointer-events-none"
                         />
                       </div>
 
@@ -176,7 +176,8 @@
                           ]"
                           @click="onReasoningClampedBodyClick(item)"
                         >
-                          <InlineMarkdownText :text="activityItemRemainingText(item)" />
+                          <InlineMarkdownText v-if="!activityItemPlainBody(item)" :text="activityItemBodyText(item)" />
+                          <template v-else>{{ activityItemBodyText(item) }}</template>
 
                           <!-- 折叠态底部 base-200 淡出遮罩 -->
                           <div
@@ -219,7 +220,7 @@
                             transform="translate(3.84 3.84) scale(0.68)"
                           />
                         </svg>
-                        <span v-if="itemIndex !== resolvedActivityItems(block).length - 1" class="mt-1 w-px flex-1 bg-current" />
+                        <span v-if="itemIndex !== presentedActivityItems.length - 1" class="mt-1 w-px flex-1 bg-current" />
                       </div>
                       <div class="min-w-0 flex-1">
                         <details
@@ -760,7 +761,7 @@ const resolvedImageSrcMap = ref<Record<string, string>>({});
 const markdownContainerRef = ref<HTMLElement | null>(null);
 const activityDetailsRef = ref<HTMLDetailsElement | null>(null);
 const activityExpanded = ref(false);
-// 思维块展开态：只记用户手动改过的条目，未记账的按「最新一条默认展开」推导
+// 思维块展开态：只记用户手动改过的条目，没点过的一律收起
 const activityItemExpandedOverrides = ref<Record<string, boolean>>({});
 // 工具结果按需加载：后端默认只下发占位文案（contentOmitted），
 // 用户点「查看结果」后才把真实内容填进 toolResultOverrides。
@@ -1287,6 +1288,91 @@ function resolvedActivityItems(block: ChatMessageBlock): ChatActivityItem[] {
   return streamBlocksToActivityItems(streamBlocks, !!block.activityRunning);
 }
 
+/**
+ * 转换层把同一批 running 标到每条上，不能据此区分已闭合与正在生长。
+ * 只有最后一条思维或正文还可能继续变长，前面的条目一律视为已闭合。
+ */
+const presentedActivityItems = computed(() => {
+  const items = resolvedActivityItems(props.block);
+  if (!props.block.isStreaming || items.length === 0) return items;
+  let liveIndex = -1;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const kind = items[index].kind;
+    if (kind === "reasoning" || kind === "content") {
+      liveIndex = index;
+      break;
+    }
+  }
+  if (liveIndex < 0) return items;
+  return items.map((item, index) => (
+    index === liveIndex || item.kind === "tool" ? item : { ...item, running: false }
+  ));
+});
+
+const collapsedActivityPreviewCache = new WeakMap<object, { source: string; preview: string }>();
+const COLLAPSED_ACTIVITY_PREVIEW_CHARS = 240;
+const LIVE_REASONING_BODY_CHARS = 4000;
+
+/** 折叠预览按固定字数截断。没有换行时也不能把全文放进页面。 */
+function collapsedActivityPreview(text: string, cacheKey: object): string {
+  const source = String(text || "");
+  const cached = collapsedActivityPreviewCache.get(cacheKey);
+  if (cached && cached.source === source) return cached.preview;
+  const preview = source.slice(0, COLLAPSED_ACTIVITY_PREVIEW_CHARS);
+  collapsedActivityPreviewCache.set(cacheKey, { source, preview });
+  return preview;
+}
+
+/** 生长中的正文只看长度和末尾字符，避免每个新字都扫描全文。 */
+function liveActivityTextSignature(text: string): string {
+  const length = text.length;
+  return `${length}:${length > 0 ? text.charCodeAt(length - 1) : 0}`;
+}
+
+function activityItemPlainBody(item: ChatActivityItem): boolean {
+  return item.kind === "reasoning" && !!item.running && activityItemExpanded(item);
+}
+
+function activityItemBodyText(item: ChatActivityItem): string {
+  const text = activityItemText(item);
+  if (item.kind !== "reasoning") return text;
+  if (!activityItemExpanded(item)) return collapsedActivityPreview(text, item);
+  if (item.running && text.length > LIVE_REASONING_BODY_CHARS) {
+    return `…\n${text.slice(text.length - LIVE_REASONING_BODY_CHARS)}`;
+  }
+  return text;
+}
+
+/** 已闭合条目只保留身份。正在生长的条目用常量级签名，不哈希全文。 */
+function activityItemMemo(item: ChatActivityItem): unknown[] {
+  const expanded = activityItemExpanded(item);
+  if (item.kind === "tool") {
+    return [activityItemKey(item), item.status || "", textContentSignature(item.argsText), textContentSignature(item.resultText)];
+  }
+  if (!item.running) return [activityItemKey(item), expanded];
+  return [activityItemKey(item), expanded, liveActivityTextSignature(activityItemText(item))];
+}
+
+function activityOpenPanelSignature(items: ChatActivityItem[]): string {
+  return items
+    .map((item) => {
+      const key = activityItemKey(item);
+      if (item.kind === "tool") {
+        return [
+          key,
+          String(item.toolCallId || "").trim(),
+          String(item.name || "").trim(),
+          String(item.status || "").trim(),
+          textContentSignature(item.argsText),
+          textContentSignature(item.resultText),
+        ].join(":");
+      }
+      if (!item.running) return `${key}:closed`;
+      return `${key}:live:${liveActivityTextSignature(activityItemText(item))}`;
+    })
+    .join("|");
+}
+
 function activityShouldAutoExpand(block: ChatMessageBlock): boolean {
   void block;
   return false;
@@ -1391,10 +1477,8 @@ function activityPanelMemoKey(block: ChatMessageBlock): unknown[] {
     activityStatusText(block),
     activityReasoningCountLabel(block),
     activityToolCountsLabel(block),
-    // 折叠时内容区不渲染，items 全文签名只用于展开态检测内容变化；
-    // 数字/状态变化已由上面几项覆盖，折叠态跳过可避免流式时对思维链全文反复哈希。
-    // 条目 details 为原生开合，不进 memoKey——点击条目不得触发面板重渲染。
-    ...(panelOpen ? [activityItemsSignature(block), activityItemExpandedOverrides.value] : []),
+    // 展开时只跟踪条目结构和正在生长的那一条。已闭合条目的全文不进签名。
+    ...(panelOpen ? [activityOpenPanelSignature(presentedActivityItems.value), activityItemExpandedOverrides.value] : []),
   ];
 }
 
@@ -1402,20 +1486,8 @@ function activityItemKey(item: ChatActivityItem): string {
   return `${item.kind}:${String(item.id || "")}`;
 }
 
-/** 最新一条思维块：默认展开的就是它 */
-const newestActivityReasoningKey = computed(() => {
-  const items = resolvedActivityItems(props.block);
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    if (items[index].kind === "reasoning") return activityItemKey(items[index]);
-  }
-  return "";
-});
-
 function activityItemExpanded(item: ChatActivityItem): boolean {
-  const override = activityItemExpandedOverrides.value[activityItemKey(item)];
-  if (override !== undefined) return override;
-  // 默认只展开最新一条思维块；content 条目（与气泡正文重复）不参与默认展开
-  return activityItemKey(item) === newestActivityReasoningKey.value;
+  return activityItemExpandedOverrides.value[activityItemKey(item)] === true;
 }
 
 /** 最新一条正在流式的活动块（思维块或内容块）：流式生长时不设高度上限 */
@@ -1468,59 +1540,68 @@ function isReasoningItemStuck(item: ChatActivityItem): boolean {
   return reasoningItemStuckKeys.value.has(activityItemKey(item));
 }
 
-const stickySentinelObservers = new Map<string, IntersectionObserver>();
+function setReasoningItemStuck(key: string, stuck: boolean): void {
+  const currentHas = reasoningItemStuckKeys.value.has(key);
+  if (stuck === currentHas) return;
+  const next = new Set(reasoningItemStuckKeys.value);
+  if (stuck) next.add(key);
+  else next.delete(key);
+  reasoningItemStuckKeys.value = next;
+}
+
+const stickySentinelCleanups = new Map<string, () => void>();
 
 function findScrollContainer(element: HTMLElement | null): HTMLElement | null {
   if (!element) return null;
-  // 严格在自身祖先树中寻找主聊天滚动容器，若未挂载则在所属 document 中回退查找
-  return (
-    (element.closest(".ecall-chat-scroll-container") as HTMLElement | null) ||
-    (element.ownerDocument?.querySelector(".ecall-chat-scroll-container") as HTMLElement | null)
-  );
+  return element.closest(".ecall-chat-scroll-container") as HTMLElement | null;
 }
 
 function bindStickySentinel(key: string, el: HTMLElement | null): void {
-  const existing = stickySentinelObservers.get(key);
+  const existing = stickySentinelCleanups.get(key);
   if (existing) {
-    existing.disconnect();
-    stickySentinelObservers.delete(key);
+    existing();
+    stickySentinelCleanups.delete(key);
   }
   if (!el) {
-    if (reasoningItemStuckKeys.value.has(key)) {
-      const next = new Set(reasoningItemStuckKeys.value);
-      next.delete(key);
-      reasoningItemStuckKeys.value = next;
-    }
+    setReasoningItemStuck(key, false);
     return;
   }
 
-  if (typeof IntersectionObserver === "undefined") return;
-  // 严格向上查找自身所属的局部滚动容器，未找到时自动回退为 null (顶层浏览器视口)
   const scrollRoot = findScrollContainer(el);
+  if (!scrollRoot) {
+    setReasoningItemStuck(key, false);
+    return;
+  }
 
-  const observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        const rootTop = entry.rootBounds ? entry.rootBounds.top : 0;
-        const stuck = !entry.isIntersecting && entry.boundingClientRect.top <= rootTop;
-        const currentHas = reasoningItemStuckKeys.value.has(key);
-        if (stuck !== currentHas) {
-          const next = new Set(reasoningItemStuckKeys.value);
-          if (stuck) next.add(key);
-          else next.delete(key);
-          reasoningItemStuckKeys.value = next;
-        }
-      }
-    },
-    {
-      root: scrollRoot,
-      rootMargin: "12px 0px 0px 0px",
-      threshold: 0,
-    },
-  );
+  let frame = 0;
+  const update = () => {
+    frame = 0;
+    const header = el.nextElementSibling instanceof HTMLElement ? el.nextElementSibling : null;
+    if (!header) {
+      setReasoningItemStuck(key, false);
+      return;
+    }
+    const stickyTop = Number.parseFloat(window.getComputedStyle(header).top);
+    const pinTop = scrollRoot.getBoundingClientRect().top + (Number.isFinite(stickyTop) ? stickyTop : 0);
+    const headerTop = header.getBoundingClientRect().top;
+    const sentinelTop = el.getBoundingClientRect().top;
+    // 哨兵滑到标题行上方，且标题行停在吸顶线上，才算贴顶。
+    const stuck = sentinelTop < headerTop - 1 && Math.abs(headerTop - pinTop) <= 3;
+    setReasoningItemStuck(key, stuck);
+  };
+  const schedule = () => {
+    if (frame) return;
+    frame = window.requestAnimationFrame(update);
+  };
 
-  observer.observe(el);
-  stickySentinelObservers.set(key, observer);
+  scrollRoot.addEventListener("scroll", schedule, { passive: true });
+  window.addEventListener("resize", schedule);
+  schedule();
+  stickySentinelCleanups.set(key, () => {
+    scrollRoot.removeEventListener("scroll", schedule);
+    window.removeEventListener("resize", schedule);
+    if (frame) window.cancelAnimationFrame(frame);
+  });
 }
 
 function activityItemText(item: ChatActivityItem): string {
@@ -2121,8 +2202,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  stickySentinelObservers.forEach((obs) => obs.disconnect());
-  stickySentinelObservers.clear();
+  stickySentinelCleanups.forEach((cleanup) => cleanup());
+  stickySentinelCleanups.clear();
   reasoningItemStuckKeys.value = new Set();
   teardownStreamingObserver();
   clearStreamingReleaseTimer();
@@ -2199,7 +2280,10 @@ function openAttachmentPath(path: string) {
 }
 
 .ecall-reasoning-sticky-fade {
-  background: linear-gradient(to bottom, var(--color-base-200) 0%, transparent 100%);
+  /* 用遮罩淡出，避免渐变插值到 transparent 时混进黑色 */
+  background-color: var(--color-base-200);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
 }
 
 .ecall-reasoning-body--clamped {
@@ -2218,7 +2302,9 @@ function openAttachmentPath(path: string) {
 }
 
 .ecall-reasoning-clamped-fade {
-  background: linear-gradient(to bottom, transparent 0%, var(--color-base-200) 100%);
+  background-color: var(--color-base-200);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 100%);
 }
 
 :deep(.ecall-activity-timeline .ecall-plain-markdown-markdown > :first-child) {
