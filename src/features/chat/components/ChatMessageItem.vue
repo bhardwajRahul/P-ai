@@ -40,7 +40,7 @@
       :avatar-url="avatarUrl"
       :streaming="!!streamingHeaderStatus"
       :streaming-text="streamingHeaderStatus"
-      :wide="blockNeedsWideBubble(block)"
+      :wide="assistantNeedsWideBubble"
       :content-empty="bubbleContentEmpty(block)"
     >
       <template v-if="showActivitySummary(block)" #activity>
@@ -360,7 +360,7 @@
           v-if="!showAssistantPreStreamingDots(block)"
           ref="assistantBubbleRef"
           class="assistant-markdown ecall-assistant-bubble max-w-full"
-          :class="{ 'ecall-assistant-bubble-wide': blockNeedsWideBubble(block) }"
+          :class="{ 'ecall-assistant-bubble-wide': assistantNeedsWideBubble }"
           :data-bubble-background="assistantBubbleBackgroundEnabled ? 'on' : 'off'"
           :data-segmented-markdown="segmentedMarkdownEnabled ? 'on' : 'off'"
           :data-process-folded="processSegmentsFolded ? 'on' : 'off'"
@@ -774,6 +774,7 @@ const planMarkdownError = ref("");
 const planMarkdownLoading = ref(false);
 const plainMarkdownDebugEnabled = debugPlainMarkdownRender;
 const assistantRawRenderedText = computed(() => formatAssistantStreamingText(props.block));
+const assistantNeedsWideBubble = computed(() => textNeedsWideBubble(assistantRawRenderedText.value));
 const assistantRenderedText = computed(() =>
   assistantRawRenderedText.value.split(TOOL_TEXT_BREAK_PLACEHOLDER).join("\n\n"),
 );
@@ -2076,26 +2077,11 @@ function normalizeRenderedLocalLinks() {
   }
 }
 
-function blockWideContentText(block: ChatMessageBlock): string {
-  return formatAssistantStreamingText(block);
-}
-
-function blockHasMermaid(block: ChatMessageBlock): boolean {
-  return /```(?:\s*)mermaid\b/i.test(blockWideContentText(block));
-}
-
-function blockHasCodeFence(block: ChatMessageBlock): boolean {
-  return /```[\w-]*\s*[\r\n]/i.test(blockWideContentText(block));
-}
-
-function blockHasTable(block: ChatMessageBlock): boolean {
-  const text = blockWideContentText(block);
-  return /\|[^\n\r]+\|\s*[\r\n]\s*\|(?:\s*:?-+:?\s*\|)+/m.test(text)
+function textNeedsWideBubble(text: string): boolean {
+  return /```(?:\s*)mermaid\b/i.test(text)
+    || /```[\w-]*\s*[\r\n]/i.test(text)
+    || /\|[^\n\r]+\|\s*[\r\n]\s*\|(?:\s*:?-+:?\s*\|)+/m.test(text)
     || /^\s*\|.+?\|.+?\|/m.test(text);
-}
-
-function blockNeedsWideBubble(block: ChatMessageBlock): boolean {
-  return blockHasMermaid(block) || blockHasCodeFence(block) || blockHasTable(block);
 }
 
 function isImageMime(mime: string): boolean {
