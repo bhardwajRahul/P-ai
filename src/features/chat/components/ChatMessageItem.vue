@@ -389,10 +389,11 @@
                   />
                 </button>
                 <div
-                  v-for="piece in visibleAssistantPieces"
+                  v-for="(piece, visibleIndex) in visibleAssistantPieces"
                   :key="piece.key"
                   :ref="(el) => setStreamingSegmentRef(el, piece.index)"
                   class="ecall-assistant-segment ecall-assistant-segment-text"
+                  :data-segment-divider="visibleIndex === visibleAssistantPieces.length - 1 && visibleAssistantPieces.length > 1 ? 'last' : undefined"
                   :style="isStreamingPiece(piece.index) ? streamingBubbleStyle : undefined"
                 >
                   <AppMarkdownRenderer
@@ -2626,17 +2627,9 @@ function openAttachmentPath(path: string) {
   background: var(--color-base-100);
 }
 
-.ecall-assistant-bubble[data-bubble-background="off"]:not([data-process-folded="on"]) .ecall-process-fold + .ecall-assistant-segment::before {
-  display: none;
-}
-
-.ecall-assistant-bubble[data-bubble-background="off"][data-process-folded="on"] .ecall-process-fold + .ecall-assistant-segment::before {
-  top: -0.75rem;
-}
-
-/* 无气泡模式：没有气泡边界，段间距拉开一倍，让断开先靠留白读出来 */
+/* 无气泡模式：中间段不再画线，也不再留出线的位置 */
 .ecall-assistant-bubble[data-bubble-background="off"] .ecall-assistant-segment-list {
-  gap: 1rem;
+  gap: 0;
 }
 
 .ecall-assistant-segment {
@@ -2664,13 +2657,16 @@ function openAttachmentPath(path: string) {
   transform-origin: center;
 }
 
-/* 段与段之间的线抬到段间距（无气泡模式 1rem）的中点：线的上下留白才相等，不会看着像下一段的上边框 */
-.ecall-assistant-bubble[data-bubble-background="off"] .ecall-assistant-segment + .ecall-assistant-segment::before {
+/* 只有最后一段前面留线。线自己占一段间距，中间段不再留这段位置 */
+.ecall-assistant-bubble[data-bubble-background="off"] .ecall-assistant-segment[data-segment-divider="last"] {
+  margin-top: 1rem;
+}
+
+.ecall-assistant-bubble[data-bubble-background="off"] .ecall-assistant-segment[data-segment-divider="last"]::before {
   top: -0.5rem;
 }
 
-/* 列表首段之前不画线：消息头下面直接开始正文 */
-.ecall-assistant-bubble[data-bubble-background="off"] .ecall-assistant-segment-list > .ecall-assistant-segment:first-child::before {
+.ecall-assistant-bubble[data-bubble-background="off"] .ecall-assistant-segment:not([data-segment-divider="last"])::before {
   display: none;
 }
 
