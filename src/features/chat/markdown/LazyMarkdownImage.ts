@@ -1,21 +1,25 @@
 import { ImageIcon } from "@lucide/vue";
 import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
-import { readTransportChatImage, resolveLocalFileUrl } from "../../../services/tauri-api";
-import { isAssistantSpacePath } from "../utils/local-link";
-import { resolveMarkdownImageSource, type MarkdownImagePreviewPayload } from "./MarkdownImage";
+import { isTauriRuntimeAvailable, readTransportChatImage, resolveLocalFileUrl } from "../../../services/tauri-api";
+import { markdownImageDisplayMode, resolveMarkdownImageSource, type MarkdownImagePreviewPayload, type MarkdownImageSource } from "./MarkdownImage";
 
-const assistantSpaceThumbnailCache = new Map<string, string>();
-const assistantSpaceThumbnailPromiseCache = new Map<string, Promise<string>>();
-const ASSISTANT_SPACE_THUMBNAIL_CACHE_LIMIT = 40;
+const transportThumbnailCache = new Map<string, string>();
+const transportThumbnailPromiseCache = new Map<string, Promise<string>>();
+const TRANSPORT_THUMBNAIL_CACHE_LIMIT = 40;
 
-function cacheAssistantSpaceThumbnail(path: string, dataUrl: string) {
-  assistantSpaceThumbnailCache.delete(path);
-  assistantSpaceThumbnailCache.set(path, dataUrl);
-  while (assistantSpaceThumbnailCache.size > ASSISTANT_SPACE_THUMBNAIL_CACHE_LIMIT) {
-    const oldestPath = assistantSpaceThumbnailCache.keys().next().value;
+function cacheTransportThumbnail(path: string, dataUrl: string) {
+  transportThumbnailCache.delete(path);
+  transportThumbnailCache.set(path, dataUrl);
+  while (transportThumbnailCache.size > TRANSPORT_THUMBNAIL_CACHE_LIMIT) {
+    const oldestPath = transportThumbnailCache.keys().next().value;
     if (!oldestPath) break;
-    assistantSpaceThumbnailCache.delete(oldestPath);
+    transportThumbnailCache.delete(oldestPath);
   }
+}
+
+function localAssetUrl(source: MarkdownImageSource): string {
+  if (source.kind !== "local") return "";
+  return resolveLocalFileUrl(source.path);
 }
 
 function isMemeImagePath(path: string): boolean {
@@ -38,7 +42,7 @@ export default defineComponent({
     const inViewport = ref(false);
     const imageLoaded = ref(false);
     const imageErrored = ref(false);
-    const assistantSpaceThumbnailSrc = ref("");
+    const transportThumbnailSrc = ref("");
     const source = computed(() => resolveMarkdownImageSource(imageProps.src, imageProps.localImageBasePath));
     let observer: IntersectionObserver | null = null;
     let thumbnailLoadVersion = 0;
@@ -55,7 +59,7 @@ export default defineComponent({
       inViewport.value = false;
       imageLoaded.value = false;
       imageErrored.value = false;
-      assistantSpaceThumbnailSrc.value = "";
+      transportThumbnailSrc.value = "";
     }
 
     function observeRoot() {
@@ -89,31 +93,31 @@ export default defineComponent({
       [source, inViewport],
       ([current, visible]) => {
         const version = ++thumbnailLoadVersion;
-        assistantSpaceThumbnailSrc.value = "";
-        if (!visible || current.kind !== "local" || !isAssistantSpacePath(current.path)) return;
+        transportThumbnailSrc.value = "";
+        if (!visible || markdownImageDisplayMode(current, localAssetUrl(current), isTauriRuntimeAvailable()) !== "transport" || current.kind !== "local") return;
         const path = current.path;
-        const cached = assistantSpaceThumbnailCache.get(path);
+        const cached = transportThumbnailCache.get(path);
         if (cached) {
-          assistantSpaceThumbnailSrc.value = cached;
+          transportThumbnailSrc.value = cached;
           return;
         }
-        const existing = assistantSpaceThumbnailPromiseCache.get(path);
+        const existing = transportThumbnailPromiseCache.get(path);
         const task = existing || readTransportChatImage({ path })
           .then((result) => {
             const dataUrl = String(result?.dataUrl || "").trim();
-            if (dataUrl) cacheAssistantSpaceThumbnail(path, dataUrl);
-            assistantSpaceThumbnailPromiseCache.delete(path);
+            if (dataUrl) cacheTransportThumbnail(path, dataUrl);
+            transportThumbnailPromiseCache.delete(path);
             return dataUrl;
           })
           .catch((error) => {
-            assistantSpaceThumbnailPromiseCache.delete(path);
-            console.warn("[Markdown图片] Assistant Space 缩略图加载失败", { path, error });
+            transportThumbnailPromiseCache.delete(path);
+            console.warn("[Markdown图片] 本地缩略图加载失败", { path, error });
             return "";
           });
-        if (!existing) assistantSpaceThumbnailPromiseCache.set(path, task);
+        if (!existing) transportThumbnailPromiseCache.set(path, task);
         void task.then((dataUrl) => {
           if (version !== thumbnailLoadVersion) return;
-          assistantSpaceThumbnailSrc.value = dataUrl;
+          transportThumbnailSrc.value = dataUrl;
           if (!dataUrl) imageErrored.value = true;
         });
       },
@@ -138,12 +142,14 @@ export default defineComponent({
         return h("span", { ref: rootRef, class: "ecall-md-image-placeholder ecall-md-image-error" }, alt || current.label || imageProps.src);
       }
 
-      const assistantSpaceImage = current.kind === "local" && isAssistantSpacePath(current.path);
-      const resolvedSrc = current.kind === "remote"
+      const displayMode = markdownImageDisplayMode(current, localAssetUrl(current), isTauriRuntimeAvailable());
+      const resolvedSrc = displayMode === "remote" && current.kind === "remote"
         ? current.src
-        : assistantSpaceImage
-          ? assistantSpaceThumbnailSrc.value
-          : resolveLocalFileUrl(current.path);
+        : displayMode === "asset"
+          ? localAssetUrl(current)
+          : displayMode === "transport"
+            ? transportThumbnailSrc.value
+            : "";
       const title = current.kind === "local" ? (alt || current.path) : alt;
       const imageClass = current.kind === "local" && isMemeImagePath(current.path)
         ? "ecall-md-meme-image"

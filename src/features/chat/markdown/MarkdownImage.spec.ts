@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeMarkdownImageCacheKey, resolveMarkdownImageSource } from "./MarkdownImage";
+import { markdownImageDisplayMode, normalizeMarkdownImageCacheKey, resolveMarkdownImageSource } from "./MarkdownImage";
 import { parseInlineSegments } from "./parse-markdown";
 
 describe("MarkdownImage", () => {
@@ -23,6 +23,18 @@ describe("MarkdownImage", () => {
       kind: "local",
       path: "{Assistant Space}/generated-images/20260727/a.png",
     });
+  });
+
+  it("网页端的本机路径一律问后端要，桌面才用资源地址", () => {
+    const local = { kind: "local" as const, path: "E:/repo/.pai/temp/a.png" };
+    expect(markdownImageDisplayMode(local, "https://asset.localhost/a.png", false)).toBe("transport");
+    expect(markdownImageDisplayMode(local, "", true)).toBe("transport");
+    expect(markdownImageDisplayMode(local, "https://asset.localhost/a.png", true)).toBe("asset");
+    expect(markdownImageDisplayMode(
+      { kind: "local", path: "{Assistant Space}/generated-images/a.png" },
+      "https://asset.localhost/a.png",
+      true,
+    )).toBe("transport");
   });
 
   it("对 Windows 缓存键统一分隔符和盘符大小写，保留其余路径大小写", () => {

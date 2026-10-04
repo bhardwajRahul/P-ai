@@ -97,6 +97,23 @@ function normalizeBaseLocalPath(value: string): string {
   return String(value || "").trim().replace(/\\/g, "/").replace(/\/$/, "");
 }
 
+export type MarkdownImageDisplayMode = "remote" | "asset" | "transport" | "none";
+
+/**
+ * 带本机路径的图，网页端一律问后端要。手机只是投影，没有这些文件。
+ * 桌面才用本机资源地址；助理空间不在资源协议范围内，桌面也走读取。
+ */
+export function markdownImageDisplayMode(
+  source: MarkdownImageSource,
+  assetUrl: string,
+  hostHasLocalFiles: boolean,
+): MarkdownImageDisplayMode {
+  if (source.kind === "blocked") return "none";
+  if (source.kind === "remote") return "remote";
+  if (!hostHasLocalFiles || isAssistantSpacePath(source.path)) return "transport";
+  return assetUrl.trim() ? "asset" : "transport";
+}
+
 export function resolveMarkdownImageSource(rawSrc: string, basePath: string): MarkdownImageSource {
   const src = String(rawSrc || "").trim();
   if (!src) return { kind: "blocked", label: "" };

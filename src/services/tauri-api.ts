@@ -862,9 +862,8 @@ export type TransportChatImageData = {
 };
 
 /**
- * 读取聊天图片的唯一入口。存储媒体引用在两端都可读取；本机路径只
- * 在桌面文件能力存在时读取，Web 端返回 null 而不是把 native command
- * 错误泄漏到共享聊天状态机。
+ * 读取聊天图片的唯一入口。存储媒体引用和本机路径都经传输读取，
+ * 桌面与 Web 共用，不能在 Web 端提前返回空。
  */
 export async function readTransportChatImage(input: {
   path?: string;
