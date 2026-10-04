@@ -367,7 +367,36 @@ fn state_service_upsert_remote_im_contact(
     let tx = conn
         .transaction()
         .map_err(|err| format!("开启 remote_im_contacts 事务失败，error={err}"))?;
+    state_db_write_remote_im_contact_row(&tx, contact)?;
+    tx.commit()
+        .map_err(|err| format!("提交 remote_im_contacts 事务失败，error={err}"))?;
+    Ok(())
+}
 
+/// 一批联系人整体写入：单事务，任一联系人写入失败时整体回滚。
+fn state_service_upsert_remote_im_contacts(
+    state: &AppState,
+    contacts: &[RemoteImContact],
+) -> Result<(), String> {
+    if contacts.is_empty() {
+        return Ok(());
+    }
+    let mut conn = state_db_open(&state.data_path)?;
+    let tx = conn
+        .transaction()
+        .map_err(|err| format!("开启 remote_im_contacts 批量事务失败，error={err}"))?;
+    for contact in contacts {
+        state_db_write_remote_im_contact_row(&tx, contact)?;
+    }
+    tx.commit()
+        .map_err(|err| format!("提交 remote_im_contacts 批量事务失败，error={err}"))?;
+    Ok(())
+}
+
+fn state_db_write_remote_im_contact_row(
+    tx: &rusqlite::Transaction<'_>,
+    contact: &RemoteImContact,
+) -> Result<(), String> {
     let mut config = serde_json::to_value(contact)
         .map_err(|err| format!("序列化 remote_im_contacts 失败，error={err}"))?;
     if let Some(obj) = config.as_object_mut() {
@@ -419,10 +448,199 @@ fn state_service_upsert_remote_im_contact(
         )
         .map_err(|err| format!("写入 remote_im_group_members 失败，contact_id={}，user_id={}，error={err}", contact.id, member.user_id))?;
     }
-
-    tx.commit()
-        .map_err(|err| format!("提交 remote_im_contacts 事务失败，error={err}"))?;
     Ok(())
+}
+
+// ==================== 联系人自定义分组 ====================
+
+/// 按渠道列出联系人分组，排序值小的在前。
+fn state_service_list_remote_im_contact_groups(
+    state: &AppState,
+    channel_id: &str,
+) -> Result<Vec<RemoteImContactGroup>, String> {
+    let conn = state_db_open(&state.data_path)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, channel_id, name, sort_order, created_at, updated_at
+             FROM remote_im_contact_groups WHERE channel_id=?1
+             ORDER BY sort_order ASC, name ASC",
+        )
+        .map_err(|err| format!("准备 remote_im_contact_groups 查询失败，error={err}"))?;
+    let rows = stmt
+        .query_map(rusqlite::params![channel_id], |row| {
+            Ok(RemoteImContactGroup {
+                id: row.get(0)?,
+                channel_id: row.get(1)?,
+                name: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })
+        .map_err(|err| format!("查询 remote_im_contact_groups 失败，error={err}"))?;
+    let mut groups = Vec::new();
+    for item in rows {
+        groups.push(item.map_err(|err| format!("读取 remote_im_contact_groups 失败，error={err}"))?);
+    }
+    Ok(groups)
+}
+
+/// 同渠道内是否已有同名分组；exclude_group_id 用于重命名时排除自身。
+fn state_service_remote_im_contact_group_name_exists(
+    state: &AppState,
+    channel_id: &str,
+    name: &str,
+    exclude_group_id: Option<&str>,
+) -> Result<bool, String> {
+    let conn = state_db_open(&state.data_path)?;
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM remote_im_contact_groups
+             WHERE channel_id=?1 AND name=?2 AND (?3 IS NULL OR id<>?3)",
+            rusqlite::params![channel_id, name, exclude_group_id],
+            |row| row.get(0),
+        )
+        .map_err(|err| format!("查询 remote_im_contact_groups 重名失败，error={err}"))?;
+    Ok(count > 0)
+}
+
+/// 新建分组时的排序值：当前渠道最大值加一。
+fn state_service_next_remote_im_contact_group_sort_order(
+    state: &AppState,
+    channel_id: &str,
+) -> Result<i64, String> {
+    let conn = state_db_open(&state.data_path)?;
+    conn.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM remote_im_contact_groups WHERE channel_id=?1",
+        rusqlite::params![channel_id],
+        |row| row.get(0),
+    )
+    .map_err(|err| format!("查询 remote_im_contact_groups 排序失败，error={err}"))
+}
+
+fn state_service_upsert_remote_im_contact_group(
+    state: &AppState,
+    group: &RemoteImContactGroup,
+) -> Result<(), String> {
+    let conn = state_db_open(&state.data_path)?;
+    conn.execute(
+        "INSERT INTO remote_im_contact_groups(id, channel_id, name, sort_order, created_at, updated_at)
+         VALUES(?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET
+           name=excluded.name,
+           sort_order=excluded.sort_order,
+           updated_at=excluded.updated_at",
+        rusqlite::params![
+            group.id,
+            group.channel_id,
+            group.name,
+            group.sort_order,
+            group.created_at,
+            group.updated_at
+        ],
+    )
+    .map_err(|err| format!("写入 remote_im_contact_groups 失败，group_id={}，error={err}", group.id))?;
+    Ok(())
+}
+
+/// 删除分组：先把组内联系人回落到未分组，再删分组，两步同一事务。
+fn state_service_delete_remote_im_contact_group(
+    state: &AppState,
+    group_id: &str,
+) -> Result<usize, String> {
+    let mut conn = state_db_open(&state.data_path)?;
+    let tx = conn
+        .transaction()
+        .map_err(|err| format!("开启 remote_im_contact_groups 删除事务失败，error={err}"))?;
+    let detached = tx
+        .execute(
+            "UPDATE remote_im_contacts SET config_json = json_set(config_json, '$.groupId', NULL)
+             WHERE json_extract(config_json, '$.groupId')=?1",
+            rusqlite::params![group_id],
+        )
+        .map_err(|err| format!("回落分组内联系人失败，group_id={group_id}，error={err}"))?;
+    tx.execute(
+        "DELETE FROM remote_im_contact_groups WHERE id=?1",
+        rusqlite::params![group_id],
+    )
+    .map_err(|err| format!("删除 remote_im_contact_groups 失败，group_id={group_id}，error={err}"))?;
+    tx.commit()
+        .map_err(|err| format!("提交 remote_im_contact_groups 删除事务失败，error={err}"))?;
+    Ok(detached)
+}
+
+/// 重命名分组：只改名称与更新时间，保留排序与创建时间。
+fn state_service_rename_remote_im_contact_group(
+    state: &AppState,
+    group_id: &str,
+    name: &str,
+    updated_at: &str,
+) -> Result<bool, String> {
+    let conn = state_db_open(&state.data_path)?;
+    let updated = conn
+        .execute(
+            "UPDATE remote_im_contact_groups SET name=?2, updated_at=?3 WHERE id=?1",
+            rusqlite::params![group_id, name, updated_at],
+        )
+        .map_err(|err| format!("重命名 remote_im_contact_groups 失败，group_id={group_id}，error={err}"))?;
+    Ok(updated > 0)
+}
+
+/// 把一组联系人移入分组（group_id 为 None 表示移入未分组）；只接受该渠道下的联系人，单事务。
+fn state_service_set_remote_im_contacts_group(
+    state: &AppState,
+    channel_id: &str,
+    contact_ids: &[String],
+    group_id: Option<&str>,
+) -> Result<usize, String> {
+    if contact_ids.is_empty() {
+        return Ok(0);
+    }
+    let mut conn = state_db_open(&state.data_path)?;
+    let tx = conn
+        .transaction()
+        .map_err(|err| format!("开启 remote_im_contacts 分组移动事务失败，error={err}"))?;
+    let mut moved = 0usize;
+    for contact_id in contact_ids {
+        let updated = tx
+            .execute(
+                "UPDATE remote_im_contacts SET config_json = json_set(config_json, '$.groupId', ?1)
+                 WHERE id=?2 AND channel_id=?3",
+                rusqlite::params![group_id, contact_id, channel_id],
+            )
+            .map_err(|err| format!("移动 remote_im_contacts 分组失败，contact_id={contact_id}，error={err}"))?;
+        if updated == 0 {
+            return Err(format!("联系人不存在或不属于该渠道：{contact_id}"));
+        }
+        moved = moved.saturating_add(1);
+    }
+    tx.commit()
+        .map_err(|err| format!("提交 remote_im_contacts 分组移动事务失败，error={err}"))?;
+    Ok(moved)
+}
+
+/// 分组所属渠道；用于重命名与删除前的存在性校验。
+fn state_service_remote_im_contact_group_channel_id(
+    state: &AppState,
+    group_id: &str,
+) -> Result<Option<String>, String> {
+    let conn = state_db_open(&state.data_path)?;
+    let mut stmt = conn
+        .prepare("SELECT channel_id FROM remote_im_contact_groups WHERE id=?1")
+        .map_err(|err| format!("准备 remote_im_contact_groups 渠道查询失败，error={err}"))?;
+    let mut rows = stmt
+        .query(rusqlite::params![group_id])
+        .map_err(|err| format!("查询 remote_im_contact_groups 渠道失败，error={err}"))?;
+    match rows
+        .next()
+        .map_err(|err| format!("读取 remote_im_contact_groups 渠道失败，error={err}"))?
+    {
+        Some(row) => Ok(Some(
+            row.get(0)
+                .map_err(|err| format!("解析 remote_im_contact_groups 渠道失败，group_id={group_id}，error={err}"))?,
+        )),
+        None => Ok(None),
+    }
 }
 
 /// 仅当联系人当前绑定仍为 expected_conversation_id 时，才清除会话绑定（原子条件更新）。

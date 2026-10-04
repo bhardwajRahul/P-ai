@@ -186,6 +186,21 @@ struct RemoteImContact {
     onebot_group_members: Vec<RemoteImGroupMemberInfo>,
     #[serde(default)]
     shell_workspaces: Vec<ShellWorkspaceConfig>,
+    /// 所属联系人分组（渠道内自定义分组）；为空表示未分组
+    #[serde(default)]
+    group_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteImContactGroup {
+    id: String,
+    channel_id: String,
+    name: String,
+    #[serde(default)]
+    sort_order: i64,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

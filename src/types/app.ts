@@ -487,6 +487,16 @@ export type RemoteImContact = {
   dingtalkSessionWebhook?: string;
   dingtalkSessionWebhookExpiredTime?: number;
   shellWorkspaces?: ShellWorkspace[];
+  groupId?: string;
+};
+
+export type RemoteImContactGroup = {
+  id: string;
+  channelId: string;
+  name: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type RemoteImContactConversationSummary = {

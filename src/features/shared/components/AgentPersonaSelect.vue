@@ -4,6 +4,7 @@
       <button
         type="button"
         class="select select-bordered flex w-full items-center justify-between gap-2 pr-3 text-left"
+        :class="size === 'sm' ? 'select-sm text-xs' : ''"
         :disabled="disabled || normalizedOptions.length === 0"
         @click="toggleOpen"
       >
@@ -12,16 +13,18 @@
             v-if="selectedOption"
             class="avatar shrink-0"
           >
-            <div class="h-7 w-7 rounded-full">
+            <div :class="size === 'sm' ? 'h-5 w-5 rounded-full' : 'h-7 w-7 rounded-full'">
               <img
                 v-if="resolveAvatarUrl(selectedOption.agentId)"
                 :src="resolveAvatarUrl(selectedOption.agentId)"
                 :alt="selectedOption.agentName"
-                class="h-7 w-7 rounded-full object-cover"
+                class="rounded-full object-cover"
+                :class="size === 'sm' ? 'h-5 w-5' : 'h-7 w-7'"
               />
               <div
                 v-else
-                class="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-content"
+                class="flex items-center justify-center rounded-full bg-primary font-semibold text-primary-content"
+                :class="size === 'sm' ? 'h-5 w-5 text-micro' : 'h-7 w-7 text-xs'"
               >
                 {{ agentInitials(selectedOption.agentName) }}
               </div>
@@ -37,14 +40,14 @@
       <div
         v-if="dropdownOpen && !disabled && (normalizedOptions.length > 0 || placeholder)"
         ref="dropdownPanelRef"
-        class="absolute z-50 w-full max-w-full overflow-hidden rounded-box border border-base-300 bg-base-100 shadow-xl"
+        class="absolute z-50 min-w-[18rem] max-w-[calc(100vw-2rem)] right-0 overflow-hidden rounded-box border border-base-300 bg-base-100 shadow-xl"
         :class="dropdownDirection === 'up' ? 'bottom-full mb-2' : 'top-full mt-2'"
       >
         <div>
           <button
             v-if="placeholder"
             type="button"
-            class="flex w-full items-center rounded-none px-3 py-2 text-left text-sm transition-colors hover:bg-base-200"
+            class="flex w-full items-center rounded-none px-3 py-2 text-left text-xs transition-colors hover:bg-base-200 border-b border-base-200"
             :class="!selectedOption ? 'bg-base-200 font-medium' : ''"
             @click="clearSelection"
           >
@@ -104,6 +107,7 @@ const props = withDefaults(defineProps<{
   personaAvatarUrlMap?: Record<string, string>;
   /** 单独禁用模型选择器（例如联系人的会话已被删除），不影响人格选择。 */
   modelDisabled?: boolean;
+  size?: "sm" | "md";
 }>(), {
   agentId: "",
   apiConfigId: "",
@@ -114,6 +118,7 @@ const props = withDefaults(defineProps<{
   showModel: true,
   autoSelectFirst: false,
   preserveCurrent: true,
+  size: "md",
 });
 
 const emit = defineEmits<{

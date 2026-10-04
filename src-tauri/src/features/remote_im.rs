@@ -172,6 +172,81 @@ struct RemoteImContactSettingsPatchInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct RemoteImContactGroupCreateInput {
+    channel_id: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteImContactGroupRenameInput {
+    group_id: String,
+    name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteImContactGroupDeleteInput {
+    group_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteImSetContactGroupInput {
+    channel_id: String,
+    contact_ids: Vec<String>,
+    /// 为空表示移入未分组
+    #[serde(default)]
+    group_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteImContactGroupDeleteResult {
+    detached_contact_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteImSetContactGroupResult {
+    moved_contact_count: usize,
+}
+
+/// 批量设置：字段为 None 表示本次不改该项。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteImBatchContactSettingsInput {
+    contact_ids: Vec<String>,
+    #[serde(default)]
+    agent_id: Option<String>,
+    #[serde(default)]
+    processing_mode: Option<String>,
+    #[serde(default)]
+    activation_mode: Option<String>,
+    #[serde(default)]
+    activation_keywords: Option<Vec<String>>,
+    #[serde(default)]
+    response_strategy: Option<String>,
+    /// 通信开关（可接收与可发送同值），与单联系人设置保持同一语义
+    #[serde(default)]
+    allow_communication: Option<bool>,
+    #[serde(default)]
+    allow_send_files: Option<bool>,
+    /// 把选中联系人已有工作区的权限统一为该值
+    #[serde(default)]
+    workspace_access: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteImBatchContactSettingsResult {
+    updated_contact_ids: Vec<String>,
+    /// 工作区权限被实际改动的联系人数
+    updated_workspace_contact_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RemoteImContactActivationUpdateInput {
     contact_id: String,
     activation_mode: String,
@@ -394,6 +469,7 @@ fn remote_im_upsert_contact_for_inbound(
         },
         onebot_group_members: Vec::new(),
         shell_workspaces: Vec::new(),
+        group_id: None,
     };
     state_service_upsert_remote_im_contact(state, &contact)?;
     Ok(contact_id)

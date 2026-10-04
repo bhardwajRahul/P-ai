@@ -1,5 +1,10 @@
 <template>
-  <SettingsPageShell :breadcrumb="remoteImBreadcrumb" header-class="">
+  <SettingsPageShell
+    :breadcrumb="remoteImBreadcrumb"
+    :no-scroll="inDetailMode"
+    :content-class="inDetailMode ? 'h-full p-2 sm:p-3 min-h-0' : undefined"
+    header-class=""
+  >
     <template #left>
       <ChannelBehaviorSettingsModal
         v-if="inDetailMode && selectedChannel"
@@ -66,27 +71,19 @@
     <!-- 主体区域切换：一级卡片列表 ↔ 二级详情页 -->
     <Transition name="ecall-config-content" mode="out-in">
       <!-- 二级菜单：渠道详情与联系人视图 -->
-      <div v-if="inDetailMode && selectedChannel" :key="'detail-body-' + selectedChannel.id" class="grid grid-cols-1 gap-4 pb-8">
-        <!-- 区块一：渠道基本与平台凭证配置 -->
-        <div class="space-y-2">
-          <div class="flex items-center justify-between px-1">
+      <div v-if="inDetailMode && selectedChannel" :key="'detail-body-' + selectedChannel.id" class="h-full min-h-0 flex flex-col gap-3 overflow-hidden flex-1">
+        <!-- 区块一：渠道配置折叠卡（改过一次后常驻折叠，不占核心视野） -->
+        <details class="collapse collapse-arrow border border-base-300 bg-base-100 rounded-box shrink-0">
+          <summary class="collapse-title min-h-0 py-2.5 px-4 text-xs font-semibold flex items-center justify-between cursor-pointer select-none">
             <div class="flex items-center gap-2">
               <Settings class="h-4 w-4 opacity-70" />
-              <span class="text-xs font-semibold uppercase tracking-wider opacity-80">{{ t("config.remoteIm.channelSettings") }}</span>
+              <span>{{ t("config.remoteIm.channelSettings") }}</span>
+              <span class="text-caption opacity-50 font-normal">({{ selectedChannel.name || platformLabelText(selectedChannel.platform) }})</span>
               <span v-if="channelDirty" class="badge badge-sm badge-warning">{{ t("config.skill.modified") }}</span>
             </div>
-            <button
-              class="btn btn-sm min-h-[2rem] btn-ghost text-error gap-1 px-2.5 text-xs hover:bg-error/10"
-              type="button"
-              :disabled="saving || isChannelOperationBusy(selectedChannel.id)"
-              @click="deleteSelectedChannel"
-            >
-              <Trash2 class="h-3.5 w-3.5" />
-              <span>{{ t("common.delete") }}</span>
-            </button>
-          </div>
-
-          <div class="rounded-box border border-base-300 bg-base-100 p-4 space-y-4">
+          </summary>
+          <div class="collapse-content pt-3 pb-4 px-4 space-y-4 border-t border-base-200">
+            <!-- 渠道名称与平台类型 -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div class="flex flex-col gap-1.5">
                 <label class="text-caption font-semibold opacity-60 uppercase">{{ t("config.remoteIm.channelName") }}</label>
@@ -140,11 +137,11 @@
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label class="text-caption opacity-60">{{ t("config.remoteIm.dingtalkClientId") }}</label>
-                    <input v-model="dingtalkCredentials.clientId" class="input input-bordered input-sm h-9 w-full text-xs" placeholder="dingxxxxxxxxxxxxxxxx" />
+                    <input v-model="dingtalkCredentials.clientId" class="input input-bordered input-sm h-9 w-full text-xs" placeholder="dingxxxxxxxxxxxx" />
                   </div>
                   <div>
                     <label class="text-caption opacity-60">{{ t("config.remoteIm.dingtalkClientSecret") }}</label>
-                    <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-1.5">
                       <input
                         v-model="dingtalkCredentials.clientSecret"
                         :type="showDingtalkSecret ? 'text' : 'password'"
@@ -196,191 +193,452 @@
                 />
               </div>
             </template>
-          </div>
-        </div>
 
-        <!-- 区块二：联系人列表（直接一张一张列出，去除外层大卡片包裹） -->
-        <div class="space-y-3 pt-2">
-          <div class="flex flex-col gap-3 px-1 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div class="flex shrink-0 items-center gap-2">
-              <Users class="h-4 w-4 opacity-70" />
-              <span class="text-xs font-semibold uppercase tracking-wider opacity-80">{{ t("config.remoteIm.contactsTitle") }}</span>
-              <span class="badge badge-sm badge-neutral">{{ currentChannelContacts.length }}</span>
-            </div>
-
-            <!-- 联系人过滤搜索框 -->
-            <div class="relative w-full min-w-0 sm:w-60 sm:min-w-60 sm:flex-none">
-              <input
-                v-model="contactSearchQuery"
-                type="text"
-                class="input input-bordered input-sm h-9 w-full pl-8 pr-8 text-xs"
-                :placeholder="t('config.remoteIm.contactsSearchPlaceholder')"
-              />
-              <Search class="absolute left-2.5 top-2.5 h-4 w-4 opacity-50 pointer-events-none" />
+            <!-- 折叠卡底部：左侧删除渠道，右侧保存渠道 -->
+            <div class="flex items-center justify-between pt-3 border-t border-base-200">
               <button
-                v-if="contactSearchQuery"
+                class="btn btn-sm btn-ghost text-error gap-1.5 px-3 hover:bg-error/10"
                 type="button"
-                class="btn btn-ghost btn-xs btn-circle absolute right-1 top-1 h-7 w-7 min-h-[1.75rem] opacity-60 hover:opacity-100"
-                @click="contactSearchQuery = ''"
+                :disabled="saving || isChannelOperationBusy(selectedChannel.id)"
+                @click="deleteSelectedChannel"
               >
-                ✕
+                <Trash2 class="h-3.5 w-3.5" />
+                <span>{{ t("config.remoteIm.deleteChannel") || t("common.delete") }}</span>
+              </button>
+
+              <button
+                v-if="channelDirty"
+                class="btn btn-sm btn-primary gap-1.5 px-4"
+                type="button"
+                :disabled="saving || isChannelOperationBusy(selectedChannel.id)"
+                @click="saveChannels"
+              >
+                <span v-if="saving" class="loading loading-spinner loading-xs"></span>
+                <Save v-else class="h-3.5 w-3.5" />
+                <span>{{ t("common.save") }}</span>
               </button>
             </div>
           </div>
+        </details>
 
-          <div v-if="contactsDisabledReason" class="rounded-box px-4 py-2.5 text-xs text-warning bg-warning/10 border border-warning/20 break-all whitespace-pre-wrap" style="overflow-wrap:anywhere">
-            {{ contactsDisabledReason }}
-          </div>
-
-          <div v-if="contactsError" class="rounded-box px-4 py-3 text-xs text-error bg-error/10 border border-error/20 break-all whitespace-pre-wrap" style="overflow-wrap:anywhere">
-            {{ contactsError }}
-          </div>
-          <div v-else-if="currentChannelContacts.length === 0" class="rounded-box border border-dashed border-base-300 py-12 text-center text-xs opacity-60 italic">
-            {{ t("config.remoteIm.contactsEmpty") }}
-          </div>
-          <div v-else class="space-y-4">
-            <div v-for="group in groupedContacts" :key="group.mode" class="space-y-2">
-              <div class="text-xs font-bold text-base-content/70 px-1 flex items-center gap-1.5">
-                <span>{{ group.label }}</span>
-                <span class="badge badge-ghost badge-xs">{{ group.items.length }}</span>
-              </div>
-              <div class="space-y-2">
-                <div
-                  v-for="item in group.items"
-                  :key="item.id"
-                  class="rounded-box border border-base-300 bg-base-100 p-3.5 hover:border-base-300 hover:bg-base-200/30 transition-all flex items-start gap-3.5"
+        <!-- 区块二：联系人两栏通讯录（左侧手风琴分组折叠树 + 右侧详细设置面板） -->
+        <div class="flex-1 min-h-0 flex flex-col md:flex-row gap-3 overflow-hidden">
+          <!-- 左侧：分组折叠通讯录 -->
+          <div
+            class="w-full md:w-80 shrink-0 rounded-box border border-base-300 bg-base-100 flex-col overflow-hidden h-full min-h-0"
+            :class="{ 'hidden md:flex': mobileShowDetail, 'flex': !mobileShowDetail }"
+          >
+            <!-- 顶部搜索与操作栏 -->
+            <div class="p-2.5 border-b border-base-300 flex flex-col gap-2 shrink-0 bg-base-200/30">
+              <div class="flex items-center gap-1.5">
+                <div class="relative flex-1 min-w-0">
+                  <input
+                    v-model="contactSearchQuery"
+                    type="text"
+                    class="input input-bordered input-sm h-8 w-full pl-7 pr-7 text-xs"
+                    :placeholder="t('config.remoteIm.contactsSearchPlaceholder')"
+                  />
+                  <Search class="absolute left-2 top-2 h-3.5 w-3.5 opacity-50 pointer-events-none" />
+                  <button
+                    v-if="contactSearchQuery"
+                    type="button"
+                    class="btn btn-ghost btn-xs btn-circle absolute right-0.5 top-0.5 h-7 w-7 min-h-0 opacity-60 hover:opacity-100"
+                    @click="contactSearchQuery = ''"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm btn-square h-8 w-8 min-h-0 shrink-0"
+                  :title="t('config.remoteIm.contactGroupCreateTitle')"
+                  @click="startContactGroupCreate"
                 >
-                  <div class="avatar placeholder shrink-0">
-                    <div class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-base-300 bg-base-200 text-xs font-semibold leading-none text-base-content/70">
-                      <img v-if="contactAvatarUrl(item)" :src="contactAvatarUrl(item)" :alt="contactSafeDisplayName(item)" class="block h-full w-full object-cover" />
-                      <span v-else>{{ contactAvatarFallbackText(item) }}</span>
-                    </div>
-                  </div>
+                  <Plus class="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm btn-square h-8 w-8 min-h-0 shrink-0"
+                  :title="t('config.remoteIm.batchSettingsTitle')"
+                  :disabled="currentChannelContacts.length === 0"
+                  @click="openBatchSettingsWizard"
+                >
+                  <UserCog class="h-4 w-4" />
+                </button>
+              </div>
 
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="min-w-0 flex-1 truncate font-semibold text-sm">
-                        <span class="font-normal opacity-60 text-xs">[{{ contactAgentLabel(item) }}]</span>
-                        {{ " " }}
-                        {{ contactSafeDisplayName(item) }}
-                        <span class="text-xs font-normal opacity-50">（{{ contactSecondaryText(item) }}）</span>
-                      </div>
+              <!-- 联系人类型单选分段切换：群聊 / 私聊（仅当存在群聊联系人时提供） -->
+              <div v-if="hasGroupContacts" class="tabs tabs-box bg-base-200/70 p-0.5 rounded-lg flex text-xs">
+                <button
+                  type="button"
+                  class="tab tab-xs flex-1 transition-all rounded-md font-medium h-6"
+                  :class="contactTypeFilter === 'group' ? 'tab-active bg-base-100 shadow-xs text-base-content' : 'text-base-content/60'"
+                  @click="setContactTypeFilter('group')"
+                >
+                  {{ t("config.remoteIm.group") }}
+                </button>
+                <button
+                  type="button"
+                  class="tab tab-xs flex-1 transition-all rounded-md font-medium h-6"
+                  :class="contactTypeFilter === 'private' ? 'tab-active bg-base-100 shadow-xs text-base-content' : 'text-base-content/60'"
+                  @click="setContactTypeFilter('private')"
+                >
+                  {{ t("config.remoteIm.private") }}
+                </button>
+              </div>
 
-                      <!-- 权限与通信操作栏 -->
-                      <div class="flex shrink-0 items-center gap-1.5">
-                        <input
-                          type="checkbox"
-                          class="toggle toggle-sm"
-                          :class="contactCommunicationToggleClass(item)"
-                          :checked="contactCommunicationToggleEnabled(item)"
-                          :disabled="contactsDisabled"
-                          :title="`${t('config.remoteIm.allowReceive')} / ${t('config.remoteIm.allowSend')}`"
-                          @click.stop
-                          @change="toggleContactCommunication(item, ($event.target as HTMLInputElement).checked)"
-                        />
-                        <button
-                          class="btn btn-ghost btn-circle h-8 w-8 min-h-[2rem]"
-                          :title="t('config.remoteIm.viewLogs')"
-                          @click.stop="openContactLogsModal(item.id)"
-                        >
-                          <ScrollText class="h-4 w-4" />
-                        </button>
-                        <button
-                          class="btn btn-ghost btn-circle h-8 w-8 min-h-[2rem]"
-                          :title="t('config.remoteIm.channelDetails')"
-                          :disabled="contactsDisabled"
-                          @click.stop="openContactConfigModal(item.id)"
-                        >
-                          <Settings class="h-4 w-4" />
-                        </button>
-                        <button
-                          class="btn btn-ghost btn-circle h-8 w-8 min-h-[2rem]"
-                          :title="t('common.copy')"
-                          :disabled="contactsDisabled || isContactOperationBusy(item.id)"
-                          @click.stop="copyContactSettings(item)"
-                        >
-                          <Copy class="h-4 w-4" />
-                        </button>
-                        <button
-                          class="btn btn-ghost btn-circle h-8 w-8 min-h-[2rem]"
-                          :title="t('common.paste')"
-                          :disabled="contactsDisabled || isContactOperationBusy(item.id) || !contactSettingsClipboard"
-                          @click.stop="pasteContactSettings(item)"
-                        >
-                          <ClipboardPaste class="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
+              <!-- 分组创建/重命名编辑行 -->
+              <div v-if="contactGroupEditMode" class="flex items-center gap-1">
+                <input
+                  v-model="contactGroupNameDraft"
+                  type="text"
+                  class="input input-bordered input-sm h-7 min-w-0 flex-1 text-xs"
+                  :placeholder="t('config.remoteIm.contactGroupNamePlaceholder')"
+                  :disabled="contactGroupBusy"
+                  @keydown.enter.prevent="submitContactGroupEdit"
+                  @keydown.esc.prevent="cancelContactGroupEdit"
+                />
+                <button
+                  type="button"
+                  class="btn btn-primary btn-xs h-7 min-h-0 px-2"
+                  :disabled="contactGroupBusy"
+                  @click="submitContactGroupEdit"
+                >
+                  <span v-if="contactGroupBusy" class="loading loading-spinner loading-xs"></span>
+                  <Check v-else class="h-3 w-3" />
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-xs h-7 min-h-0 px-2"
+                  :disabled="contactGroupBusy"
+                  @click="cancelContactGroupEdit"
+                >
+                  <X class="h-3 w-3" />
+                </button>
+              </div>
+              <p
+                v-if="contactGroupError"
+                class="text-caption text-error break-all whitespace-pre-wrap"
+              >
+                {{ contactGroupError }}
+              </p>
+            </div>
 
-                    <!-- 标签徽章栏 -->
-                    <div class="mt-2 flex flex-wrap gap-1.5 overflow-visible whitespace-nowrap text-xs">
-                      <span class="badge badge-sm shrink-0" :class="item.remoteContactType === 'group' ? 'badge-secondary' : 'badge-primary'">
-                        {{ item.remoteContactType === "group" ? t("config.remoteIm.group") : t("config.remoteIm.private") }}
-                      </span>
-                      <div>
-                        <button
-                          type="button"
-                          class="badge badge-sm shrink-0 gap-1.5 transition-colors"
-                          :class="contactActivationBadgeClass(item)"
-                          :title="contactActivationHintText(item)"
-                          :disabled="contactsDisabled || isContactOperationBusy(item.id)"
-                          @click.stop="openContactPillMenu($event, item, 'activation')"
-                        >
-                          {{ contactActivationModeLabel(item) }}
-                          <ChevronUp class="h-3.5 w-3.5 opacity-70" />
-                        </button>
-                      </div>
-                      <span
-                        v-if="contactKeywordModeMissingKeywords(item)"
-                        class="badge badge-sm badge-warning shrink-0 gap-1.5"
-                        :title="t('config.remoteIm.keywordMissingHint')"
+            <!-- 分组折叠树列表（DaisyUI menu 规范组件） -->
+            <OverlayScrollArea class="flex-1 min-h-0 h-full overflow-hidden" scroller-class="h-full p-1.5 overflow-x-hidden">
+              <div v-if="contactsError" class="rounded-box p-3 text-xs text-error bg-error/10 border border-error/20 m-2">
+                {{ contactsError }}
+              </div>
+              <div v-else-if="currentChannelContacts.length === 0" class="py-12 text-center text-xs opacity-50 italic">
+                {{ t("config.remoteIm.contactsEmpty") }}
+              </div>
+              <ul v-else class="menu w-full min-w-0 max-w-full p-1 overflow-x-hidden">
+                <li v-for="entry in contactGroupNavEntries" :key="entry.key" class="w-full min-w-0 max-w-full overflow-hidden">
+                  <details :open="isGroupExpanded(entry.key)" class="w-full min-w-0 max-w-full overflow-hidden">
+                    <summary
+                      class="group font-semibold text-sm flex items-center justify-between h-8 min-h-[32px] py-0 px-2 rounded-lg hover:bg-base-200/50 cursor-pointer w-full min-w-0 max-w-full overflow-hidden"
+                      @click.prevent="toggleGroup(entry.key)"
+                    >
+                      <span class="truncate flex-1 min-w-0">{{ entry.name }}</span>
+                      <div
+                        v-if="entry.group"
+                        class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 mr-1 shrink-0"
+                        @click.stop
                       >
-                        <AlertTriangle class="h-3.5 w-3.5" />
-                        {{ t('config.remoteIm.keywordEmpty') }}
-                      </span>
-                      <div>
                         <button
                           type="button"
-                          class="badge badge-sm shrink-0 gap-1.5 transition-colors"
-                          :class="contactProcessingModeBadgeClass(item)"
-                          :title="processingModeHintText(item)"
-                          :disabled="contactsDisabled || isContactOperationBusy(item.id)"
-                          @click.stop="openContactPillMenu($event, item, 'processing')"
+                          class="btn btn-ghost btn-xs btn-circle h-6 w-6 min-h-0 p-0"
+                          :title="t('config.remoteIm.contactGroupRenameTitle')"
+                          @click.stop="startContactGroupRename(entry.group)"
                         >
-                          {{ contactProcessingModeLabel(item) }}
-                          <ChevronUp class="h-3.5 w-3.5 opacity-70" />
+                          <Pencil class="h-3 w-3" />
                         </button>
-                      </div>
-                      <div v-if="!isPrivateContact(item)">
                         <button
                           type="button"
-                          class="badge badge-sm shrink-0 gap-1.5"
-                          :class="contactResponseStrategy(item) === 'smart_judge' ? 'badge-accent' : 'badge-ghost'"
-                          :title="contactResponseStrategyHintText(item)"
-                          :disabled="contactsDisabled || isContactOperationBusy(item.id) || isPrivateContact(item)"
-                          @click.stop="!isPrivateContact(item) && openContactPillMenu($event, item, 'response')"
+                          class="btn btn-ghost btn-xs btn-circle h-6 w-6 min-h-0 p-0 text-error"
+                          :title="t('config.remoteIm.contactGroupDeleteTitle')"
+                          @click.stop="deleteContactGroup(entry.group)"
                         >
-                          {{ contactResponseStrategyLabel(item) }}
-                          <ChevronUp class="h-3.5 w-3.5 opacity-70" />
+                          <Trash2 class="h-3 w-3" />
                         </button>
                       </div>
-                      <div>
-                        <button
-                          type="button"
-                          class="badge badge-sm shrink-0 gap-1.5"
-                          :class="item.allowSendFiles ? 'badge-warning' : 'badge-ghost'"
-                          :title="t('config.remoteIm.allowSendFiles')"
-                          :disabled="contactsDisabled || isContactOperationBusy(item.id)"
-                          @click.stop="openContactPillMenu($event, item, 'files')"
+                    </summary>
+
+                    <ul class="w-full min-w-0 max-w-full overflow-hidden">
+                      <li v-if="contactsInGroup(entry.key).length === 0">
+                        <span class="text-xs opacity-40 italic">{{ t("config.remoteIm.contactGroupEmpty") }}</span>
+                      </li>
+                      <li v-for="item in contactsInGroup(entry.key)" :key="item.id" class="w-full min-w-0 max-w-full overflow-hidden">
+                        <a
+                          class="w-full min-w-0 max-w-full overflow-hidden py-1.5"
+                          :class="{ 'menu-active': item.id === selectedContactId, active: item.id === selectedContactId }"
+                          @click="selectContact(item, true)"
                         >
-                          {{ contactSendFilesLabel(item) }}
-                          <ChevronUp class="h-3.5 w-3.5 opacity-70" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                          <Users v-if="item.remoteContactType === 'group'" class="h-4 w-4 shrink-0" />
+                          <User v-else class="h-4 w-4 shrink-0" />
+                          <div class="min-w-0 flex-1 overflow-hidden">
+                            <div class="truncate text-xs font-medium leading-snug">
+                              {{ contactSafeDisplayName(item) }}
+                            </div>
+                            <div class="truncate text-caption opacity-60 leading-tight">
+                              <span>{{ contactAgentLabel(item) }}</span>
+                              <template v-if="contactSecondaryText(item)">
+                                <span class="opacity-40"> · </span>
+                                <span>{{ contactSecondaryText(item) }}</span>
+                              </template>
+                            </div>
+                          </div>
+                        </a>
+                      </li>
+                    </ul>
+                  </details>
+                </li>
+              </ul>
+            </OverlayScrollArea>
+          </div>
+
+          <!-- 右侧：联系人详细设置面板 -->
+          <div
+            class="flex-1 min-w-0 min-h-0 rounded-box border border-base-300 bg-base-100 flex-col overflow-hidden h-full flex"
+            :class="{ 'flex': mobileShowDetail, 'hidden md:flex': !mobileShowDetail }"
+          >
+            <template v-if="selectedContact && contactDraft">
+              <!-- 顶部单行资料卡与操作栏 -->
+              <div class="px-3 py-2 border-b border-base-300 bg-base-200/20 flex items-center justify-between gap-2 shrink-0 min-h-[44px]">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
+                  <!-- 手机端返回按钮 -->
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs btn-circle md:hidden shrink-0"
+                    :title="t('common.back')"
+                    @click="mobileShowDetail = false"
+                  >
+                    <ChevronLeft class="h-4 w-4" />
+                  </button>
+                  <!-- 群名 / 联系人名：自动压缩截断，不挤压右侧按钮 -->
+                  <span
+                    class="text-xs font-semibold truncate min-w-0 flex-1"
+                    :title="contactSafeDisplayName(selectedContact)"
+                  >
+                    {{ contactSafeDisplayName(selectedContact) }}
+                  </span>
+                </div>
+
+                <!-- 右侧快捷操作按钮区 (shrink-0) -->
+                <div class="flex items-center gap-1 shrink-0">
+                  <button
+                    class="btn btn-ghost btn-circle btn-sm"
+                    :title="t('config.remoteIm.viewLogs')"
+                    @click="openContactLogsModal(selectedContact.id)"
+                  >
+                    <ScrollText class="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    class="btn btn-ghost btn-circle btn-sm"
+                    :title="t('common.copy')"
+                    :disabled="isContactOperationBusy(selectedContact.id)"
+                    @click="copyContactSettings(selectedContact)"
+                  >
+                    <Copy class="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    class="btn btn-ghost btn-circle btn-sm"
+                    :title="t('common.paste')"
+                    :disabled="isContactOperationBusy(selectedContact.id) || !contactSettingsClipboard"
+                    @click="pasteContactSettings(selectedContact)"
+                  >
+                    <ClipboardPaste class="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    class="btn btn-ghost btn-circle btn-sm text-error"
+                    :title="t('common.delete')"
+                    :disabled="contactSaving || contactDeleting"
+                    @click="deleteContact(selectedContact)"
+                  >
+                    <Trash2 class="h-3.5 w-3.5" />
+                  </button>
                 </div>
               </div>
+
+              <!-- 设置表单区 -->
+              <OverlayScrollArea class="flex-1 min-h-0 h-full overflow-hidden" scroller-class="h-full p-4 space-y-4">
+                <ul class="list gap-2.5">
+                  <!-- 好友分组切换（如 QQ/微信的好友分组） -->
+                  <li class="list-row flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-base-200/30">
+                    <div class="font-medium text-xs">{{ t("config.remoteIm.contactGroups") }}</div>
+                    <div class="w-64 max-w-full">
+                      <select
+                        class="select select-bordered select-sm w-full text-xs"
+                        :value="contactGroupIdOf(selectedContact)"
+                        @change="moveContactToGroupDirect(selectedContact, ($event.target as HTMLSelectElement).value)"
+                      >
+                        <option value="">{{ t("config.remoteIm.contactGroupUngrouped") }}</option>
+                        <option v-for="g in currentChannelGroups" :key="g.id" :value="g.id">{{ g.name }}</option>
+                      </select>
+                    </div>
+                  </li>
+
+                  <!-- 处理人格 -->
+                  <li class="list-row flex items-start justify-between gap-3 p-2 rounded-lg hover:bg-base-200/30">
+                    <div class="font-medium text-xs pt-1">{{ t("config.remoteIm.processingAgent") }}</div>
+                    <div class="w-64 max-w-full">
+                      <AgentPersonaSelect
+                        v-model:agent-id="contactDraft.boundAgentId"
+                        :personas="personas"
+                        :persona-avatar-url-map="personaAvatarUrlMap"
+                        :api-configs="config.apiConfigs"
+                        :expert-api-config-id="config.expertApiConfigId"
+                        :tool-review-api-config-id="config.toolReviewApiConfigId"
+                        :placeholder="t('config.remoteIm.processingAgentPlaceholder')"
+                        :show-model="false"
+                      />
+                    </div>
+                  </li>
+
+                  <!-- 首选模型（独立平级，ApiConfigPicker 标准组件） -->
+                  <li class="list-row flex items-start justify-between gap-3 p-2 rounded-lg hover:bg-base-200/30">
+                    <div class="font-medium text-xs pt-1">{{ t("config.remoteIm.preferredModel") }}</div>
+                    <div class="w-64 max-w-full">
+                      <ApiConfigPicker
+                        :model-value="contactConversationModel.preferredApiConfigId"
+                        :api-configs="config.apiConfigs"
+                        :placeholder="t('config.remoteIm.preferredModelUnset')"
+                        @update:model-value="onContactConversationModelChange"
+                      />
+                    </div>
+                  </li>
+
+                  <!-- 处理模式 -->
+                  <li class="list-row flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-base-200/30">
+                    <div class="font-medium text-xs">{{ t("config.remoteIm.processingMode") }}</div>
+                    <div class="w-64 max-w-full">
+                      <select
+                        class="select select-bordered select-sm w-full text-xs"
+                        v-model="contactDraft.processingMode"
+                      >
+                        <option value="continuous">{{ t("config.remoteIm.processingModeContinuous") }}</option>
+                        <option value="qa">{{ t("config.remoteIm.processingModeQa") }}</option>
+                      </select>
+                    </div>
+                  </li>
+
+                  <!-- 触发时机 / 激活模式 -->
+                  <li class="list-row flex items-start justify-between gap-3 p-2 rounded-lg hover:bg-base-200/30">
+                    <div class="font-medium text-xs pt-1">{{ t("config.remoteIm.activateMode") }}</div>
+                    <div class="w-64 max-w-full space-y-2">
+                      <select
+                        class="select select-bordered select-sm w-full text-xs"
+                        v-model="contactDraft.activationMode"
+                      >
+                        <option
+                          v-for="option in contactActivationModeOptions(selectedContact)"
+                          :key="option.value"
+                          :value="option.value"
+                        >
+                          {{ option.label }}
+                        </option>
+                      </select>
+                      <input
+                        v-if="!isPrivateContact(selectedContact) && contactDraft.activationMode === 'keyword'"
+                        type="text"
+                        class="input input-bordered input-sm w-full text-xs"
+                        :placeholder="t('config.remoteIm.activateKeywordsPlaceholder')"
+                        v-model="contactDraft.activationKeywordsText"
+                      />
+                    </div>
+                  </li>
+
+                  <!-- 群聊响应策略 (非私聊显示) -->
+                  <li
+                    v-if="!isPrivateContact(selectedContact)"
+                    class="list-row flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-base-200/30"
+                  >
+                    <div class="font-medium text-xs">{{ t("config.remoteIm.responseStrategy") }}</div>
+                    <div class="w-64 max-w-full">
+                      <select
+                        class="select select-bordered select-sm w-full text-xs"
+                        v-model="contactDraft.responseStrategy"
+                      >
+                        <option value="always_reply">{{ t("config.remoteIm.responseStrategyAlways") }}</option>
+                        <option value="smart_judge">{{ t("config.remoteIm.responseStrategySmart") }}</option>
+                      </select>
+                    </div>
+                  </li>
+
+                  <!-- 允许发送文件 -->
+                  <li class="list-row flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-base-200/30">
+                    <div class="font-medium text-xs">{{ t("config.remoteIm.allowSendFiles") }}</div>
+                    <input
+                      type="checkbox"
+                      class="toggle toggle-sm toggle-primary"
+                      v-model="contactDraft.allowSendFiles"
+                    />
+                  </li>
+                </ul>
+
+                <!-- 工作目录配置：使用会话工作目录最新卡片设计 -->
+                <div class="pt-4 border-t border-base-200 space-y-2.5">
+                  <div class="flex items-center justify-between px-1">
+                    <div class="font-medium text-xs">{{ t("config.remoteIm.workspace") }}</div>
+                    <span class="text-caption opacity-50">{{ t("config.remoteIm.systemWorkspaceReadonly") }}</span>
+                  </div>
+                  <div class="rounded-xl border border-base-content/10 bg-base-200/20 p-3">
+                    <WorkspaceConfigCard
+                      :main-path="contactMainPath"
+                      :secondary-paths="contactSecondaryPaths"
+                      :access="contactUnifiedAccess"
+                      :available-workspaces="contactAvailableWorkspaces"
+                      @update:main-path="onContactMainPathUpdate"
+                      @update:access="onContactAccessUpdate"
+                      @add-secondary="onContactAddSecondary"
+                      @remove-secondary="onContactRemoveSecondary"
+                    />
+                  </div>
+                </div>
+              </OverlayScrollArea>
+
+              <!-- 底部操作栏（常驻面板）：左侧收信开关与修改标记，右侧还原与保存 -->
+              <div class="p-3 border-t border-base-300 bg-base-100 flex items-center justify-between gap-3 shrink-0">
+                <div class="flex items-center gap-2 min-w-0">
+                  <label class="label cursor-pointer gap-2 py-0 px-0">
+                    <input
+                      type="checkbox"
+                      class="toggle toggle-primary toggle-sm"
+                      :checked="contactCommunicationToggleEnabled(selectedContact)"
+                      :disabled="isContactOperationBusy(selectedContact.id)"
+                      @change="toggleContactCommunication(selectedContact, ($event.target as HTMLInputElement).checked)"
+                    />
+                    <span class="label-text text-xs font-medium">{{ t("config.remoteIm.allowReceive") || "允许收信" }}</span>
+                  </label>
+                  <span v-if="contactDraftDirty" class="text-warning text-xs font-medium shrink-0 ml-1">● {{ t("config.skill.modified") }}</span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <button
+                    class="btn btn-sm btn-ghost gap-1.5"
+                    :disabled="!contactDraftDirty || contactSaving"
+                    @click="resetContactDraft"
+                  >
+                    <RotateCcw class="h-3.5 w-3.5" />
+                    <span>{{ t("common.reset") }}</span>
+                  </button>
+                  <button
+                    class="btn btn-sm btn-primary gap-1.5 px-4"
+                    :disabled="!contactDraftDirty || contactSaving || contactDeleting"
+                    @click="saveContactDraft"
+                  >
+                    <span v-if="contactSaving" class="loading loading-spinner loading-xs"></span>
+                    <Save v-else class="h-3.5 w-3.5" />
+                    <span>{{ t("common.save") }}</span>
+                  </button>
+                </div>
+              </div>
+            </template>
+
+            <!-- 未选择联系人空状态 -->
+            <div v-else class="flex-1 flex flex-col items-center justify-center p-8 text-center opacity-50">
+              <Users class="h-12 w-12 stroke-[1.5] mb-2 opacity-40" />
+              <div class="text-sm font-medium">{{ t("config.remoteIm.contactsEmpty") || "请在左侧选择联系人" }}</div>
+              <div class="text-xs opacity-60 mt-1">点击联系人后即可在此处查看并修改详细设置</div>
             </div>
           </div>
         </div>
@@ -451,34 +709,6 @@
         </div>
       </div>
     </Transition>
-
-    <Teleport to="body">
-      <div
-        v-if="contactPillMenu"
-        class="fixed inset-0 z-9999"
-        @click="closeContactPillMenu"
-        @wheel.passive="closeContactPillMenu"
-      >
-        <ul
-          class="menu menu-sm fixed rounded-box border border-base-300 bg-base-100 p-1 text-sm shadow-xl"
-          :class="contactPillMenu.widthClass"
-          :style="{ left: `${contactPillMenu.left}px`, top: `${contactPillMenu.top}px` }"
-          @click.stop
-        >
-          <li v-for="option in contactPillMenu.options" :key="option.key">
-            <button
-              type="button"
-              class="leading-5"
-              :class="{ active: option.active }"
-              @click="selectContactPillMenuOption(option)"
-            >
-              {{ option.label }}
-            </button>
-          </li>
-        </ul>
-      </div>
-    </Teleport>
-
     <dialog ref="addChannelDialogRef" class="modal" @close="closeAddChannelModal" @cancel.prevent="closeAddChannelModal">
       <div class="modal-box max-w-md">
         <div class="flex items-center justify-between">
@@ -780,220 +1010,555 @@
       </form>
     </dialog>
 
-    <!-- 联系人配置模态框 -->
-    <dialog ref="contactConfigDialogRef" class="modal" @close="closeContactConfigModal" @cancel.prevent="closeContactConfigModal">
-      <div class="modal-box max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
-        <div class="flex items-center justify-between shrink-0">
-          <div class="font-semibold text-lg flex items-center gap-2">
-            <span class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#07c160] text-white text-sm font-bold">微</span>
-            <span>{{ t("config.remoteIm.contactSettingsTitle", { name: contactModalTitle }) }}</span>
-          </div>
-          <button class="btn btn-sm btn-circle btn-ghost" @click="closeContactConfigModal">
-            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+    <!-- 分组批量设置向导 -->
+    <dialog
+      ref="batchSettingsDialogRef"
+      class="modal"
+      @close="closeBatchSettingsWizard"
+      @cancel.prevent="closeBatchSettingsWizard"
+    >
+      <div class="modal-box max-w-xl flex flex-col h-[80vh] max-h-[85vh] p-6 overflow-hidden">
+        <!-- 顶部 Header（标题与关闭按钮同行展示） -->
+        <div class="flex items-center justify-between shrink-0 mb-1">
+          <h3 class="font-bold text-base">{{ t("config.remoteIm.batchSettingsTitle") }}</h3>
+          <button
+            class="btn btn-sm btn-circle btn-ghost -mr-2"
+            type="button"
+            @click="closeBatchSettingsWizard"
+          >
+            ✕
           </button>
         </div>
 
-        <div v-if="selectedContact && contactDraft" class="mt-4 flex-1 min-h-0 overflow-hidden flex flex-col">
-          <div class="flex-1 overflow-y-auto">
-            <ul class="list gap-2">
-              <li class="list-row flex items-start justify-between gap-3">
-                <div class="font-medium">{{ t("config.remoteIm.processingAgent") }}</div>
-                <div class="flex w-[28rem] max-w-full flex-col gap-1">
-                  <AgentPersonaSelect
-                    v-model:agent-id="contactDraft.boundAgentId"
-                    :api-config-id="contactConversationModel.preferredApiConfigId"
-                    :personas="personas"
-                    :persona-avatar-url-map="personaAvatarUrlMap"
-                    :api-configs="config.apiConfigs"
-                    :expert-api-config-id="config.expertApiConfigId"
-                    :tool-review-api-config-id="config.toolReviewApiConfigId"
-                    :placeholder="t('config.remoteIm.processingAgentPlaceholder')"
-                    :show-model="true"
-                    :disabled="contactsDisabled"
-                    :model-disabled="!contactConversationModel.conversationExists"
-                    @update:api-config-id="onContactConversationModelChange"
-                  />
-                  <span class="text-xs opacity-60">{{ contactDraftRoutingHint }}</span>
-                </div>
-              </li>
-
-              <li class="list-row flex items-start justify-between gap-3">
-                <div class="font-medium">{{ t("config.remoteIm.processingMode") }}</div>
-                <div class="flex w-64 flex-col gap-1">
-                  <select
-                    class="select select-bordered select-sm w-full"
-                    v-model="contactDraft.processingMode"
-                  >
-                    <option value="continuous">{{ t("config.remoteIm.processingModeContinuous") }}</option>
-                    <option value="qa">{{ t("config.remoteIm.processingModeQa") }}</option>
-                  </select>
-                  <span class="text-xs opacity-60">{{ contactDraftProcessingHint }}</span>
-                </div>
-              </li>
-
-              <li v-if="selectedContact" class="list-row flex items-start justify-between gap-3">
-                <div class="font-medium">{{ t("config.remoteIm.activateMode") }}</div>
-                <div class="flex w-64 flex-col gap-2">
-                  <select
-                    class="select select-bordered select-sm w-full"
-                    v-model="contactDraft.activationMode"
-                  >
-                    <option
-                      v-for="option in contactActivationModeOptions(selectedContact)"
-                      :key="option.value"
-                      :value="option.value"
-                    >
-                      {{ option.label }}
-                    </option>
-                  </select>
-                  <span class="text-xs opacity-60">{{ contactDraftActivationHint }}</span>
-                  <input
-                    v-if="!isPrivateContact(selectedContact) && contactDraft.activationMode === 'keyword'"
-                    type="text"
-                    class="input input-bordered input-sm w-full"
-                    :placeholder="t('config.remoteIm.activateKeywordsPlaceholder')"
-                    v-model="contactDraft.activationKeywordsText"
-                  />
-                </div>
-              </li>
-
-              <li
-                v-if="selectedContact && !isPrivateContact(selectedContact)"
-                class="list-row flex items-start justify-between gap-3"
+        <!-- 面包屑步骤导航（简洁纯粹，上下无多余分割线） -->
+        <div v-if="batchSettingsWizard" class="breadcrumbs text-xs shrink-0 py-2 text-base-content/70">
+          <ul>
+            <li>
+              <a
+                v-if="batchSettingsWizard.step > 1 && !batchSettingsWizard.executing"
+                class="cursor-pointer opacity-70 hover:opacity-100 hover:text-primary transition-colors"
+                @click.prevent="batchSettingsWizard.step = 1"
               >
-                <div class="font-medium">{{ t("config.remoteIm.responseStrategy") }}</div>
-                <div class="flex w-64 flex-col gap-2">
-                  <select
-                    class="select select-bordered select-sm w-full"
-                    v-model="contactDraft.responseStrategy"
-                  >
-                    <option value="always_reply">{{ t("config.remoteIm.responseStrategyAlways") }}</option>
-                    <option value="smart_judge">{{ t("config.remoteIm.responseStrategySmart") }}</option>
-                  </select>
-                  <span class="text-xs opacity-60">{{ contactDraftResponseStrategyHint }}</span>
-                </div>
-              </li>
+                {{ t("config.remoteIm.batchStepFields") }}
+              </a>
+              <span v-else :class="batchSettingsWizard.step === 1 ? 'font-bold text-primary' : 'opacity-40'">
+                {{ t("config.remoteIm.batchStepFields") }}
+              </span>
+            </li>
+            <li>
+              <a
+                v-if="batchSettingsWizard.step > 2 && !batchSettingsWizard.executing"
+                class="cursor-pointer opacity-70 hover:opacity-100 hover:text-primary transition-colors"
+                @click.prevent="batchSettingsWizard.step = 2"
+              >
+                {{ t("config.remoteIm.batchStepContacts") }}
+              </a>
+              <span v-else :class="batchSettingsWizard.step === 2 ? 'font-bold text-primary' : 'opacity-40'">
+                {{ t("config.remoteIm.batchStepContacts") }}
+              </span>
+            </li>
+            <li>
+              <a
+                v-if="batchSettingsWizard.step > 3 && !batchSettingsWizard.executing"
+                class="cursor-pointer opacity-70 hover:opacity-100 hover:text-primary transition-colors"
+                @click.prevent="batchSettingsWizard.step = 3"
+              >
+                {{ t("config.remoteIm.batchStepPreview") }}
+              </a>
+              <span v-else :class="batchSettingsWizard.step === 3 ? 'font-bold text-primary' : 'opacity-40'">
+                {{ t("config.remoteIm.batchStepPreview") }}
+              </span>
+            </li>
+            <li>
+              <span :class="batchSettingsWizard.step === 4 ? 'font-bold text-primary' : 'opacity-40'">
+                {{ t("config.remoteIm.batchStepResult") }}
+              </span>
+            </li>
+          </ul>
+        </div>
 
-              <li class="list-row flex items-center justify-between gap-3">
-                <div class="font-medium">{{ t("config.remoteIm.allowSendFiles") }}</div>
+        <!-- 中间独立滚动区（严格锁定高度，内容溢出时在内部滚动） -->
+        <OverlayScrollArea
+          v-if="batchSettingsWizard"
+          class="flex-1 min-h-0 h-full overflow-hidden"
+          scroller-class="h-full pr-1"
+        >
+          <div
+            v-if="batchSettingsWizard.error"
+            class="alert alert-error mb-3 py-2 text-xs break-all"
+          >
+            {{ batchSettingsWizard.error }}
+          </div>
+
+          <!-- 第一步：选择要批量设置的项（所有项严格统一结构：左侧复选框，右侧同宽控件，未勾选禁用展示） -->
+          <div v-if="batchSettingsWizard.step === 1" class="flex flex-col">
+            <!-- 处理人格 -->
+            <div class="border-b-base-content/10 flex items-center justify-between gap-3 border-b border-dashed py-3 last:border-b-0">
+              <label class="flex cursor-pointer items-center gap-2.5 select-none">
                 <input
                   type="checkbox"
-                  class="toggle toggle-sm toggle-primary"
-                  v-model="contactDraft.allowSendFiles"
+                  class="checkbox checkbox-sm"
+                  :checked="batchSettingsWizard.fields.agent"
+                  @change="batchWizardToggleField('agent', ($event.target as HTMLInputElement).checked)"
                 />
-              </li>
-            </ul>
+                <span class="text-xs font-medium">{{ t("config.remoteIm.processingAgent") }}</span>
+              </label>
+              <div class="w-56 max-w-full shrink-0">
+                <AgentPersonaSelect
+                  v-model:agent-id="batchSettingsWizard.agentId"
+                  :personas="personas"
+                  :persona-avatar-url-map="personaAvatarUrlMap"
+                  :api-configs="config.apiConfigs"
+                  :expert-api-config-id="config.expertApiConfigId"
+                  :tool-review-api-config-id="config.toolReviewApiConfigId"
+                  :placeholder="t('config.remoteIm.processingAgentPlaceholder')"
+                  :show-model="false"
+                  :disabled="!batchSettingsWizard.fields.agent"
+                  size="sm"
+                />
+              </div>
+            </div>
 
-              <!-- 工作目录配置 -->
-              <li class="list-row flex flex-col gap-2 pt-3 mt-2 border-t border-base-300">
-                <div class="flex items-center justify-between">
-                  <div class="font-medium">{{ t("config.remoteIm.workspace") }}</div>
-                  <span class="text-xs opacity-50">{{ t("config.remoteIm.systemWorkspaceReadonly") }}</span>
-                </div>
-                <div
-                  v-if="contactDraft.shellWorkspaces.length === 0"
-                  class="rounded-box border border-dashed border-base-300 bg-base-200/20 px-3 py-4 text-center text-xs opacity-60"
+            <!-- 首选模型（独立项） -->
+            <div class="border-b-base-content/10 flex items-center justify-between gap-3 border-b border-dashed py-3 last:border-b-0">
+              <label class="flex cursor-pointer items-center gap-2.5 select-none">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  :checked="batchSettingsWizard.fields.model"
+                  @change="batchWizardToggleField('model', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="text-xs font-medium">{{ t("config.remoteIm.preferredModel") }}</span>
+              </label>
+              <ApiConfigPicker
+                class="w-56 max-w-full shrink-0"
+                size="sm"
+                :model-value="batchSettingsWizard.preferredApiConfigId"
+                :api-configs="config.apiConfigs"
+                :placeholder="t('config.remoteIm.preferredModelUnset')"
+                :disabled="!batchSettingsWizard.fields.model"
+                @update:model-value="(val: string) => { if (batchSettingsWizard) batchSettingsWizard.preferredApiConfigId = val; }"
+              />
+            </div>
+
+            <!-- 处理模式 -->
+            <div class="border-b-base-content/10 flex items-center justify-between gap-3 border-b border-dashed py-3 last:border-b-0">
+              <label class="flex cursor-pointer items-center gap-2.5 select-none">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  :checked="batchSettingsWizard.fields.processingMode"
+                  @change="batchWizardToggleField('processingMode', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="text-xs font-medium">{{ t("config.remoteIm.processingMode") }}</span>
+              </label>
+              <select
+                v-model="batchSettingsWizard.processingMode"
+                class="select select-bordered select-sm text-xs w-56 shrink-0"
+                :disabled="!batchSettingsWizard.fields.processingMode"
+              >
+                <option value="continuous">{{ t("config.remoteIm.processingModeContinuous") }}</option>
+                <option value="qa">{{ t("config.remoteIm.processingModeQa") }}</option>
+              </select>
+            </div>
+
+            <!-- 入场时机 -->
+            <div class="border-b-base-content/10 flex flex-col border-b border-dashed py-3 last:border-b-0">
+              <div class="flex items-center justify-between gap-3">
+                <label class="flex cursor-pointer items-center gap-2.5 select-none">
+                  <input
+                    type="checkbox"
+                    class="checkbox checkbox-sm"
+                    :checked="batchSettingsWizard.fields.activation"
+                    @change="batchWizardToggleField('activation', ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span class="text-xs font-medium">{{ t("config.remoteIm.activateMode") }}</span>
+                </label>
+                <select
+                  v-model="batchSettingsWizard.activationMode"
+                  class="select select-bordered select-sm text-xs w-56 shrink-0"
+                  :disabled="!batchSettingsWizard.fields.activation"
                 >
-                  {{ t("config.remoteIm.noCustomWorkspace") }}
+                  <option value="always">{{ t("config.remoteIm.activateModeAlways") }}</option>
+                  <option value="keyword">{{ t("config.remoteIm.activateModeKeyword") }}</option>
+                  <option value="never">{{ t("config.remoteIm.activateModeNever") }}</option>
+                </select>
+              </div>
+              <div
+                v-if="batchSettingsWizard.fields.activation && batchSettingsWizard.activationMode === 'keyword'"
+                class="mt-2.5 pl-6.5"
+              >
+                <input
+                  v-model="batchSettingsWizard.activationKeywordsText"
+                  type="text"
+                  class="input input-bordered input-sm text-xs w-full"
+                  :placeholder="t('config.remoteIm.activateKeywordsPlaceholder')"
+                />
+              </div>
+            </div>
+
+            <!-- 应答策略 -->
+            <div class="border-b-base-content/10 flex items-center justify-between gap-3 border-b border-dashed py-3 last:border-b-0">
+              <label class="flex cursor-pointer items-center gap-2.5 select-none">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  :checked="batchSettingsWizard.fields.responseStrategy"
+                  @change="batchWizardToggleField('responseStrategy', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="text-xs font-medium">{{ t("config.remoteIm.responseStrategy") }}</span>
+              </label>
+              <select
+                v-model="batchSettingsWizard.responseStrategy"
+                class="select select-bordered select-sm text-xs w-56 shrink-0"
+                :disabled="!batchSettingsWizard.fields.responseStrategy"
+              >
+                <option value="always_reply">{{ t("config.remoteIm.responseStrategyAlways") }}</option>
+                <option value="smart_judge">{{ t("config.remoteIm.responseStrategySmart") }}</option>
+              </select>
+            </div>
+
+            <!-- 通信开关 -->
+            <div class="border-b-base-content/10 flex items-center justify-between gap-3 border-b border-dashed py-3 last:border-b-0">
+              <label class="flex cursor-pointer items-center gap-2.5 select-none">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  :checked="batchSettingsWizard.fields.communication"
+                  @change="batchWizardToggleField('communication', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="text-xs font-medium">{{ t("config.remoteIm.batchCommunicationLabel") }}</span>
+              </label>
+              <div class="flex items-center gap-4 shrink-0">
+                <label class="flex cursor-pointer items-center gap-2 select-none">
+                  <span class="text-xs opacity-80">{{ t("config.remoteIm.batchCommunicationToggle") }}</span>
+                  <input
+                    v-model="batchSettingsWizard.allowCommunication"
+                    type="checkbox"
+                    class="toggle toggle-primary toggle-sm"
+                    :disabled="!batchSettingsWizard.fields.communication"
+                  />
+                </label>
+                <label class="flex cursor-pointer items-center gap-2 select-none">
+                  <span class="text-xs opacity-80">{{ t("config.remoteIm.allowSendFiles") }}</span>
+                  <input
+                    v-model="batchSettingsWizard.allowSendFiles"
+                    type="checkbox"
+                    class="toggle toggle-primary toggle-sm"
+                    :disabled="!batchSettingsWizard.fields.communication"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <!-- 工作区权限 -->
+            <div class="border-b-base-content/10 flex items-center justify-between gap-3 border-b border-dashed py-3 last:border-b-0">
+              <label class="flex cursor-pointer items-center gap-2.5 select-none min-w-0">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  :checked="batchSettingsWizard.fields.workspaceAccess"
+                  @change="batchWizardToggleField('workspaceAccess', ($event.target as HTMLInputElement).checked)"
+                />
+                <div class="min-w-0">
+                  <div class="text-xs font-medium">{{ t("config.remoteIm.batchWorkspaceAccess") }}</div>
+                  <div class="text-caption opacity-50">{{ t("config.remoteIm.batchWorkspaceAccessHint") }}</div>
                 </div>
-                <div v-else class="divide-y divide-base-300">
-                  <div
-                    v-for="ws in contactDraft.shellWorkspaces"
-                    :key="ws.id"
-                    class="py-2 text-left"
-                    :title="ws.path"
+              </label>
+              <select
+                v-model="batchSettingsWizard.workspaceAccess"
+                class="select select-bordered select-sm text-xs w-56 shrink-0"
+                :disabled="!batchSettingsWizard.fields.workspaceAccess"
+              >
+                <option value="read_only">{{ t("config.tools.workspaceAccessReadOnly") }}</option>
+                <option value="approval">{{ t("config.tools.workspaceAccessApproval") }}</option>
+                <option value="full_access">{{ t("config.tools.workspaceAccessFullAccess") }}</option>
+              </select>
+            </div>
+
+            <!-- 移动到分组 -->
+            <div class="border-b-base-content/10 flex items-center justify-between gap-3 border-b border-dashed py-3 last:border-b-0">
+              <label class="flex cursor-pointer items-center gap-2.5 select-none">
+                <input
+                  type="checkbox"
+                  class="checkbox checkbox-sm"
+                  :checked="batchSettingsWizard.fields.group"
+                  @change="batchWizardToggleField('group', ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="text-xs font-medium">{{ t("config.remoteIm.batchMoveToGroup") }}</span>
+              </label>
+              <select
+                v-model="batchSettingsWizard.targetGroupId"
+                class="select select-bordered select-sm text-xs w-56 shrink-0"
+                :disabled="!batchSettingsWizard.fields.group"
+              >
+                <option value="">{{ t("config.remoteIm.contactGroupUngrouped") }}</option>
+                <option v-for="group in currentChannelGroups" :key="group.id" :value="group.id">
+                  {{ group.name }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 第二步：选择联系人（按分组罗列，支持折叠与三态勾选） -->
+          <template v-else-if="batchSettingsWizard.step === 2">
+            <div class="flex items-center justify-between gap-2 mb-3">
+              <div class="text-xs font-medium">
+                {{ t("config.remoteIm.batchSelectedCount", {
+                  selected: batchSettingsWizard.selectedContactIds.length,
+                  total: batchWizardScopedContacts.length
+                }) }}
+              </div>
+              <div class="flex items-center gap-2">
+                <div class="relative">
+                  <input
+                    v-model="batchSettingsWizard.contactSearchQuery"
+                    type="text"
+                    class="input input-bordered input-sm text-xs pl-8 w-44"
+                    :placeholder="t('config.remoteIm.contactsSearchPlaceholder')"
+                  />
+                  <Search class="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 opacity-40" />
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-xs text-xs"
+                  @click="batchWizardToggleAllContacts(true)"
+                >
+                  {{ t("config.remoteIm.batchSelectAll") }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-xs text-xs"
+                  @click="batchWizardToggleAllContacts(false)"
+                >
+                  {{ t("config.remoteIm.batchClearAll") }}
+                </button>
+              </div>
+            </div>
+
+            <div
+              v-if="batchWizardScopedContacts.length === 0"
+              class="py-12 text-center text-xs opacity-50"
+            >
+              {{ t("config.remoteIm.contactGroupEmpty") }}
+            </div>
+            <div v-else class="space-y-3">
+              <div
+                v-for="section in batchWizardContactSections"
+                :key="section.key"
+                class="rounded-box border border-base-300 bg-base-100 overflow-hidden"
+              >
+                <!-- 分组头部：点击整行折叠/展开，右边带三态勾选 Checkbox -->
+                <div
+                  class="flex items-center justify-between px-3 py-2 bg-base-200/50 cursor-pointer select-none"
+                  @click="batchWizardToggleGroupExpand(section.key)"
+                >
+                  <div class="flex items-center gap-2">
+                    <ChevronDown
+                      v-if="batchWizardIsGroupExpanded(section.key)"
+                      class="h-4 w-4 opacity-50"
+                    />
+                    <ChevronRight
+                      v-else
+                      class="h-4 w-4 opacity-50"
+                    />
+                    <span class="text-xs font-bold">{{ section.name }}</span>
+                  </div>
+
+                  <!-- 分组全选/全不选切换 -->
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-xs h-6 px-1.5"
+                    @click.stop="batchWizardToggleContactGroup(
+                      section.contacts,
+                      batchWizardGroupSelectionState(section.contacts) !== 'all',
+                    )"
                   >
-                    <div class="flex items-center gap-3">
-                      <div class="min-w-0 flex-1 text-left">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span class="inline-block w-40 truncate font-medium align-middle" :title="ws.path">{{ ws.name }}</span>
-                          <span v-if="ws.level === 'main'" class="badge badge-primary">
-                            {{ t("config.tools.workspaceLevelMain") }}
-                          </span>
-                          <span class="badge" :class="ws.access === 'full_access' ? 'badge-success' : ws.access === 'approval' ? 'badge-warning' : 'badge-ghost'">
-                            {{ ws.access === 'full_access' ? t("config.tools.workspaceAccessFullAccess") : ws.access === 'approval' ? t("config.tools.workspaceAccessApproval") : t("config.tools.workspaceAccessReadOnly") }}
-                          </span>
-                        </div>
-                      </div>
-                      <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                        <button
-                          v-if="ws.level !== 'main'"
-                          class="btn btn-xs btn-ghost"
-                          type="button"
-                          :title="t('config.tools.setWorkspaceAsMain')"
-                          @click="setContactWorkspaceMain(ws.id)"
-                        >
-                          <SquareTerminal class="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          v-else
-                          class="btn btn-xs btn-primary pointer-events-none opacity-100"
-                          type="button"
-                          aria-disabled="true"
-                          tabindex="-1"
-                          :title="t('config.tools.currentMainWorkspace')"
-                        >
-                          <SquareTerminal class="h-3.5 w-3.5" />
-                        </button>
-                        <select
-                          class="select select-sm select-bordered w-32"
-                          :value="ws.access"
-                          @change="updateContactWorkspaceAccess(ws.id, ($event.target as HTMLSelectElement).value as ShellWorkspace['access'])"
-                        >
-                          <option value="full_access">{{ t("config.tools.workspaceAccessFullAccess") }}</option>
-                          <option value="approval">{{ t("config.tools.workspaceAccessApproval") }}</option>
-                          <option value="read_only">{{ t("config.tools.workspaceAccessReadOnly") }}</option>
-                        </select>
-                        <button
-                          class="btn btn-sm btn-ghost text-error"
-                          type="button"
-                          :title="t('config.tools.delete')"
-                          @click="removeContactWorkspace(ws.id)"
-                        >
-                          <Trash2 class="h-4 w-4" />
-                        </button>
-                      </div>
+                    <span
+                      class="flex h-3.5 w-3.5 items-center justify-center rounded border transition"
+                      :class="batchWizardStateBoxClasses(batchWizardGroupSelectionState(section.contacts))"
+                    >
+                      <Check v-if="batchWizardGroupSelectionState(section.contacts) === 'all'" class="h-2.5 w-2.5" stroke-width="3" />
+                      <Minus v-else-if="batchWizardGroupSelectionState(section.contacts) === 'partial'" class="h-2.5 w-2.5" stroke-width="3" />
+                    </span>
+                  </button>
+                </div>
+
+                <!-- 分组内联系人列表 -->
+                <div
+                  v-if="batchWizardIsGroupExpanded(section.key)"
+                  class="divide-y divide-base-200"
+                >
+                  <label
+                    v-for="contact in section.contacts"
+                    :key="contact.id"
+                    class="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-base-200/40"
+                  >
+                    <input
+                      type="checkbox"
+                      class="checkbox checkbox-sm"
+                      :checked="batchSettingsWizard.selectedContactIds.includes(contact.id)"
+                      @change="batchWizardToggleContact(contact.id, ($event.target as HTMLInputElement).checked)"
+                    />
+                    <div class="flex-1 min-w-0 flex items-center gap-2 text-xs">
+                      <span class="badge badge-ghost badge-sm font-normal">
+                        {{ contactAgentLabel(contact) }}
+                      </span>
+                      <span class="truncate font-medium">
+                        {{ contactSafeDisplayName(contact) }}
+                      </span>
+                    </div>
+                    <span
+                      v-if="isPrivateContact(contact)"
+                      class="badge badge-ghost badge-xs opacity-60"
+                    >
+                      {{ t("config.remoteIm.private") }}
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- 第三步：变更预览 -->
+          <template v-else-if="batchSettingsWizard.step === 3">
+            <div
+              v-if="batchWizardChangedPreviews.length === 0"
+              class="rounded-box border border-base-300 p-8 text-center text-xs opacity-50"
+            >
+              {{ t("config.remoteIm.batchNoChange") }}
+            </div>
+            <div v-else class="space-y-2">
+              <div class="text-xs opacity-70 font-medium px-1">
+                {{ t("config.remoteIm.batchPreviewSummary", {
+                  changed: batchWizardChangedPreviews.length,
+                  total: batchWizardPreviews.length,
+                }) }}
+              </div>
+              <div class="rounded-box border border-base-300 p-2 divide-y divide-base-200">
+                <div
+                  v-for="preview in batchWizardChangedPreviews"
+                  :key="preview.contactId"
+                  class="py-2.5 px-2"
+                >
+                  <div class="mb-1 text-xs font-semibold">{{ preview.name }}</div>
+                  <div class="space-y-1">
+                    <div
+                      v-for="change in preview.changes"
+                      :key="change.label"
+                      class="flex flex-wrap items-center gap-1.5 text-xs"
+                    >
+                      <span class="shrink-0 opacity-70">{{ change.label }}：</span>
+                      <span class="opacity-50 line-through">{{ change.from }}</span>
+                      <span class="opacity-50">→</span>
+                      <span class="font-medium text-primary">{{ change.to }}</span>
                     </div>
                   </div>
                 </div>
-                <div class="flex justify-end">
-                  <button class="btn btn-sm" type="button" @click="addContactWorkspace">
-                    {{ t("config.tools.addWorkspace") }}
-                  </button>
-                </div>
-              </li>
-
-          <div class="mt-2 text-xs opacity-60 leading-5">
-            {{ t("config.remoteIm.contactConversationHint") }}
-          </div>
-          </div>
-          <div class="mt-3 pt-3 border-t border-base-300 flex items-center justify-between gap-2 shrink-0">
-            <button
-              class="btn btn-ghost text-error"
-              :disabled="contactsDisabled || contactSaving || contactDeleting || !selectedContact"
-              @click="selectedContact && deleteContact(selectedContact)"
-            >
-              <Trash2 class="h-3.5 w-3.5" />
-              {{ t("common.delete") }}
-            </button>
-            <div class="flex items-center gap-2">
-            <button class="btn btn-ghost" :disabled="!contactDraftDirty || contactSaving" @click="resetContactDraft">
-              <RotateCcw class="h-3.5 w-3.5" />
-              {{ t("common.reset") }}
-            </button>
-            <button class="btn btn-primary" :disabled="contactsDisabled || !contactDraftDirty || contactSaving || contactDeleting" @click="saveContactDraft">
-              <Save v-if="!contactSaving" class="h-3.5 w-3.5" />
-              <span v-else class="loading loading-spinner loading-xs"></span>
-              {{ t("common.save") }}
-            </button>
+              </div>
             </div>
+          </template>
+
+          <!-- 第四步：执行结果 -->
+          <template v-else>
+            <div v-if="batchSettingsWizard.result" class="flex flex-col items-center py-6 text-center">
+              <div class="flex h-12 w-12 items-center justify-center rounded-full bg-success/15 text-success mb-3">
+                <Check class="h-6 w-6 stroke-[2.5]" />
+              </div>
+              <div class="text-sm font-semibold mb-2">{{ t("common.success") || "设置已完成" }}</div>
+              <div class="space-y-1 text-xs opacity-75">
+                <div v-if="batchSettingsWizard.result.updatedContactCount > 0">
+                  {{ t("config.remoteIm.batchResultContacts", {
+                    count: batchSettingsWizard.result.updatedContactCount,
+                  }) }}
+                </div>
+                <div v-if="batchSettingsWizard.result.movedContactCount > 0">
+                  {{ t("config.remoteIm.batchResultMoved", {
+                    count: batchSettingsWizard.result.movedContactCount,
+                    name: contactGroupLabelById(batchSettingsWizard.targetGroupId),
+                  }) }}
+                </div>
+                <div v-if="batchSettingsWizard.result.workspaceChangedContactCount > 0">
+                  {{ t("config.remoteIm.batchResultWorkspace", {
+                    count: batchSettingsWizard.result.workspaceChangedContactCount,
+                  }) }}
+                </div>
+                <div v-if="batchSettingsWizard.fields.model">
+                  {{ t("config.remoteIm.batchResultModel", {
+                    updated: batchSettingsWizard.result.modelUpdatedCount,
+                    skipped: batchSettingsWizard.result.modelSkippedCount,
+                  }) }}
+                </div>
+              </div>
+            </div>
+          </template>
+        </OverlayScrollArea>
+
+        <!-- DaisyUI 原生 modal-action，shrink-0 确保永远固定在底部，绝不被裁切或遮盖 -->
+        <div class="modal-action shrink-0 mt-3 pt-3 border-t border-base-content/10 flex items-center justify-between">
+          <!-- 左侧：取消 / 上一步 -->
+          <button
+            v-if="batchSettingsWizard && batchSettingsWizard.step === 1"
+            class="btn btn-sm btn-ghost"
+            type="button"
+            @click="closeBatchSettingsWizard"
+          >
+            {{ t("common.cancel") }}
+          </button>
+          <button
+            v-else-if="batchSettingsWizard && batchSettingsWizard.step > 1 && batchSettingsWizard.step < 4"
+            class="btn btn-sm btn-ghost"
+            type="button"
+            :disabled="batchSettingsWizard.executing"
+            @click="batchSettingsWizard.step -= 1"
+          >
+            {{ t("config.remoteIm.batchStepBack") }}
+          </button>
+          <span v-else></span>
+
+          <!-- 右侧：下一步 / 执行设置 / 完成 -->
+          <div v-if="batchSettingsWizard" class="flex items-center gap-2">
+            <button
+              v-if="batchSettingsWizard.step === 1"
+              class="btn btn-sm btn-primary"
+              type="button"
+              @click="goToBatchWizardContactsStep"
+            >
+              {{ t("config.remoteIm.batchStepNext") }}
+            </button>
+            <button
+              v-else-if="batchSettingsWizard.step === 2"
+              class="btn btn-sm btn-primary"
+              type="button"
+              :disabled="batchSettingsWizard.preparing"
+              @click="goToBatchWizardPreviewStep"
+            >
+              <span v-if="batchSettingsWizard.preparing" class="loading loading-spinner loading-xs"></span>
+              {{ t("config.remoteIm.batchStepNext") }}
+            </button>
+            <button
+              v-else-if="batchSettingsWizard.step === 3"
+              class="btn btn-sm btn-primary"
+              type="button"
+              :disabled="batchSettingsWizard.executing || batchWizardChangedPreviews.length === 0"
+              @click="executeBatchSettings"
+            >
+              <span v-if="batchSettingsWizard.executing" class="loading loading-spinner loading-xs"></span>
+              {{ t("config.remoteIm.batchExecute") }}
+            </button>
+            <button
+              v-else
+              class="btn btn-sm btn-primary"
+              type="button"
+              @click="closeBatchSettingsWizard"
+            >
+              {{ t("common.close") }}
+            </button>
           </div>
         </div>
       </div>
       <form method="dialog" class="modal-backdrop">
-        <button @click.prevent="closeContactConfigModal">close</button>
+        <button @click.prevent="closeBatchSettingsWizard">close</button>
       </form>
     </dialog>
   </SettingsPageShell>
@@ -1004,10 +1569,16 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   ClipboardPaste,
   Copy,
+  FolderInput,
+  Minus,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -1017,13 +1588,19 @@ import {
   Settings,
   SquareTerminal,
   Trash2,
+  User,
+  UserCog,
   Users,
+  X,
 } from "@lucide/vue";
 import { invokeTauri, openTransportFileDialog } from "../../../../services/tauri-api";
-import type { AppConfig, PersonaProfile, RemoteImChannelConfig, RemoteImContact, RemoteImPlatform, ShellWorkspace } from "../../../../types/app";
+import type { AppConfig, LegacyShellWorkspaceAccess, PersonaProfile, RemoteImChannelConfig, RemoteImContact, RemoteImContactGroup, RemoteImPlatform, ShellWorkspace, ShellWorkspaceAccess } from "../../../../types/app";
 import SettingsPageShell from "../../components/SettingsPageShell.vue";
 import type { SettingsBreadcrumbBadge, SettingsBreadcrumbItem } from "../../components/SettingsBreadcrumb.vue";
 import AgentPersonaSelect from "../../../shared/components/AgentPersonaSelect.vue";
+import ApiConfigPicker from "../../components/ApiConfigPicker.vue";
+import WorkspaceConfigCard from "../../../shared/components/WorkspaceConfigCard.vue";
+import OverlayScrollArea from "../../../shared/components/OverlayScrollArea.vue";
 import ChannelBehaviorSettingsModal from "./remote-im/ChannelBehaviorSettingsModal.vue";
 import type { ChannelConnectionStatus, ChannelLogEntry, WeixinLoginStatus } from "./remote-im/types";
 import { buildContactLogDisplayItem, type ContactLogDisplayItem } from "./remote-im/contact-log-display";
@@ -1051,7 +1628,7 @@ const WEIXIN_OC_BOT_TYPE = "3";
 const WEIXIN_OC_QR_POLL_INTERVAL = 1;
 const WEIXIN_OC_LONG_POLL_TIMEOUT_MS = 35000;
 const WEIXIN_OC_API_TIMEOUT_MS = 15000;
-type ContactPillMenuKind = "activation" | "processing" | "response" | "files";
+type ContactPillMenuKind = "activation" | "processing" | "response" | "files" | "group";
 type ContactPillMenuOption = {
   key: string;
   label: string;
@@ -1065,6 +1642,47 @@ type ContactPillMenuState = {
   top: number;
   widthClass: string;
   options: ContactPillMenuOption[];
+};
+type BatchWizardFieldKey =
+  | "agent"
+  | "model"
+  | "processingMode"
+  | "activation"
+  | "responseStrategy"
+  | "communication"
+  | "workspaceAccess"
+  | "group";
+type BatchWizardChange = { label: string; from: string; to: string };
+type BatchWizardPreview = { contactId: string; name: string; changes: BatchWizardChange[] };
+type BatchWizardContactSection = { key: string; name: string; contacts: RemoteImContact[] };
+type BatchSettingsWizardState = {
+  step: number;
+  fields: Record<BatchWizardFieldKey, boolean>;
+  agentId: string;
+  setPreferredModel: boolean;
+  preferredApiConfigId: string;
+  processingMode: "qa" | "continuous";
+  activationMode: RemoteImContact["activationMode"];
+  activationKeywordsText: string;
+  responseStrategy: NonNullable<RemoteImContact["responseStrategy"]>;
+  allowCommunication: boolean;
+  allowSendFiles: boolean;
+  workspaceAccess: LegacyShellWorkspaceAccess;
+  /** 移动到分组的目标分组 id，空字符串表示未分组。 */
+  targetGroupId: string;
+  selectedContactIds: string[];
+  contactSearchQuery: string;
+  contactModels: Record<string, ContactConversationModel>;
+  preparing: boolean;
+  executing: boolean;
+  error: string;
+  result: {
+    updatedContactCount: number;
+    workspaceChangedContactCount: number;
+    modelUpdatedCount: number;
+    modelSkippedCount: number;
+    movedContactCount: number;
+  } | null;
 };
 type ContactSettingsClipboard = {
   boundAgentId: string;
@@ -1082,6 +1700,16 @@ const saving = ref(false);
 const contactsLoading = ref(false);
 const contactsError = ref("");
 const contacts = ref<RemoteImContact[]>([]);
+/** 联系人自定义分组：后端按渠道存储，前端只缓存当前加载结果。 */
+const contactGroups = ref<RemoteImContactGroup[]>([]);
+const activeContactGroupKey = ref("");
+const contactGroupEditMode = ref<"create" | "rename" | null>(null);
+const contactGroupEditTargetId = ref("");
+const contactGroupNameDraft = ref("");
+const contactGroupError = ref("");
+const contactGroupBusy = ref(false);
+const batchSettingsDialogRef = ref<HTMLDialogElement | null>(null);
+const batchSettingsWizard = ref<BatchSettingsWizardState | null>(null);
 const channelOperationIds = ref<Record<string, boolean>>({});
 const contactOperationIds = ref<Record<string, boolean>>({});
 const credentialDrafts = ref<Record<string, string>>({});
@@ -1116,6 +1744,10 @@ const filteredChannels = computed(() => {
 function enterChannel(channelId: string) {
   selectedChannelId.value = channelId;
   inDetailMode.value = true;
+  // 分组归属渠道，切入时先清空选中分组，等分组列表拉回后再校正到第一个分组（无分组则「未分组」）。
+  activeContactGroupKey.value = "";
+  cancelContactGroupEdit();
+  void refreshContactGroups();
 }
 
 function backToChannels() {
@@ -1193,8 +1825,6 @@ const addChannelDialogRef = ref<HTMLDialogElement | null>(null);
 const addChannelModalOpen = ref(false);
 const channelConfigDialogRef = ref<HTMLDialogElement | null>(null);
 const channelConfigModalOpen = ref(false);
-const contactConfigDialogRef = ref<HTMLDialogElement | null>(null);
-const contactConfigModalOpen = ref(false);
 
 function syncAddChannelDialog() {
   const d = addChannelDialogRef.value;
@@ -1224,13 +1854,6 @@ function syncChannelConfigDialog() {
     if (!d.open) d.showModal();
   } else if (d.open) d.close();
 }
-function syncContactConfigDialog() {
-  const d = contactConfigDialogRef.value;
-  if (!d) return;
-  if (contactConfigModalOpen.value) {
-    if (!d.open) d.showModal();
-  } else if (d.open) d.close();
-}
 
 watch(addChannelModalOpen, syncAddChannelDialog);
 watch(addChannelDialogRef, syncAddChannelDialog);
@@ -1240,8 +1863,6 @@ watch(contactLogsModalOpen, syncContactLogsDialog);
 watch(contactLogsDialogRef, syncContactLogsDialog);
 watch(channelConfigModalOpen, syncChannelConfigDialog);
 watch(channelConfigDialogRef, syncChannelConfigDialog);
-watch(contactConfigModalOpen, syncContactConfigDialog);
-watch(contactConfigDialogRef, syncContactConfigDialog);
 const selectedContactId = ref<string>("");
 const contactPillMenu = ref<ContactPillMenuState | null>(null);
 const contactSettingsClipboard = ref<ContactSettingsClipboard | null>(null);
@@ -1415,8 +2036,35 @@ const currentChannelContacts = computed(() => {
   return contacts.value.filter((c) => c.channelId === selectedChannelId.value);
 });
 
-const filteredCurrentContacts = computed(() => {
+/** 联系人分组：每个渠道各自一套，只属于一个分组，未分组用空 groupId 表示。 */
+const currentChannelGroups = computed(() => (
+  contactGroups.value
+    .filter((group) => group.channelId === selectedChannelId.value)
+    .slice()
+    .sort((a, b) => (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name))
+));
+
+function contactGroupIdOf(contact: RemoteImContact): string {
+  return String(contact.groupId || "").trim();
+}
+
+/** 分组名：未分组、以及指向不存在分组的 groupId，都回落为「未分组」。 */
+function contactGroupLabelById(groupId: string): string {
+  const id = String(groupId || "").trim();
+  if (!id) return t("config.remoteIm.contactGroupUngrouped");
+  return currentChannelGroups.value.find((group) => group.id === id)?.name
+    ?? t("config.remoteIm.contactGroupUngrouped");
+}
+
+const groupScopedContacts = computed(() => {
   const all = currentChannelContacts.value;
+  const key = activeContactGroupKey.value;
+  if (key === "ungrouped") return all.filter((contact) => !contactGroupIdOf(contact));
+  return all.filter((contact) => contactGroupIdOf(contact) === key);
+});
+
+const visibleContacts = computed(() => {
+  const all = groupScopedContacts.value;
   const q = contactSearchQuery.value.trim().toLowerCase();
   if (!q) return all;
   return all.filter((c) => {
@@ -1427,48 +2075,127 @@ const filteredCurrentContacts = computed(() => {
   });
 });
 
-const contactsDisabledReason = computed(() => {
-  const channel = selectedChannel.value;
-  if (!channel) return "";
-  if (!channel.enabled) return t('config.remoteIm.channelDisabledHint');
-  if (channel.platform === "feishu") return "";
-  if (channel.platform === "onebot_v11" || channel.platform === "dingtalk" || channel.platform === "weixin_oc") {
-    const status = channelRuntimeStates.value[channel.id];
-    if (status?.connected) return "";
-    if (channel.platform === "onebot_v11" && status?.statusText === "binding_retry") {
-      return status.lastError || t('config.remoteIm.onebotPortOccupied');
-    }
-    if (channel.platform === "onebot_v11" && status?.statusText === "bind_failed") {
-      return status.lastError || t('config.remoteIm.onebotBindFailed');
-    }
-    if (channel.platform === "onebot_v11" && status?.statusText === "binding") {
-      return t('config.remoteIm.onebotBinding');
-    }
-    if (channel.platform === "onebot_v11" && status?.listenAddr) {
-      return t('config.remoteIm.onebotListening', { addr: status.listenAddr });
-    }
-    return t('config.remoteIm.channelNotConnected');
+type ContactGroupNavEntry = {
+  key: string;
+  name: string;
+  count: number;
+  group: RemoteImContactGroup | null;
+};
+
+const collapsedGroupKeys = ref<Set<string>>(new Set());
+
+function isGroupExpanded(key: string): boolean {
+  return !collapsedGroupKeys.value.has(key);
+}
+
+function toggleGroup(key: string) {
+  const next = new Set(collapsedGroupKeys.value);
+  if (next.has(key)) {
+    next.delete(key);
+  } else {
+    next.add(key);
   }
-  return "";
+  collapsedGroupKeys.value = next;
+}
+
+const hasGroupContacts = computed(() =>
+  currentChannelContacts.value.some((c) => c.remoteContactType === "group"),
+);
+
+const contactTypeFilter = ref<"group" | "private">("group");
+
+watch(hasGroupContacts, (hasGroups) => {
+  if (!hasGroups) {
+    contactTypeFilter.value = "private";
+  }
+}, { immediate: true });
+
+function setContactTypeFilter(type: "group" | "private") {
+  if (contactTypeFilter.value === type) return;
+  contactTypeFilter.value = type;
+  if (selectedContact.value) {
+    const isGroup = selectedContact.value.remoteContactType === "group";
+    if ((type === "group" && !isGroup) || (type === "private" && isGroup)) {
+      const match = currentChannelContacts.value.find((c) =>
+        type === "group" ? c.remoteContactType === "group" : c.remoteContactType !== "group",
+      );
+      if (match) {
+        selectContact(match);
+      }
+    }
+  }
+}
+
+function contactsInGroup(groupKey: string): RemoteImContact[] {
+  const all = currentChannelContacts.value;
+  let inGroup = groupKey === "ungrouped"
+    ? all.filter((contact) => !contactGroupIdOf(contact))
+    : all.filter((contact) => contactGroupIdOf(contact) === groupKey);
+
+  if (hasGroupContacts.value) {
+    if (contactTypeFilter.value === "group") {
+      inGroup = inGroup.filter((contact) => contact.remoteContactType === "group");
+    } else {
+      inGroup = inGroup.filter((contact) => contact.remoteContactType !== "group");
+    }
+  }
+
+  const q = contactSearchQuery.value.trim().toLowerCase();
+  if (!q) return inGroup;
+  return inGroup.filter((c) => {
+    const name = contactSafeDisplayName(c).toLowerCase();
+    const agent = contactAgentLabel(c).toLowerCase();
+    const sec = contactSecondaryText(c).toLowerCase();
+    return name.includes(q) || agent.includes(q) || sec.includes(q);
+  });
+}
+
+const mobileShowDetail = ref(false);
+
+function selectContact(contact: RemoteImContact, fromUserAction = false) {
+  selectedContactId.value = contact.id;
+  syncSelectedContactDraft();
+  void refreshContactConversationModel(contact.id);
+  if (fromUserAction) {
+    mobileShowDetail.value = true;
+  }
+}
+
+async function moveContactToGroupDirect(contact: RemoteImContact, groupId: string) {
+  await moveContactsToGroup([contact.id], groupId);
+}
+
+const contactGroupNavEntries = computed<ContactGroupNavEntry[]>(() => {
+  const all = currentChannelContacts.value.filter((contact) => {
+    if (!hasGroupContacts.value) return true;
+    if (contactTypeFilter.value === "group") return contact.remoteContactType === "group";
+    return contact.remoteContactType !== "group";
+  });
+  const entries: ContactGroupNavEntry[] = [];
+  for (const group of currentChannelGroups.value) {
+    entries.push({
+      key: group.id,
+      name: group.name,
+      count: all.filter((contact) => contactGroupIdOf(contact) === group.id).length,
+      group,
+    });
+  }
+  entries.push({
+    key: "ungrouped",
+    name: t("config.remoteIm.contactGroupUngrouped"),
+    count: all.filter((contact) => !contactGroupIdOf(contact)).length,
+    group: null,
+  });
+  return entries;
 });
-const contactsDisabled = computed(() => !!contactsDisabledReason.value);
+
+const activeContactGroupName = computed(() => (
+  contactGroupNavEntries.value.find((entry) => entry.key === activeContactGroupKey.value)?.name
+  ?? t("config.remoteIm.contactGroupUngrouped")
+));
+
 const contactActivationModeOrder: RemoteImContact["activationMode"][] = ["always", "keyword", "never"];
 
-type ContactGroup = { mode: "always" | "keyword" | "never"; label: string; items: typeof currentChannelContacts.value };
-const groupedContacts = computed<ContactGroup[]>(() => {
-  const all = filteredCurrentContacts.value;
-  const groups: { mode: ContactGroup["mode"]; label: string; items: typeof all }[] = [
-    { mode: "always", label: t("config.remoteIm.activateModeAlways"), items: [] },
-    { mode: "keyword", label: t("config.remoteIm.activateModeKeyword"), items: [] },
-    { mode: "never", label: t("config.remoteIm.activateModeNever"), items: [] },
-  ];
-  for (const c of all) {
-    const mode = isPrivateContact(c) ? "always" : normalizeActivationMode(c.activationMode);
-    const target = groups.find((g) => g.mode === mode);
-    (target ?? groups[2]).items.push(c);
-  }
-  return groups.filter((g) => g.items.length > 0);
-});
 const selectedContact = computed(() =>
   currentChannelContacts.value.find((item) => item.id === selectedContactId.value) ?? null,
 );
@@ -1510,31 +2237,6 @@ const contactDraftSnapshot = ref("");
 const contactDraftDirty = computed(() =>
   !!contactDraft.value && JSON.stringify(contactDraft.value) !== contactDraftSnapshot.value,
 );
-const contactDraftRoutingHint = computed(() => {
-  if (!selectedContact.value || !contactDraft.value) return "";
-  return t("config.remoteIm.routingHint");
-});
-const contactDraftProcessingHint = computed(() => {
-  if (!selectedContact.value || !contactDraft.value) return "";
-  return processingModeHintText({
-    ...selectedContact.value,
-    processingMode: contactDraft.value.processingMode,
-  } as RemoteImContact);
-});
-const contactDraftActivationHint = computed(() => {
-  if (!selectedContact.value || !contactDraft.value) return "";
-  return contactActivationHintText({
-    ...selectedContact.value,
-    activationMode: contactDraft.value.activationMode,
-  } as RemoteImContact);
-});
-const contactDraftResponseStrategyHint = computed(() => {
-  if (!selectedContact.value || !contactDraft.value) return "";
-  return contactResponseStrategyHintText({
-    ...selectedContact.value,
-    responseStrategy: contactDraft.value.responseStrategy,
-  } as RemoteImContact);
-});
 const contactLogDisplayItems = computed<ContactLogDisplayItem[]>(() =>
   contactLogs.value
     .map((log) => buildContactLogDisplayItem(log, t))
@@ -1557,7 +2259,7 @@ const contactKeywordDrafts = ref<Record<string, string>>({});
 
 function buildContactDraftFromContact(item: RemoteImContact): ContactEditDraft {
   return {
-    boundAgentId: String(item.boundAgentId || ""),
+    boundAgentId: String(item.boundAgentId || "").trim() || "support",
     processingMode: normalizeProcessingMode(item.processingMode),
     activationMode: isPrivateContact(item) ? "always" : normalizeActivationMode(item.activationMode || "never"),
     activationKeywordsText: item.activationKeywords.join(", "),
@@ -1582,7 +2284,7 @@ function buildContactSettingsClipboard(
 ): Omit<ContactSettingsClipboard, "preferredApiConfigId"> {
   const isPrivate = isPrivateContact(item);
   return {
-    boundAgentId: String(item.boundAgentId || ""),
+    boundAgentId: String(item.boundAgentId || "").trim() || "support",
     processingMode: normalizeProcessingMode(item.processingMode),
     activationMode: isPrivate ? "always" : normalizeActivationMode(item.activationMode || "never"),
     activationKeywordsText: isPrivate ? "" : (Array.isArray(item.activationKeywords) ? item.activationKeywords.join(", ") : ""),
@@ -1610,7 +2312,23 @@ type ContactConversationModel = {
   preferredApiConfigId: string;
 };
 
-/** 只读解析联系人的会话模型；会话不存在时返回 conversationExists=false。 */
+/**
+ * 解析有效文本模型：当模型为空或丢失（不在可用文本模型列表）时，默认切到专家模型。
+ */
+function resolveAvailableOrExpertModelId(modelId?: string | null): string {
+  const raw = String(modelId || "").trim();
+  const textConfigs = (props.config.apiConfigs || []).filter((item) => !!item.enableText);
+  if (raw && textConfigs.some((item) => item.id === raw)) {
+    return raw;
+  }
+  const expertId = String(props.config.expertApiConfigId || "").trim();
+  if (expertId && textConfigs.some((item) => item.id === expertId)) {
+    return expertId;
+  }
+  return textConfigs[0]?.id || "";
+}
+
+/** 只读解析联系人的会话模型；会话不存在时返回 conversationExists=false。模型为空或丢失时默认切到专家模型。 */
 async function fetchContactConversationModel(contactId: string): Promise<ContactConversationModel> {
   try {
     const result = await invokeTauri<{
@@ -1618,10 +2336,12 @@ async function fetchContactConversationModel(contactId: string): Promise<Contact
       conversationExists?: boolean;
       preferredApiConfigId?: string | null;
     }>("remoteIm.contact.conversationModel", { input: { contactId } });
+    const rawModel = String(result.preferredApiConfigId || "").trim();
+    const resolvedModel = resolveAvailableOrExpertModelId(rawModel);
     return {
       conversationId: String(result.conversationId || "").trim(),
       conversationExists: !!result.conversationExists,
-      preferredApiConfigId: String(result.preferredApiConfigId || "").trim(),
+      preferredApiConfigId: resolvedModel,
     };
   } catch (error) {
     props.setStatusAction(t("status.saveConfigFailed", { err: String(error) }));
@@ -1634,8 +2354,12 @@ async function refreshContactConversationModel(contactId: string) {
 }
 
 async function onContactConversationModelChange(apiConfigIdRaw: string) {
-  const target = contactConversationModel.value;
-  if (!target.conversationExists || !target.conversationId) return;
+  let target = contactConversationModel.value;
+  if (!target.conversationId && selectedContact.value) {
+    target = await fetchContactConversationModel(selectedContact.value.id);
+    contactConversationModel.value = target;
+  }
+  if (!target.conversationId) return;
   const nextApiConfigId = String(apiConfigIdRaw || "").trim();
   const previous = target.preferredApiConfigId;
   contactConversationModel.value = { ...target, preferredApiConfigId: nextApiConfigId };
@@ -1994,7 +2718,6 @@ async function toggleSelectedChannelEnabled(enabled: boolean) {
 }
 
 async function toggleContactCommunication(item: RemoteImContact, enabled: boolean) {
-  if (contactsDisabled.value) return;
   const oldSend = item.allowSend;
   const oldReceive = item.allowReceive;
   item.allowSend = enabled;
@@ -2013,7 +2736,6 @@ async function toggleContactCommunication(item: RemoteImContact, enabled: boolea
 }
 
 async function toggleContactAllowSendFiles(item: RemoteImContact, enabled: boolean) {
-  if (contactsDisabled.value) return;
   const oldValue = item.allowSendFiles;
   item.allowSendFiles = enabled;
   try {
@@ -2038,7 +2760,6 @@ async function saveContactActivation(
     >
   >,
 ) {
-  if (contactsDisabled.value) return;
   const oldMode = item.activationMode;
   const oldKeywords = [...item.activationKeywords];
   const oldResponseStrategy = normalizeResponseStrategy(item.responseStrategy);
@@ -2093,7 +2814,7 @@ function buildContactClipboardPatch(
 async function pasteContactSettings(item: RemoteImContact) {
   const clipboard = contactSettingsClipboard.value;
   if (!clipboard) return;
-  if (contactsDisabled.value || isContactOperationBusy(item.id)) return;
+  if (isContactOperationBusy(item.id)) return;
   const patch = buildContactClipboardPatch(clipboard, item);
   await withContactOperation(item.id, async () => {
     try {
@@ -2152,7 +2873,6 @@ async function selectContactActivationMode(
   item: RemoteImContact,
   mode: RemoteImContact["activationMode"],
 ) {
-  if (contactsDisabled.value) return;
   const nextMode = normalizeActivationMode(mode);
   if (normalizeActivationMode(item.activationMode || "never") === nextMode) return;
   await withContactOperation(item.id, () => saveContactActivation(item, { activationMode: nextMode }));
@@ -2165,6 +2885,7 @@ function closeContactPillMenu() {
 function contactPillMenuWidthClass(kind: ContactPillMenuKind): string {
   if (kind === "processing") return "w-40";
   if (kind === "files") return "w-32";
+  if (kind === "group") return "w-40";
   return "w-36";
 }
 
@@ -2199,6 +2920,9 @@ function contactPillMenuOptions(
       value: option.value,
     }));
   }
+  if (kind === "group") {
+    return contactGroupOptionsForMove(item);
+  }
   return contactSendFilesOptions().map((option) => ({
     key: String(option.value),
     label: option.label,
@@ -2212,13 +2936,13 @@ function openContactPillMenu(
   item: RemoteImContact,
   kind: ContactPillMenuKind,
 ) {
-  if (contactsDisabled.value || isContactOperationBusy(item.id)) return;
+  if (isContactOperationBusy(item.id)) return;
   const target = event.currentTarget as HTMLElement | null;
   const rect = target?.getBoundingClientRect();
   if (!rect) return;
   const options = contactPillMenuOptions(item, kind);
   const menuHeight = options.length * 32 + 10;
-  const menuWidth = kind === "processing" ? 160 : kind === "files" ? 128 : 144;
+  const menuWidth = kind === "processing" || kind === "group" ? 160 : kind === "files" ? 128 : 144;
   const left = Math.max(8, Math.min(window.innerWidth - menuWidth - 8, rect.left));
   const top = Math.max(8, rect.top - menuHeight - 4);
   contactPillMenu.value = {
@@ -2243,6 +2967,8 @@ async function selectContactPillMenuOption(option: ContactPillMenuOption) {
     await selectContactProcessingMode(item, option.value as "continuous" | "qa");
   } else if (menu.kind === "response") {
     await selectContactResponseStrategy(item, option.value as NonNullable<RemoteImContact["responseStrategy"]>);
+  } else if (menu.kind === "group") {
+    await moveContactsToGroup([item.id], String(option.value || ""));
   } else {
     await selectContactAllowSendFiles(item, option.value === true);
   }
@@ -2294,7 +3020,6 @@ function reorderContactAfterActivationMove(
 }
 
 async function moveContactActivationMode(item: RemoteImContact, direction: -1 | 1) {
-  if (contactsDisabled.value) return;
   const currentIndex = contactActivationModeIndex(item);
   const nextIndex = (currentIndex + direction + contactActivationModeOrder.length) % contactActivationModeOrder.length;
   const nextMode = contactActivationModeOrder[nextIndex];
@@ -2358,14 +3083,12 @@ async function selectContactProcessingMode(
   item: RemoteImContact,
   mode: "continuous" | "qa",
 ) {
-  if (contactsDisabled.value) return;
   const nextMode = normalizeProcessingMode(mode);
   if (normalizeProcessingMode(item.processingMode) === nextMode) return;
   await withContactOperation(item.id, () => onContactProcessingModeChange(item, nextMode));
 }
 
 async function cycleContactProcessingMode(item: RemoteImContact) {
-  if (contactsDisabled.value) return;
   const current = normalizeProcessingMode(item.processingMode);
   const next = current === "qa" ? "continuous" : "qa";
   await withContactOperation(item.id, () => onContactProcessingModeChange(item, next));
@@ -2399,7 +3122,7 @@ async function selectContactResponseStrategy(
   item: RemoteImContact,
   strategy: NonNullable<RemoteImContact["responseStrategy"]>,
 ) {
-  if (contactsDisabled.value || isPrivateContact(item)) return;
+  if (isPrivateContact(item)) return;
   const nextStrategy = normalizeResponseStrategy(strategy);
   if (normalizeResponseStrategy(item.responseStrategy) === nextStrategy) return;
   await withContactOperation(item.id, () => saveContactActivation(item, { responseStrategy: nextStrategy }));
@@ -2418,13 +3141,11 @@ function contactSendFilesLabel(item: RemoteImContact): string {
 }
 
 async function selectContactAllowSendFiles(item: RemoteImContact, enabled: boolean) {
-  if (contactsDisabled.value) return;
   if (!!item.allowSendFiles === enabled) return;
   await withContactOperation(item.id, () => toggleContactAllowSendFiles(item, enabled));
 }
 
 async function cycleContactAllowSendFiles(item: RemoteImContact) {
-  if (contactsDisabled.value) return;
   await withContactOperation(item.id, () => toggleContactAllowSendFiles(item, !item.allowSendFiles));
 }
 
@@ -2435,53 +3156,133 @@ function onContactActivationKeywordsBlur(item: RemoteImContact) {
   void saveContactActivation(item, { activationKeywords: keywords });
 }
 
-async function addContactWorkspace() {
+// ========== 联系人工作区配置（迁移会话工作目录最新卡片设计） ==========
+const contactMainPath = computed(() => {
+  if (!contactDraft.value?.shellWorkspaces) return "";
+  const main = contactDraft.value.shellWorkspaces.find((ws) => ws.level === "main");
+  if (main) return String(main.path || "").trim();
+  return String(contactDraft.value.shellWorkspaces[0]?.path || "").trim();
+});
+
+const contactSecondaryPaths = computed(() => {
+  if (!contactDraft.value?.shellWorkspaces) return [];
+  const main = contactMainPath.value.toLowerCase();
+  return contactDraft.value.shellWorkspaces
+    .filter((ws) => ws.path.toLowerCase() !== main)
+    .map((ws) => String(ws.path || "").trim())
+    .filter(Boolean);
+});
+
+const contactUnifiedAccess = computed<ShellWorkspaceAccess>(() => {
+  if (!contactDraft.value?.shellWorkspaces?.length) return "approval";
+  const main = contactDraft.value.shellWorkspaces.find((ws) => ws.level === "main");
+  const raw = String(main?.access || contactDraft.value.shellWorkspaces[0]?.access || "approval").trim();
+  return (raw === "full_access" ? "full_access" : "approval") as ShellWorkspaceAccess;
+});
+
+const contactAvailableWorkspaces = computed(() => {
+  const result: Array<{ id: string; name: string; path: string; access: ShellWorkspaceAccess }> = [];
+  const seenPaths = new Set<string>();
+
+  // 1. 联系人自己的工作区
+  for (const ws of contactDraft.value?.shellWorkspaces || []) {
+    const p = String(ws.path || "").trim();
+    if (p && !seenPaths.has(p.toLowerCase())) {
+      seenPaths.add(p.toLowerCase());
+      result.push({
+        id: ws.id,
+        name: ws.name,
+        path: ws.path,
+        access: ws.access as ShellWorkspaceAccess,
+      });
+    }
+  }
+
+  // 2. 全局配置里的工作区供联系人挑选
+  for (const ws of props.config.shellWorkspaces || []) {
+    const p = String(ws.path || "").trim();
+    if (p && !seenPaths.has(p.toLowerCase())) {
+      seenPaths.add(p.toLowerCase());
+      result.push({
+        id: ws.id || p,
+        name: ws.name || p.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || p,
+        path: ws.path,
+        access: (ws.access || "approval") as ShellWorkspaceAccess,
+      });
+    }
+  }
+
+  return result;
+});
+
+function onContactMainPathUpdate(path: string) {
   if (!contactDraft.value) return;
-  try {
-    const picked = await openTransportFileDialog({
-      directory: true,
-      multiple: false,
-    });
-    if (!picked || Array.isArray(picked)) return;
-    const path = String(picked || "").trim();
-    if (!path) return;
+  const normalized = String(path || "").trim();
+  if (!normalized) {
+    const mainIdx = contactDraft.value.shellWorkspaces.findIndex((ws) => ws.level === "main");
+    if (mainIdx >= 0) contactDraft.value.shellWorkspaces.splice(mainIdx, 1);
+    return;
+  }
 
-    const existed = contactDraft.value.shellWorkspaces.some(
-      (ws) => ws.path.toLowerCase() === path.toLowerCase(),
-    );
-    if (existed) return;
+  const existed = contactDraft.value.shellWorkspaces.find(
+    (ws) => ws.path.toLowerCase() === normalized.toLowerCase(),
+  );
 
-    const hasMain = contactDraft.value.shellWorkspaces.some((ws) => ws.level === "main");
-    const name = path.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || path;
-    contactDraft.value.shellWorkspaces.push({
+  if (existed) {
+    for (const ws of contactDraft.value.shellWorkspaces) {
+      ws.level = ws.id === existed.id ? "main" : "secondary";
+    }
+  } else {
+    for (const ws of contactDraft.value.shellWorkspaces) {
+      if (ws.level === "main") {
+        ws.level = "secondary";
+      }
+    }
+    const name = normalized.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || normalized;
+    contactDraft.value.shellWorkspaces.unshift({
       id: crypto.randomUUID(),
       name,
-      path,
-      level: hasMain ? "secondary" : "main",
-      access: (hasMain ? "read_only" : "approval") as unknown as ShellWorkspace["access"],
+      path: normalized,
+      level: "main",
+      access: contactUnifiedAccess.value,
     });
-  } catch {
-    // 用户取消选择
   }
 }
 
-function removeContactWorkspace(id: string) {
-  if (!contactDraft.value) return;
-  const idx = contactDraft.value.shellWorkspaces.findIndex((ws) => ws.id === id);
-  if (idx >= 0) contactDraft.value.shellWorkspaces.splice(idx, 1);
-}
-
-function setContactWorkspaceMain(id: string) {
+function onContactAccessUpdate(access: ShellWorkspaceAccess) {
   if (!contactDraft.value) return;
   for (const ws of contactDraft.value.shellWorkspaces) {
-    ws.level = ws.id === id ? "main" : "secondary";
+    ws.access = access;
   }
 }
 
-function updateContactWorkspaceAccess(id: string, access: ShellWorkspace["access"]) {
+function onContactAddSecondary(path: string) {
   if (!contactDraft.value) return;
-  const ws = contactDraft.value.shellWorkspaces.find((w) => w.id === id);
-  if (ws) ws.access = access;
+  const normalized = String(path || "").trim();
+  if (!normalized) return;
+  const existed = contactDraft.value.shellWorkspaces.some(
+    (ws) => ws.path.toLowerCase() === normalized.toLowerCase(),
+  );
+  if (existed) return;
+  const name = normalized.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || normalized;
+  contactDraft.value.shellWorkspaces.push({
+    id: crypto.randomUUID(),
+    name,
+    path: normalized,
+    level: "secondary",
+    access: contactUnifiedAccess.value,
+  });
+}
+
+function onContactRemoveSecondary(path: string) {
+  if (!contactDraft.value) return;
+  const normalized = String(path || "").trim();
+  const idx = contactDraft.value.shellWorkspaces.findIndex(
+    (ws) => ws.path.toLowerCase() === normalized.toLowerCase(),
+  );
+  if (idx >= 0) {
+    contactDraft.value.shellWorkspaces.splice(idx, 1);
+  }
 }
 
 function resetContactDraft() {
@@ -2489,7 +3290,6 @@ function resetContactDraft() {
 }
 
 async function saveContactDraft() {
-  if (contactsDisabled.value) return;
   if (!selectedContact.value || !contactDraft.value || !contactDraftDirty.value || contactSaving.value) return;
   const item = selectedContact.value;
   const draft = contactDraft.value;
@@ -2715,8 +3515,10 @@ async function refreshContacts() {
       contactKeywordDrafts.value[item.id] = item.activationKeywords.join(", ");
     }
     if (selectedContactId.value && !contacts.value.some((item) => item.id === selectedContactId.value)) {
-      contactConfigModalOpen.value = false;
       selectedContactId.value = "";
+    }
+    if (currentChannelContacts.value.length > 0 && (!selectedContactId.value || !currentChannelContacts.value.some((item) => item.id === selectedContactId.value))) {
+      selectContact(currentChannelContacts.value[0]);
     }
     if (contactLogsContactId.value && !contacts.value.some((item) => item.id === contactLogsContactId.value)) {
       contactLogsModalOpen.value = false;
@@ -2728,6 +3530,158 @@ async function refreshContacts() {
   } finally {
     contactsLoading.value = false;
   }
+  await refreshContactGroups();
+}
+
+// ==================== 联系人自定义分组 ====================
+
+async function refreshContactGroups() {
+  const channelId = selectedChannelId.value;
+  if (!channelId) {
+    contactGroups.value = [];
+    return;
+  }
+  try {
+    const groups = await invokeTauri<RemoteImContactGroup[]>("remote_im_list_contact_groups", {
+      channelId,
+    });
+    if (selectedChannelId.value !== channelId) return;
+    contactGroups.value = groups;
+  } catch (error) {
+    if (selectedChannelId.value !== channelId) return;
+    contactGroups.value = [];
+    contactGroupError.value = String(error);
+  }
+  normalizeActiveContactGroupKey();
+}
+
+/** 选中分组失效（切渠道、被删、尚未选）时回落到第一个分组，没有分组则「未分组」。 */
+function normalizeActiveContactGroupKey() {
+  const key = activeContactGroupKey.value;
+  if (key === "ungrouped") return;
+  if (key && currentChannelGroups.value.some((group) => group.id === key)) return;
+  activeContactGroupKey.value = currentChannelGroups.value[0]?.id ?? "ungrouped";
+}
+
+watch(currentChannelGroups, () => {
+  normalizeActiveContactGroupKey();
+});
+
+function selectContactGroupNav(key: string) {
+  activeContactGroupKey.value = key;
+  cancelContactGroupEdit();
+}
+
+function startContactGroupCreate() {
+  contactGroupEditMode.value = "create";
+  contactGroupEditTargetId.value = "";
+  contactGroupNameDraft.value = "";
+  contactGroupError.value = "";
+}
+
+function startContactGroupRename(group: RemoteImContactGroup) {
+  contactGroupEditMode.value = "rename";
+  contactGroupEditTargetId.value = group.id;
+  contactGroupNameDraft.value = group.name;
+  contactGroupError.value = "";
+}
+
+function cancelContactGroupEdit() {
+  contactGroupEditMode.value = null;
+  contactGroupEditTargetId.value = "";
+  contactGroupNameDraft.value = "";
+  contactGroupError.value = "";
+}
+
+async function submitContactGroupEdit() {
+  const mode = contactGroupEditMode.value;
+  const channelId = selectedChannelId.value;
+  if (!mode || contactGroupBusy.value || !channelId) return;
+  const name = contactGroupNameDraft.value.trim();
+  if (!name) {
+    contactGroupError.value = t("config.remoteIm.contactGroupNameRequired");
+    return;
+  }
+  contactGroupBusy.value = true;
+  contactGroupError.value = "";
+  try {
+    if (mode === "create") {
+      const created = await invokeTauri<RemoteImContactGroup>("remote_im_create_contact_group", {
+        input: { channelId, name },
+      });
+      await refreshContactGroups();
+      activeContactGroupKey.value = created.id;
+    } else {
+      await invokeTauri("remote_im_rename_contact_group", {
+        input: { groupId: contactGroupEditTargetId.value, name },
+      });
+      await refreshContactGroups();
+    }
+    cancelContactGroupEdit();
+    props.setStatusAction(t("config.remoteIm.contactGroupSaved"));
+  } catch (error) {
+    contactGroupError.value = String(error);
+  } finally {
+    contactGroupBusy.value = false;
+  }
+}
+
+async function deleteContactGroup(group: RemoteImContactGroup) {
+  const channelId = selectedChannelId.value;
+  if (!channelId || contactGroupBusy.value) return;
+  const confirmed = window.confirm(
+    t("config.remoteIm.contactGroupDeleteConfirm", { name: group.name }),
+  );
+  if (!confirmed) return;
+  contactGroupBusy.value = true;
+  contactGroupError.value = "";
+  try {
+    const result = await invokeTauri<{ detachedContactCount: number }>(
+      "remote_im_delete_contact_group",
+      { input: { groupId: group.id } },
+    );
+    if (activeContactGroupKey.value === group.id) activeContactGroupKey.value = "ungrouped";
+    await refreshContacts();
+    props.setStatusAction(
+      t("config.remoteIm.contactGroupDeleted", { count: result.detachedContactCount }),
+    );
+  } catch (error) {
+    contactGroupError.value = String(error);
+  } finally {
+    contactGroupBusy.value = false;
+  }
+}
+
+async function moveContactsToGroup(contactIds: string[], groupId: string) {
+  const channelId = selectedChannelId.value;
+  if (!channelId || contactIds.length === 0) return;
+  try {
+    await invokeTauri("remote_im_set_contact_group", {
+      input: { channelId, contactIds, groupId: groupId || null },
+    });
+    await refreshContacts();
+    props.setStatusAction(t("config.remoteIm.moveToGroupDone"));
+  } catch (error) {
+    props.setStatusAction(t("status.saveConfigFailed", { err: String(error) }));
+  }
+}
+
+function contactGroupOptionsForMove(contact: RemoteImContact): ContactPillMenuOption[] {
+  const currentGroupId = contactGroupIdOf(contact);
+  return [
+    {
+      key: "ungrouped",
+      label: t("config.remoteIm.contactGroupUngrouped"),
+      active: !currentGroupId,
+      value: "",
+    },
+    ...currentChannelGroups.value.map((group) => ({
+      key: group.id,
+      label: group.name,
+      active: currentGroupId === group.id,
+      value: group.id,
+    })),
+  ];
 }
 
 function contactDisplayName(item: RemoteImContact): string {
@@ -2757,7 +3711,6 @@ function contactSecondaryText(item: RemoteImContact): string {
 }
 
 async function deleteContact(item: RemoteImContact) {
-  if (contactsDisabled.value) return;
   if (contactDeleting.value) return;
   const displayName = contactSafeDisplayName(item);
   const confirmed = window.confirm(t('config.remoteIm.deleteContactConfirm', { name: displayName }));
@@ -2772,10 +3725,10 @@ async function deleteContact(item: RemoteImContact) {
       return;
     }
     if (selectedContactId.value === item.id) {
-      contactConfigModalOpen.value = false;
       selectedContactId.value = "";
       contactDraft.value = null;
       contactDraftSnapshot.value = "";
+      mobileShowDetail.value = false;
     }
     await refreshContacts();
     props.setStatusAction(t('config.remoteIm.deleteContactSuccess', { name: displayName }));
@@ -2787,8 +3740,7 @@ async function deleteContact(item: RemoteImContact) {
 }
 
 function contactAgentLabel(item: RemoteImContact): string {
-  const agentId = String(item.boundAgentId || "").trim();
-  if (!agentId) return t("config.remoteIm.processingAgentDefault");
+  const agentId = String(item.boundAgentId || "").trim() || "support";
   const persona = (props.personas || []).find((agent) => String(agent.id || "").trim() === agentId);
   return String(persona?.name || "").trim() || agentId;
 }
@@ -3076,12 +4028,10 @@ function closeChannelConfigModal() {
 function openContactConfigModal(contactId: string) {
   selectedContactId.value = contactId;
   syncSelectedContactDraft();
-  contactConfigModalOpen.value = true;
   void refreshContactConversationModel(contactId);
 }
 
 function closeContactConfigModal() {
-  contactConfigModalOpen.value = false;
   syncSelectedContactDraft();
 }
 
@@ -3125,6 +4075,22 @@ watch(selectedChannelId, () => {
     } else {
       channelLogs.value = [];
     }
+    if (!hasGroupContacts.value) {
+      contactTypeFilter.value = "private";
+    }
+    const match = currentChannelContacts.value.find((c) =>
+      hasGroupContacts.value && contactTypeFilter.value === "group"
+        ? c.remoteContactType === "group"
+        : c.remoteContactType !== "group",
+    );
+    const firstContact = match || currentChannelContacts.value[0];
+    if (firstContact) {
+      selectContact(firstContact);
+    } else {
+      selectedContactId.value = "";
+      contactDraft.value = null;
+    }
+    mobileShowDetail.value = false;
   }
   lastSavedChannelSnapshot.value = channelSnapshot.value;
 });
@@ -3213,4 +4179,482 @@ onUnmounted(() => {
     weixinLoginPollTimer = null;
   }
 });
+// ==================== 联系人批量设置 ====================
+
+const batchWizardFieldKeys: BatchWizardFieldKey[] = [
+  "agent",
+  "model",
+  "processingMode",
+  "activation",
+  "responseStrategy",
+  "communication",
+  "workspaceAccess",
+  "group",
+];
+
+/** 需要在联系人字段上批量写入的设置项（「移动到分组」走分组命令，「首选模型」走会话模型命令）。 */
+const batchWizardPatchFieldKeys: BatchWizardFieldKey[] = batchWizardFieldKeys.filter((key) => key !== "group" && key !== "model");
+
+function personaNameById(agentId: string): string {
+  const id = String(agentId || "").trim() || "support";
+  const persona = (props.personas || []).find((agent) => String(agent.id || "").trim() === id);
+  return String(persona?.name || "").trim() || id;
+}
+
+function apiConfigLabelById(apiConfigId: string): string {
+  const resolvedId = resolveAvailableOrExpertModelId(apiConfigId);
+  if (!resolvedId) return t("config.remoteIm.preferredModelUnset");
+  const apiConfig = (props.config.apiConfigs || []).find((item) => String(item.id || "").trim() === resolvedId);
+  return String(apiConfig?.name || "").trim() || resolvedId;
+}
+
+function workspaceAccessLabel(access: string): string {
+  if (access === "full_access") return t("config.tools.workspaceAccessFullAccess");
+  if (access === "approval") return t("config.tools.workspaceAccessApproval");
+  return t("config.tools.workspaceAccessReadOnly");
+}
+
+function batchWizardEnabledLabel(enabled: boolean): string {
+  return enabled ? t("config.remoteIm.batchToggleOn") : t("config.remoteIm.batchToggleOff");
+}
+
+/** 向导候选集为当前渠道全部联系人，按分组分段呈现，不随主界面切换分组而变。 */
+const batchWizardScopedContacts = computed(() => {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard) return [];
+  const scope = currentChannelContacts.value;
+  const q = wizard.contactSearchQuery.trim().toLowerCase();
+  if (!q) return scope;
+  return scope.filter((item) => {
+    const name = contactSafeDisplayName(item).toLowerCase();
+    const agent = contactAgentLabel(item).toLowerCase();
+    return name.includes(q) || agent.includes(q);
+  });
+});
+
+/** 第二步的分组分段：空分组不占位，未分组固定排在最后。 */
+const batchWizardContactSections = computed<BatchWizardContactSection[]>(() => {
+  const scope = batchWizardScopedContacts.value;
+  const sections: BatchWizardContactSection[] = [];
+  for (const group of currentChannelGroups.value) {
+    const contacts = scope.filter((item) => contactGroupIdOf(item) === group.id);
+    if (contacts.length > 0) sections.push({ key: group.id, name: group.name, contacts });
+  }
+  const ungrouped = scope.filter((item) => !contactGroupIdOf(item));
+  if (ungrouped.length > 0) {
+    sections.push({
+      key: "ungrouped",
+      name: t("config.remoteIm.contactGroupUngrouped"),
+      contacts: ungrouped,
+    });
+  }
+  return sections;
+});
+
+const batchWizardSelectedContacts = computed(() => {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard) return [];
+  return currentChannelContacts.value.filter((item) => wizard.selectedContactIds.includes(item.id));
+});
+
+function batchWizardHasFieldSelection(wizard: BatchSettingsWizardState): boolean {
+  return batchWizardFieldKeys.some((key) => wizard.fields[key]);
+}
+
+function batchWizardHasPatchFieldSelection(wizard: BatchSettingsWizardState): boolean {
+  return batchWizardPatchFieldKeys.some((key) => wizard.fields[key]);
+}
+
+function batchWizardGroupSelectedCount(contacts: RemoteImContact[]): number {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard) return 0;
+  return contacts.filter((contact) => wizard.selectedContactIds.includes(contact.id)).length;
+}
+
+function batchWizardGroupSelectionState(contacts: RemoteImContact[]): "all" | "none" | "partial" {
+  const selected = batchWizardGroupSelectedCount(contacts);
+  if (selected === 0) return "none";
+  return selected === contacts.length ? "all" : "partial";
+}
+
+function batchWizardToggleContactGroup(contacts: RemoteImContact[], selected: boolean) {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard) return;
+  const selectedIds = new Set(wizard.selectedContactIds);
+  for (const contact of contacts) {
+    if (selected) selectedIds.add(contact.id);
+    else selectedIds.delete(contact.id);
+  }
+  wizard.selectedContactIds = Array.from(selectedIds);
+}
+
+const batchWizardCollapsedGroups = ref<Set<string>>(new Set());
+
+function batchWizardIsGroupExpanded(groupKey: string): boolean {
+  return !batchWizardCollapsedGroups.value.has(groupKey);
+}
+
+function batchWizardToggleGroupExpand(groupKey: string) {
+  const next = new Set(batchWizardCollapsedGroups.value);
+  if (next.has(groupKey)) {
+    next.delete(groupKey);
+  } else {
+    next.add(groupKey);
+  }
+  batchWizardCollapsedGroups.value = next;
+}
+
+function batchWizardStateBoxClasses(state: "all" | "none" | "partial") {
+  if (state === "all") return "border-primary bg-primary text-primary-content shadow-xs";
+  if (state === "partial") return "border-primary/50 bg-primary/20 text-primary";
+  return "border-base-content/25 bg-transparent text-transparent";
+}
+
+/** 按单联系人设置同一口径推导「将会发生什么」，未变化项不列出。 */
+function batchWizardPreviewFor(contact: RemoteImContact): BatchWizardChange[] {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard) return [];
+  const changes: BatchWizardChange[] = [];
+  const isPrivate = isPrivateContact(contact);
+
+  if (wizard.fields.agent) {
+    const fromAgent = contactAgentLabel(contact);
+    const toAgent = personaNameById(wizard.agentId);
+    if (fromAgent !== toAgent) {
+      changes.push({ label: t("config.remoteIm.processingAgent"), from: fromAgent, to: toAgent });
+    }
+  }
+
+  if (wizard.fields.model) {
+    const model = wizard.contactModels[contact.id];
+    if (model?.conversationExists) {
+      const fromModel = apiConfigLabelById(model.preferredApiConfigId);
+      const toModel = apiConfigLabelById(wizard.preferredApiConfigId);
+      if (fromModel !== toModel) {
+        changes.push({ label: t("config.remoteIm.preferredModel"), from: fromModel, to: toModel });
+      }
+    }
+  }
+
+  if (wizard.fields.processingMode) {
+    const from = contactProcessingModeLabel(contact);
+    const to = wizard.processingMode === "qa"
+      ? t("config.remoteIm.processingModeQa")
+      : t("config.remoteIm.processingModeContinuous");
+    if (from !== to) {
+      changes.push({ label: t("config.remoteIm.processingMode"), from, to });
+    }
+  }
+
+  if (wizard.fields.activation) {
+    const from = contactActivationModeLabel(contact);
+    const to = isPrivate
+      ? t("config.remoteIm.activateModeAlways")
+      : wizard.activationMode === "always"
+        ? t("config.remoteIm.activateModeAlways")
+        : wizard.activationMode === "keyword"
+          ? t("config.remoteIm.activateModeKeyword")
+          : t("config.remoteIm.activateModeNever");
+    if (from !== to) {
+      changes.push({ label: t("config.remoteIm.activateMode"), from, to });
+    }
+    if (!isPrivate && wizard.activationMode === "keyword") {
+      const fromKeywords = (contact.activationKeywords || []).join(", ");
+      const toKeywords = parseActivationKeywords(wizard.activationKeywordsText).join(", ");
+      if (fromKeywords !== toKeywords) {
+        changes.push({
+          label: t("config.remoteIm.activateKeywords"),
+          from: fromKeywords || t("config.remoteIm.keywordEmpty"),
+          to: toKeywords || t("config.remoteIm.keywordEmpty"),
+        });
+      }
+    }
+  }
+
+  if (wizard.fields.responseStrategy) {
+    const from = contactResponseStrategyLabel(contact);
+    const to = isPrivate || wizard.responseStrategy === "always_reply"
+      ? t("config.remoteIm.responseStrategyAlways")
+      : t("config.remoteIm.responseStrategySmart");
+    if (from !== to) {
+      changes.push({ label: t("config.remoteIm.responseStrategy"), from, to });
+    }
+  }
+
+  if (wizard.fields.communication) {
+    const fromCommunication = !!(contact.allowReceive || contact.allowSend);
+    if (fromCommunication !== wizard.allowCommunication) {
+      changes.push({
+        label: t("config.remoteIm.batchCommunicationLabel"),
+        from: batchWizardEnabledLabel(fromCommunication),
+        to: batchWizardEnabledLabel(wizard.allowCommunication),
+      });
+    }
+    if (!!contact.allowSendFiles !== wizard.allowSendFiles) {
+      changes.push({
+        label: t("config.remoteIm.allowSendFiles"),
+        from: batchWizardEnabledLabel(!!contact.allowSendFiles),
+        to: batchWizardEnabledLabel(wizard.allowSendFiles),
+      });
+    }
+  }
+
+  if (wizard.fields.workspaceAccess) {
+    const workspaces = contact.shellWorkspaces || [];
+    if (workspaces.length > 0) {
+      const currentAccess = Array.from(new Set(workspaces.map((workspace) => workspace.access)));
+      if (currentAccess.some((access) => access !== wizard.workspaceAccess)) {
+        changes.push({
+          label: t("config.remoteIm.workspace"),
+          from: currentAccess.map(workspaceAccessLabel).join(" / "),
+          to: workspaceAccessLabel(wizard.workspaceAccess),
+        });
+      }
+    }
+  }
+
+  if (wizard.fields.group) {
+    const fromGroup = contactGroupLabelById(contactGroupIdOf(contact));
+    const toGroup = contactGroupLabelById(wizard.targetGroupId);
+    if (fromGroup !== toGroup) {
+      changes.push({
+        label: t("config.remoteIm.contactGroupLabel"),
+        from: fromGroup,
+        to: toGroup,
+      });
+    }
+  }
+
+  return changes;
+}
+
+const batchWizardPreviews = computed<BatchWizardPreview[]>(() => {
+  if (!batchSettingsWizard.value) return [];
+  return batchWizardSelectedContacts.value.map((contact) => ({
+    contactId: contact.id,
+    name: contactSafeDisplayName(contact),
+    changes: batchWizardPreviewFor(contact),
+  }));
+});
+
+const batchWizardChangedPreviews = computed(() => (
+  batchWizardPreviews.value.filter((preview) => preview.changes.length > 0)
+));
+
+function syncBatchSettingsDialog() {
+  const dialog = batchSettingsDialogRef.value;
+  if (!dialog) return;
+  if (batchSettingsWizard.value) {
+    if (!dialog.open) dialog.showModal();
+  } else if (dialog.open) {
+    dialog.close();
+  }
+}
+
+watch(batchSettingsWizard, syncBatchSettingsDialog);
+watch(batchSettingsDialogRef, syncBatchSettingsDialog);
+
+function openBatchSettingsWizard() {
+  const defaultScope = groupScopedContacts.value;
+  if (defaultScope.length === 0) return;
+  batchWizardCollapsedGroups.value = new Set();
+  batchSettingsWizard.value = {
+    step: 1,
+    fields: {
+      agent: false,
+      model: false,
+      processingMode: false,
+      activation: false,
+      responseStrategy: false,
+      communication: false,
+      workspaceAccess: false,
+      group: false,
+    },
+    agentId: "support",
+    setPreferredModel: false,
+    preferredApiConfigId: resolveAvailableOrExpertModelId(),
+    processingMode: "continuous",
+    activationMode: "always",
+    activationKeywordsText: "",
+    responseStrategy: "always_reply",
+    allowCommunication: true,
+    allowSendFiles: false,
+    workspaceAccess: "read_only",
+    targetGroupId: "",
+    // 第二步范围是渠道全部联系人，默认只选中进入时的分组，其余分组可自行勾选。
+    selectedContactIds: defaultScope.map((contact) => contact.id),
+    contactSearchQuery: "",
+    contactModels: {},
+    preparing: false,
+    executing: false,
+    error: "",
+    result: null,
+  };
+}
+
+function closeBatchSettingsWizard() {
+  batchSettingsWizard.value = null;
+}
+
+function batchWizardToggleField(key: BatchWizardFieldKey, enabled: boolean) {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard) return;
+  wizard.fields[key] = enabled;
+  if (key === "agent" && enabled && !wizard.agentId) {
+    wizard.agentId = "support";
+  }
+  if (key === "model" && enabled && !wizard.preferredApiConfigId) {
+    wizard.preferredApiConfigId = resolveAvailableOrExpertModelId();
+  }
+  wizard.error = "";
+}
+
+function batchWizardToggleContact(contactId: string, selected: boolean) {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard) return;
+  const selectedIds = new Set(wizard.selectedContactIds);
+  if (selected) selectedIds.add(contactId);
+  else selectedIds.delete(contactId);
+  wizard.selectedContactIds = Array.from(selectedIds);
+}
+
+function batchWizardToggleAllContacts(selected: boolean) {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard) return;
+  wizard.selectedContactIds = selected
+    ? batchWizardScopedContacts.value.map((contact) => contact.id)
+    : [];
+}
+
+function goToBatchWizardContactsStep() {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard) return;
+  if (!batchWizardHasFieldSelection(wizard)) {
+    wizard.error = t("config.remoteIm.batchSelectAtLeastOne");
+    return;
+  }
+  wizard.error = "";
+  wizard.step = 2;
+}
+
+async function goToBatchWizardPreviewStep() {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard || wizard.preparing) return;
+  if (wizard.selectedContactIds.length === 0) {
+    wizard.error = t("config.remoteIm.batchNoContactSelected");
+    return;
+  }
+  wizard.preparing = true;
+  wizard.error = "";
+  try {
+    if (wizard.fields.model) {
+      const entries = await Promise.all(
+        batchWizardSelectedContacts.value.map(async (contact) => (
+          [contact.id, await fetchContactConversationModel(contact.id)] as const
+        )),
+      );
+      wizard.contactModels = Object.fromEntries(entries);
+    } else {
+      wizard.contactModels = {};
+    }
+    wizard.step = 3;
+  } finally {
+    wizard.preparing = false;
+  }
+}
+
+async function executeBatchSettings() {
+  const wizard = batchSettingsWizard.value;
+  if (!wizard || wizard.executing) return;
+  const targets = batchWizardSelectedContacts.value;
+  if (targets.length === 0) {
+    wizard.error = t("config.remoteIm.batchNoContactSelected");
+    return;
+  }
+  wizard.executing = true;
+  wizard.error = "";
+  try {
+    const contactIds = targets.map((contact) => contact.id);
+    let updatedContactCount = 0;
+    let workspaceChangedContactCount = 0;
+    let movedContactCount = 0;
+
+    // 移动到分组是整批一次写入，字段设置走批量 patch，两者可同时勾选。
+    const channelId = selectedChannelId.value;
+    if (wizard.fields.group && channelId) {
+      await invokeTauri("remote_im_set_contact_group", {
+        input: { channelId, contactIds, groupId: wizard.targetGroupId || null },
+      });
+      movedContactCount = contactIds.length;
+    }
+
+    if (batchWizardHasPatchFieldSelection(wizard)) {
+      const input: Record<string, unknown> = { contactIds };
+      if (wizard.fields.agent) input.agentId = wizard.agentId;
+      if (wizard.fields.processingMode) input.processingMode = wizard.processingMode;
+      if (wizard.fields.activation) {
+        input.activationMode = wizard.activationMode;
+        input.activationKeywords = parseActivationKeywords(wizard.activationKeywordsText);
+      }
+      if (wizard.fields.responseStrategy) input.responseStrategy = wizard.responseStrategy;
+      if (wizard.fields.communication) {
+        input.allowCommunication = wizard.allowCommunication;
+        input.allowSendFiles = wizard.allowSendFiles;
+      }
+      if (wizard.fields.workspaceAccess) input.workspaceAccess = wizard.workspaceAccess;
+
+      const result = await invokeTauri<{
+        updatedContactIds: string[];
+        updatedWorkspaceContactCount: number;
+      }>("remote_im_batch_patch_contact_settings", { input });
+      updatedContactCount = result.updatedContactIds.length;
+      workspaceChangedContactCount = result.updatedWorkspaceContactCount;
+    }
+
+    // 首选模型挂在各自会话上，联系人不存储该字段，只能按会话逐个写入。
+    let modelUpdatedCount = 0;
+    let modelSkippedCount = 0;
+    if (wizard.fields.model) {
+      for (const contact of targets) {
+        const model = wizard.contactModels[contact.id];
+        if (!model?.conversationExists || !model.conversationId) {
+          modelSkippedCount += 1;
+          continue;
+        }
+        try {
+          await invokeTauri("conversation.preferredModel.set", {
+            input: {
+              conversationId: model.conversationId,
+              preferredApiConfigId: wizard.preferredApiConfigId || null,
+            },
+          });
+          modelUpdatedCount += 1;
+        } catch (error) {
+          modelSkippedCount += 1;
+          console.warn("[联系人批量设置] 首选模型写入失败", contact.id, error);
+        }
+      }
+    }
+
+    await refreshContacts();
+    wizard.result = {
+      updatedContactCount,
+      workspaceChangedContactCount,
+      modelUpdatedCount,
+      modelSkippedCount,
+      movedContactCount,
+    };
+    wizard.step = 4;
+    props.setStatusAction(
+      movedContactCount > 0 && updatedContactCount === 0
+        ? t("config.remoteIm.moveToGroupDone")
+        : t("config.remoteIm.batchSettingsDone", { count: updatedContactCount }),
+    );
+  } catch (error) {
+    wizard.error = String(error);
+  } finally {
+    wizard.executing = false;
+  }
+}
+
 </script>

@@ -571,4 +571,55 @@ fn ide_chat_remote_im_reconfigure_channel_behavior_for_web_settings(
     ide_chat_serialize(remote_im_reconfigure_channel_behavior_inner(state, channel_id))
 }
 
+fn ide_chat_remote_im_list_contact_groups_for_web_settings(
+    state: &AppState,
+    params: Value,
+) -> Result<Value, String> {
+    let channel_id = params
+        .get("channelId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    ide_chat_serialize(remote_im_list_contact_groups_inner(state, channel_id)?)
+}
+
+fn ide_chat_remote_im_create_contact_group_for_web_settings(
+    state: &AppState,
+    params: Value,
+) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<RemoteImContactGroupCreateInput>(params, "input")?;
+    ide_chat_serialize(remote_im_create_contact_group_inner(state, input)?)
+}
+
+fn ide_chat_remote_im_rename_contact_group_for_web_settings(
+    state: &AppState,
+    params: Value,
+) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<RemoteImContactGroupRenameInput>(params, "input")?;
+    ide_chat_serialize(remote_im_rename_contact_group_inner(state, input)?)
+}
+
+fn ide_chat_remote_im_delete_contact_group_for_web_settings(
+    state: &AppState,
+    params: Value,
+) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<RemoteImContactGroupDeleteInput>(params, "input")?;
+    ide_chat_serialize(remote_im_delete_contact_group_inner(state, input)?)
+}
+
+fn ide_chat_remote_im_set_contact_group_for_web_settings(
+    state: &AppState,
+    params: Value,
+) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<RemoteImSetContactGroupInput>(params, "input")?;
+    ide_chat_serialize(remote_im_set_contact_group_inner(state, input)?)
+}
+
+fn ide_chat_remote_im_batch_patch_contact_settings_for_web_settings(
+    state: &AppState,
+    params: Value,
+) -> Result<Value, String> {
+    let input = ide_chat_parse_param_field::<RemoteImBatchContactSettingsInput>(params, "input")?;
+    ide_chat_serialize(remote_im_batch_patch_contact_settings_inner(state, input)?)
+}
+
 include!("remote_im_methods.rs");

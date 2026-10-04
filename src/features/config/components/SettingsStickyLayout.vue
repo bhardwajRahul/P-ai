@@ -6,7 +6,13 @@
       </div>
     </div>
 
-    <div class="relative min-h-0 flex-1 overflow-hidden" @mouseenter="scrollbarRef?.reveal()" @mouseleave="scrollbarRef?.hide()">
+    <div v-if="noScroll" class="relative min-h-0 flex-1 overflow-hidden flex flex-col">
+      <div class="h-full w-full min-h-0 flex flex-col flex-1" :class="contentClass">
+        <slot />
+      </div>
+    </div>
+
+    <div v-else class="relative min-h-0 flex-1 overflow-hidden" @mouseenter="scrollbarRef?.reveal()" @mouseleave="scrollbarRef?.hide()">
       <div ref="scrollerRef" class="ecall-floating-scroll-target scrollbar-gutter-stable min-h-0 h-full overflow-y-auto overflow-x-hidden pb-24">
         <div class="w-full p-4" :class="contentClass">
           <slot />
@@ -25,9 +31,11 @@ import FloatingScrollbar from "../../shell/components/FloatingScrollbar.vue";
 const props = withDefaults(defineProps<{
   contentClass?: string;
   headerClass?: string;
+  noScroll?: boolean;
 }>(), {
   contentClass: "mx-auto max-w-5xl",
   headerClass: "",
+  noScroll: false,
 });
 
 const scrollerRef = ref<HTMLElement | null>(null);

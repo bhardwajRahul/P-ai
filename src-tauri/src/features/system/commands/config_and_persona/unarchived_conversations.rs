@@ -29,6 +29,12 @@ fn conversation_preferred_model_repair_candidate(
         .unwrap_or_else(|| config.expert_api_config_id.trim().to_string());
     resolve_model_role_api_config_id(config, &primary_id)
         .filter(|resolved_id| config.api_configs.iter().any(|api| api.id == *resolved_id && is_text_chat_api(api)))
+        .or_else(|| {
+            let expert_id = config.expert_api_config_id.trim();
+            (!expert_id.is_empty())
+                .then(|| expert_id.to_string())
+                .filter(|id| config.api_configs.iter().any(|api| api.id == *id && is_text_chat_api(api)))
+        })
 }
 
 fn repair_conversation_preferred_model_for_snapshot(

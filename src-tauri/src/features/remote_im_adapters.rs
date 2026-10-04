@@ -1638,6 +1638,7 @@ mod remote_im_adapter_tests {
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         }
     }
 

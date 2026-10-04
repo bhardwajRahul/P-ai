@@ -512,6 +512,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         state_service_upsert_remote_im_contact(&state, &contact).expect("write contact");
         for conversation in &conversations {
@@ -673,6 +674,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         state_service_upsert_remote_im_contact(&state, &contact).expect("write contact");
         for conversation in &conversations {
@@ -1468,6 +1470,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         }
     }
 
@@ -4741,4 +4744,374 @@
         let blank = test_text_message("user", "   ", &now);
         let fallback = remote_im_reply_delegate_title("contact-uuid", &blank);
         assert_eq!(fallback, "远程应答 · contact-uuid");
+    }
+
+    // ==================== 联系人自定义分组与批量设置 ====================
+
+    fn seed_remote_im_test_contact(
+        state: &AppState,
+        channel_id: &str,
+        remote_contact_type: &str,
+        remote_contact_id: &str,
+    ) -> String {
+        let contact_id = Uuid::new_v4().to_string();
+        let contact = RemoteImContact {
+            id: contact_id.clone(),
+            channel_id: channel_id.to_string(),
+            platform: RemoteImPlatform::OnebotV11,
+            remote_contact_type: remote_contact_type.to_string(),
+            remote_contact_id: remote_contact_id.to_string(),
+            remote_contact_name: String::new(),
+            avatar_url: String::new(),
+            remark_name: String::new(),
+            allow_send: false,
+            allow_send_files: false,
+            allow_receive: false,
+            activation_mode: "never".to_string(),
+            activation_keywords: Vec::new(),
+            mute_keywords: Vec::new(),
+            unmute_keywords: Vec::new(),
+            patience_seconds: 0,
+            mute_duration_seconds: 0,
+            activation_cooldown_seconds: 0,
+            route_mode: "dedicated_contact_conversation".to_string(),
+            bound_agent_id: None,
+            bound_conversation_id: None,
+            processing_mode: "continuous".to_string(),
+            response_strategy: "smart_judge".to_string(),
+            response_guidance: default_remote_im_contact_response_guidance(),
+            blocked_message_prefixes: Vec::new(),
+            group_reply_pacing: RemoteImGroupReplyPacing::default(),
+            last_activated_at: None,
+            last_message_at: None,
+            dingtalk_session_webhook: None,
+            dingtalk_session_webhook_expired_time: None,
+            onebot_group_members: Vec::new(),
+            shell_workspaces: Vec::new(),
+            group_id: None,
+        };
+        state_service_upsert_remote_im_contact(state, &contact).expect("seed remote im contact");
+        contact_id
+    }
+
+    fn create_remote_im_test_group(state: &AppState, channel_id: &str, name: &str) -> RemoteImContactGroup {
+        remote_im_create_contact_group_inner(
+            state,
+            RemoteImContactGroupCreateInput {
+                channel_id: channel_id.to_string(),
+                name: name.to_string(),
+            },
+        )
+        .expect("create contact group")
+    }
+
+    #[test]
+    fn remote_im_contact_group_create_should_reject_duplicate_name_within_channel() {
+        let state = remote_im_test_state();
+        let created = create_remote_im_test_group(&state, "c1", "  工作  ");
+        assert_eq!(created.name, "工作");
+        assert_eq!(created.channel_id, "c1");
+
+        assert!(
+            remote_im_create_contact_group_inner(
+                &state,
+                RemoteImContactGroupCreateInput {
+                    channel_id: "c1".to_string(),
+                    name: "工作".to_string(),
+                },
+            )
+            .is_err(),
+            "同渠道重名必须拒绝"
+        );
+        assert!(
+            remote_im_create_contact_group_inner(
+                &state,
+                RemoteImContactGroupCreateInput {
+                    channel_id: "c1".to_string(),
+                    name: "   ".to_string(),
+                },
+            )
+            .is_err(),
+            "空名必须拒绝"
+        );
+
+        // 另一个渠道同名可建，且两侧列表互不可见
+        let other = create_remote_im_test_group(&state, "c2", "工作");
+        assert_ne!(created.id, other.id);
+        assert_eq!(
+            state_service_list_remote_im_contact_groups(&state, "c1")
+                .expect("list c1 groups")
+                .len(),
+            1
+        );
+        assert_eq!(
+            state_service_list_remote_im_contact_groups(&state, "c2")
+                .expect("list c2 groups")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn remote_im_contact_group_delete_should_detach_members_to_ungrouped() {
+        let state = remote_im_test_state();
+        let group = create_remote_im_test_group(&state, "c1", "工作");
+        let contact_a = seed_remote_im_test_contact(&state, "c1", "group", "g1");
+        let contact_b = seed_remote_im_test_contact(&state, "c1", "group", "g2");
+
+        let moved = remote_im_set_contact_group_inner(
+            &state,
+            RemoteImSetContactGroupInput {
+                channel_id: "c1".to_string(),
+                contact_ids: vec![contact_a.clone(), contact_b.clone()],
+                group_id: Some(group.id.clone()),
+            },
+        )
+        .expect("move contacts into group");
+        assert_eq!(moved.moved_contact_count, 2);
+        assert_eq!(
+            state_service_get_remote_im_contact(&state, &contact_a)
+                .expect("read contact")
+                .expect("contact exists")
+                .group_id
+                .as_deref(),
+            Some(group.id.as_str())
+        );
+
+        let deleted = remote_im_delete_contact_group_inner(
+            &state,
+            RemoteImContactGroupDeleteInput {
+                group_id: group.id.clone(),
+            },
+        )
+        .expect("delete group");
+        assert_eq!(deleted.detached_contact_count, 2);
+        assert!(state_service_list_remote_im_contact_groups(&state, "c1")
+            .expect("list groups")
+            .is_empty());
+        // 联系人本身保留，只是不再属于任何分组
+        assert!(state_service_get_remote_im_contact(&state, &contact_a)
+            .expect("read contact")
+            .expect("contact exists")
+            .group_id
+            .is_none());
+        assert!(remote_im_delete_contact_group_inner(
+            &state,
+            RemoteImContactGroupDeleteInput {
+                group_id: group.id,
+            },
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn remote_im_set_contact_group_should_reject_other_channel_contact() {
+        let state = remote_im_test_state();
+        let group = create_remote_im_test_group(&state, "c1", "工作");
+        let other_channel_contact = seed_remote_im_test_contact(&state, "c2", "group", "g9");
+
+        let err = remote_im_set_contact_group_inner(
+            &state,
+            RemoteImSetContactGroupInput {
+                channel_id: "c1".to_string(),
+                contact_ids: vec![other_channel_contact.clone()],
+                group_id: Some(group.id.clone()),
+            },
+        )
+        .expect_err("跨渠道移动必须拒绝");
+        assert!(err.contains("不属于该渠道"), "unexpected error: {err}");
+        assert!(state_service_get_remote_im_contact(&state, &other_channel_contact)
+            .expect("read contact")
+            .expect("contact exists")
+            .group_id
+            .is_none());
+    }
+
+    #[test]
+    fn remote_im_batch_patch_contact_settings_should_apply_selected_fields() {
+        let state = remote_im_test_state();
+        let group_contact = seed_remote_im_test_contact(&state, "c1", "group", "g1");
+        let private_contact = seed_remote_im_test_contact(&state, "c1", "private", "u1");
+
+        let result = remote_im_batch_patch_contact_settings_inner(
+            &state,
+            RemoteImBatchContactSettingsInput {
+                contact_ids: vec![group_contact.clone(), private_contact.clone()],
+                agent_id: None,
+                processing_mode: Some("qa".to_string()),
+                activation_mode: Some("keyword".to_string()),
+                activation_keywords: Some(vec!["你好".to_string()]),
+                response_strategy: Some("always_reply".to_string()),
+                allow_communication: Some(true),
+                allow_send_files: Some(true),
+                workspace_access: None,
+            },
+        )
+        .expect("batch patch");
+        assert_eq!(result.updated_contact_ids.len(), 2);
+        assert!(result
+            .updated_contact_ids
+            .iter()
+            .any(|id| id == &group_contact));
+
+        let group_after = state_service_get_remote_im_contact(&state, &group_contact)
+            .expect("read contact")
+            .expect("contact exists");
+        assert_eq!(group_after.processing_mode, "qa");
+        assert_eq!(group_after.activation_mode, "keyword");
+        assert_eq!(group_after.activation_keywords, vec!["你好".to_string()]);
+        assert_eq!(group_after.response_strategy, "always_reply");
+        assert!(group_after.allow_receive);
+        assert!(group_after.allow_send);
+        assert!(group_after.allow_send_files);
+        // 未勾选的项（处理人格）必须保持原样
+        assert!(group_after.bound_agent_id.is_none());
+
+        // 私有联系人恒为始终入场 + 始终回复，且不保留点名关键词
+        let private_after = state_service_get_remote_im_contact(&state, &private_contact)
+            .expect("read contact")
+            .expect("contact exists");
+        assert_eq!(private_after.processing_mode, "qa");
+        assert_eq!(private_after.activation_mode, "always");
+        assert!(private_after.activation_keywords.is_empty());
+        assert_eq!(private_after.response_strategy, "always_reply");
+    }
+
+    #[test]
+    fn remote_im_batch_patch_contact_settings_should_abort_when_contact_missing() {
+        let state = remote_im_test_state();
+        let existing = seed_remote_im_test_contact(&state, "c1", "group", "g1");
+
+        let err = remote_im_batch_patch_contact_settings_inner(
+            &state,
+            RemoteImBatchContactSettingsInput {
+                contact_ids: vec![existing.clone(), "missing-contact".to_string()],
+                agent_id: None,
+                processing_mode: Some("qa".to_string()),
+                activation_mode: None,
+                activation_keywords: None,
+                response_strategy: None,
+                allow_communication: None,
+                allow_send_files: None,
+                workspace_access: None,
+            },
+        )
+        .expect_err("含不存在联系人时必须整体拒绝");
+        assert!(err.contains("未找到远程联系人"), "unexpected error: {err}");
+
+        // 已存在的联系人不能被写入半截
+        let after = state_service_get_remote_im_contact(&state, &existing)
+            .expect("read contact")
+            .expect("contact exists");
+        assert_eq!(after.processing_mode, "continuous");
+
+        assert!(
+            remote_im_batch_patch_contact_settings_inner(
+                &state,
+                RemoteImBatchContactSettingsInput {
+                    contact_ids: vec![existing.clone()],
+                    agent_id: None,
+                    processing_mode: None,
+                    activation_mode: None,
+                    activation_keywords: None,
+                    response_strategy: None,
+                    allow_communication: None,
+                    allow_send_files: None,
+                    workspace_access: None,
+                },
+            )
+            .is_err(),
+            "一项变更都没有时必须拒绝"
+        );
+    }
+
+    #[test]
+    fn remote_im_batch_patch_contact_settings_should_unify_workspace_access() {
+        let state = remote_im_test_state();
+        let contact_id = seed_remote_im_test_contact(&state, "c1", "group", "g1");
+        let mut contact = state_service_get_remote_im_contact(&state, &contact_id)
+            .expect("read contact")
+            .expect("contact exists");
+        contact.shell_workspaces = vec![
+            ShellWorkspaceConfig {
+                id: "ws-1".to_string(),
+                name: "story".to_string(),
+                path: "E:/github/story".to_string(),
+                level: SHELL_WORKSPACE_LEVEL_MAIN.to_string(),
+                access: SHELL_WORKSPACE_ACCESS_READ_ONLY.to_string(),
+                built_in: false,
+            },
+            ShellWorkspaceConfig {
+                id: "ws-2".to_string(),
+                name: "easy_call_ai".to_string(),
+                path: "E:/github/easy_call_ai".to_string(),
+                level: "secondary".to_string(),
+                access: SHELL_WORKSPACE_ACCESS_APPROVAL.to_string(),
+                built_in: false,
+            },
+        ];
+        state_service_upsert_remote_im_contact(&state, &contact).expect("seed workspaces");
+
+        let result = remote_im_batch_patch_contact_settings_inner(
+            &state,
+            RemoteImBatchContactSettingsInput {
+                contact_ids: vec![contact_id.clone()],
+                agent_id: None,
+                processing_mode: None,
+                activation_mode: None,
+                activation_keywords: None,
+                response_strategy: None,
+                allow_communication: None,
+                allow_send_files: None,
+                workspace_access: Some("full_access".to_string()),
+            },
+        )
+        .expect("batch patch workspaces");
+        assert_eq!(result.updated_workspace_contact_count, 1);
+
+        let after = state_service_get_remote_im_contact(&state, &contact_id)
+            .expect("read contact")
+            .expect("contact exists");
+        assert_eq!(after.shell_workspaces.len(), 2);
+        assert!(after
+            .shell_workspaces
+            .iter()
+            .all(|workspace| workspace.access == SHELL_WORKSPACE_ACCESS_FULL_ACCESS));
+        // 路径与层级不能被改动
+        assert_eq!(after.shell_workspaces[0].path, "E:/github/story");
+        assert_eq!(after.shell_workspaces[0].level, SHELL_WORKSPACE_LEVEL_MAIN);
+    }
+
+    #[test]
+    fn remote_im_contact_group_id_should_default_to_none_for_legacy_record() {
+        let state = remote_im_test_state();
+        let platform_value =
+            serde_json::to_value(RemoteImPlatform::OnebotV11).expect("serialize platform");
+        let platform_str = platform_value.as_str().expect("platform is string").to_string();
+        let legacy_json = serde_json::json!({
+            "id": "legacy-contact",
+            "channelId": "c1",
+            "platform": platform_value,
+            "remoteContactType": "group",
+            "remoteContactId": "g1",
+            "remoteContactName": "旧记录",
+            "activationMode": "never",
+        })
+        .to_string();
+        {
+            let conn = state_db_open(&state.data_path).expect("open state db");
+            conn.execute(
+                "INSERT INTO remote_im_contacts(id, channel_id, platform, remote_contact_type, remote_contact_id, config_json)
+                 VALUES(?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params!["legacy-contact", "c1", platform_str, "group", "g1", legacy_json],
+            )
+            .expect("insert legacy contact");
+        }
+
+        let contact = state_service_get_remote_im_contact(&state, "legacy-contact")
+            .expect("read legacy contact")
+            .expect("legacy contact exists");
+        assert!(contact.group_id.is_none());
+        assert_eq!(contact.activation_mode, "never");
+        assert_eq!(contact.remote_contact_name, "旧记录");
     }

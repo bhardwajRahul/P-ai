@@ -975,6 +975,7 @@ mod prompt_assembly_tests {
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         state_service_upsert_remote_im_contact(&state, &contact).expect("write contact");
 

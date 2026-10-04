@@ -466,6 +466,14 @@ fn agent_primary_chat_api_config_id(
     agent: &AgentProfile,
 ) -> Option<String> {
     resolve_chat_api_config_id(app_config, &agent_primary_api_config_id(agent))
+        .or_else(|| resolve_chat_api_config_id(app_config, MODEL_ROLE_EXPERT_API_CONFIG_ID))
+        .or_else(|| {
+            app_config
+                .api_configs
+                .iter()
+                .find(|api| is_text_chat_api(api))
+                .map(|api| api.id.clone())
+        })
 }
 
 fn effective_chat_api_config_ids(

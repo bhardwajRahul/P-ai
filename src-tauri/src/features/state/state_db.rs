@@ -8,6 +8,7 @@
 //   pdf_image_cache(file_hash PRIMARY KEY, ...)
 //   remote_im_contacts(id TEXT PRIMARY KEY, channel_id, platform, ..., config_json)
 //   remote_im_group_members(contact_id, user_id, nickname, card, display_name, updated_at)
+//   remote_im_contact_groups(id, channel_id, name, sort_order, created_at, updated_at)  渠道内联系人自定义分组
 //   remote_im_contact_checkpoints(contact_id TEXT PRIMARY KEY, checkpoint_json)
 //   window_layouts(window_label TEXT PRIMARY KEY, width, height, x, y, maximized)
 //   git_repo_history(repo_key TEXT PRIMARY KEY, history_json)
@@ -103,6 +104,16 @@ fn state_db_open(data_path: &PathBuf) -> Result<rusqlite::Connection, String> {
            updated_at TEXT,
            PRIMARY KEY (contact_id, user_id)
          );
+
+         CREATE TABLE IF NOT EXISTS remote_im_contact_groups (
+           id TEXT PRIMARY KEY,
+           channel_id TEXT NOT NULL,
+           name TEXT NOT NULL,
+           sort_order INTEGER NOT NULL DEFAULT 0,
+           created_at TEXT NOT NULL,
+           updated_at TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_remote_im_contact_groups_channel ON remote_im_contact_groups(channel_id);
 
          CREATE TABLE IF NOT EXISTS remote_im_contact_checkpoints (
            contact_id TEXT PRIMARY KEY,

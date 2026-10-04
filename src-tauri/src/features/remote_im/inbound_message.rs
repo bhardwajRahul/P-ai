@@ -50,23 +50,27 @@ fn resolve_contact_agent_id(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
-    let default_agent_id = state_service_get_assistant_agent_id(state)?;
+    let snapshot = load_runtime_organization_snapshot(state)?;
+    let default_agent_id = if runtime_agent_by_id(&snapshot, SUPPORT_AGENT_ID).is_some() {
+        SUPPORT_AGENT_ID.to_string()
+    } else {
+        state_service_get_assistant_agent_id(state)?
+    };
     let hint_agent_id = if let Some(agent_id) = requested_agent_id.as_deref() {
         agent_id
     } else {
         default_agent_id.as_str()
     };
 
-    let snapshot = load_runtime_organization_snapshot(state)?;
-    // 显式绑定的人格已被删除时回落到助理人格，不让这条路由直接断掉。
+    // 显式绑定的人格已被删除时回落到客服/助理人格，不让这条路由直接断掉。
     let agent = match runtime_agent_by_id(&snapshot, hint_agent_id) {
         Some(agent) => agent,
         None => {
             runtime_log_warn(format!(
-                "[远程IM] 路由人格已不存在，回落到助理人格: agent_id={hint_agent_id}"
+                "[远程IM] 路由人格已不存在，回落到默认客服/助理人格: agent_id={hint_agent_id}"
             ));
             runtime_agent_by_id(&snapshot, &default_agent_id)
-                .ok_or_else(|| format!("助理人格不存在: {default_agent_id}"))?
+                .ok_or_else(|| format!("默认人格不存在: {default_agent_id}"))?
         }
     };
     agent_primary_chat_api_config_id(&snapshot.config, agent)

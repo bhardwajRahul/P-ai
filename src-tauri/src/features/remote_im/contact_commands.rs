@@ -632,6 +632,7 @@ fn remote_im_list_contacts(state: State<'_, AppState>) -> Result<Vec<RemoteImCon
 /// 联系人处理模型存在哪：模型挂在联系人的会话上（会话 preferred_api_config_id），
 /// 联系人自身不存模型。这里只做只读解析——会话被删/归档时 conversation_exists=false，
 /// 前端据此禁用模型选择器，绝不顺手重建会话。
+#[allow(dead_code)]
 fn remote_im_find_existing_contact_conversation_id(
     state: &AppState,
     contact: &RemoteImContact,
@@ -685,20 +686,41 @@ fn remote_im_get_contact_conversation_model_inner(
         conversation_exists: false,
         preferred_api_config_id: None,
     };
-    let Some(contact) = state_service_get_remote_im_contact(state, contact_id)? else {
+    let Some(mut contact) = state_service_get_remote_im_contact(state, contact_id)? else {
         return Ok(empty_output);
     };
-    let Some(conversation_id) =
-        remote_im_find_existing_contact_conversation_id(state, &contact)?
-    else {
-        return Ok(empty_output);
-    };
-    let preferred_api_config_id = conversation_service_v2()
+    let conversation_id = ensure_remote_im_contact_conversation_id(state, &mut contact)?;
+    let _ = state_service_upsert_remote_im_contact(state, &contact);
+
+    let raw_model = conversation_service_v2()
         .get_conversation_meta(state, &conversation_id)
         .ok()
         .and_then(|conversation_meta| conversation_meta.preferred_api_config_id)
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let config = state_read_config_cached(state)?;
+    let is_valid_text_api = |id: &str| {
+        config.api_configs.iter().any(|api| api.id == id && is_text_chat_api(api))
+    };
+    let preferred_api_config_id = match raw_model {
+        Some(ref id) if is_valid_text_api(id) => Some(id.clone()),
+        _ => {
+            let expert_id = config.expert_api_config_id.trim();
+            if !expert_id.is_empty() && is_valid_text_api(expert_id) {
+                Some(expert_id.to_string())
+            } else {
+                config.api_configs.iter().find(|api| is_text_chat_api(api)).map(|api| api.id.clone())
+            }
+        }
+    };
+    // 若会话尚未固化首选模型或原模型已丢失，自动将兜底专家模型回写给会话
+    if raw_model != preferred_api_config_id {
+        let _ = conversation_service_v2().set_preferred_api_config_id(
+            state,
+            &conversation_id,
+            preferred_api_config_id.clone(),
+        );
+    }
     Ok(RemoteImContactConversationModelOutput {
         conversation_id: Some(conversation_id),
         conversation_exists: true,
@@ -962,6 +984,353 @@ fn remote_im_patch_contact_settings(
     state: State<'_, AppState>,
 ) -> Result<RemoteImContact, String> {
     remote_im_patch_contact_settings_inner(state.inner(), input)
+}
+
+// ==================== 联系人自定义分组 ====================
+
+const REMOTE_IM_CONTACT_GROUP_NAME_MAX_CHARS: usize = 20;
+
+fn normalize_remote_im_contact_group_name(raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err("分组名不能为空".to_string());
+    }
+    if name.chars().count() > REMOTE_IM_CONTACT_GROUP_NAME_MAX_CHARS {
+        return Err(format!(
+            "分组名最多 {} 个字",
+            REMOTE_IM_CONTACT_GROUP_NAME_MAX_CHARS
+        ));
+    }
+    Ok(name.to_string())
+}
+
+/// 去重并剔除空白项；全空时拒绝，避免把空 id 带进事务。
+fn normalize_remote_im_contact_ids(raw: &[String]) -> Result<Vec<String>, String> {
+    let mut contact_ids: Vec<String> = Vec::new();
+    for item in raw {
+        let id = item.trim();
+        if id.is_empty() {
+            continue;
+        }
+        if !contact_ids.iter().any(|existing| existing == id) {
+            contact_ids.push(id.to_string());
+        }
+    }
+    if contact_ids.is_empty() {
+        return Err("contactIds 不能为空".to_string());
+    }
+    Ok(contact_ids)
+}
+
+fn remote_im_list_contact_groups_inner(
+    state: &AppState,
+    channel_id: &str,
+) -> Result<Vec<RemoteImContactGroup>, String> {
+    let channel_id = channel_id.trim();
+    if channel_id.is_empty() {
+        return Err("channelId 不能为空".to_string());
+    }
+    state_service_list_remote_im_contact_groups(state, channel_id)
+}
+
+#[tauri::command]
+fn remote_im_list_contact_groups(
+    channel_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<RemoteImContactGroup>, String> {
+    remote_im_list_contact_groups_inner(state.inner(), &channel_id)
+}
+
+fn remote_im_create_contact_group_inner(
+    state: &AppState,
+    input: RemoteImContactGroupCreateInput,
+) -> Result<RemoteImContactGroup, String> {
+    let channel_id = input.channel_id.trim();
+    if channel_id.is_empty() {
+        return Err("channelId 不能为空".to_string());
+    }
+    let name = normalize_remote_im_contact_group_name(&input.name)?;
+    if state_service_remote_im_contact_group_name_exists(state, channel_id, &name, None)? {
+        return Err(format!("分组名已存在：{name}"));
+    }
+    let now = now_iso();
+    let group = RemoteImContactGroup {
+        id: Uuid::new_v4().to_string(),
+        channel_id: channel_id.to_string(),
+        name: name.clone(),
+        sort_order: state_service_next_remote_im_contact_group_sort_order(state, channel_id)?,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    state_service_upsert_remote_im_contact_group(state, &group)?;
+    runtime_log_info(format!(
+        "[远程IM] 联系人分组创建完成，channel_id={channel_id}，group_id={}，name={name}",
+        group.id
+    ));
+    Ok(group)
+}
+
+#[tauri::command]
+fn remote_im_create_contact_group(
+    input: RemoteImContactGroupCreateInput,
+    state: State<'_, AppState>,
+) -> Result<RemoteImContactGroup, String> {
+    remote_im_create_contact_group_inner(state.inner(), input)
+}
+
+fn remote_im_rename_contact_group_inner(
+    state: &AppState,
+    input: RemoteImContactGroupRenameInput,
+) -> Result<(), String> {
+    let group_id = input.group_id.trim();
+    if group_id.is_empty() {
+        return Err("groupId 不能为空".to_string());
+    }
+    let name = normalize_remote_im_contact_group_name(&input.name)?;
+    let channel_id = state_service_remote_im_contact_group_channel_id(state, group_id)?
+        .ok_or_else(|| "联系人分组不存在".to_string())?;
+    if state_service_remote_im_contact_group_name_exists(state, &channel_id, &name, Some(group_id))? {
+        return Err(format!("分组名已存在：{name}"));
+    }
+    if !state_service_rename_remote_im_contact_group(state, group_id, &name, &now_iso())? {
+        return Err("联系人分组不存在".to_string());
+    }
+    runtime_log_info(format!(
+        "[远程IM] 联系人分组重命名完成，group_id={group_id}，name={name}"
+    ));
+    Ok(())
+}
+
+#[tauri::command]
+fn remote_im_rename_contact_group(
+    input: RemoteImContactGroupRenameInput,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    remote_im_rename_contact_group_inner(state.inner(), input)
+}
+
+fn remote_im_delete_contact_group_inner(
+    state: &AppState,
+    input: RemoteImContactGroupDeleteInput,
+) -> Result<RemoteImContactGroupDeleteResult, String> {
+    let group_id = input.group_id.trim();
+    if group_id.is_empty() {
+        return Err("groupId 不能为空".to_string());
+    }
+    if state_service_remote_im_contact_group_channel_id(state, group_id)?.is_none() {
+        return Err("联系人分组不存在".to_string());
+    }
+    let detached_contact_count = state_service_delete_remote_im_contact_group(state, group_id)?;
+    runtime_log_info(format!(
+        "[远程IM] 联系人分组删除完成，group_id={group_id}，回落未分组联系人={detached_contact_count}"
+    ));
+    Ok(RemoteImContactGroupDeleteResult {
+        detached_contact_count,
+    })
+}
+
+#[tauri::command]
+fn remote_im_delete_contact_group(
+    input: RemoteImContactGroupDeleteInput,
+    state: State<'_, AppState>,
+) -> Result<RemoteImContactGroupDeleteResult, String> {
+    remote_im_delete_contact_group_inner(state.inner(), input)
+}
+
+fn remote_im_set_contact_group_inner(
+    state: &AppState,
+    input: RemoteImSetContactGroupInput,
+) -> Result<RemoteImSetContactGroupResult, String> {
+    let channel_id = input.channel_id.trim();
+    if channel_id.is_empty() {
+        return Err("channelId 不能为空".to_string());
+    }
+    let contact_ids = normalize_remote_im_contact_ids(&input.contact_ids)?;
+    let group_id = input
+        .group_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if let Some(group_id) = group_id {
+        let group_channel_id = state_service_remote_im_contact_group_channel_id(state, group_id)?
+            .ok_or_else(|| "联系人分组不存在".to_string())?;
+        if group_channel_id != channel_id {
+            return Err("联系人分组不属于该渠道".to_string());
+        }
+    }
+    let moved_contact_count =
+        state_service_set_remote_im_contacts_group(state, channel_id, &contact_ids, group_id)?;
+    runtime_log_info(format!(
+        "[远程IM] 联系人分组移动完成，channel_id={channel_id}，group_id={}，contact_count={moved_contact_count}",
+        group_id.unwrap_or("")
+    ));
+    Ok(RemoteImSetContactGroupResult {
+        moved_contact_count,
+    })
+}
+
+#[tauri::command]
+fn remote_im_set_contact_group(
+    input: RemoteImSetContactGroupInput,
+    state: State<'_, AppState>,
+) -> Result<RemoteImSetContactGroupResult, String> {
+    remote_im_set_contact_group_inner(state.inner(), input)
+}
+
+// ==================== 联系人批量设置 ====================
+
+fn remote_im_batch_patch_contact_settings_inner(
+    state: &AppState,
+    input: RemoteImBatchContactSettingsInput,
+) -> Result<RemoteImBatchContactSettingsResult, String> {
+    if input.agent_id.is_none()
+        && input.processing_mode.is_none()
+        && input.activation_mode.is_none()
+        && input.activation_keywords.is_none()
+        && input.response_strategy.is_none()
+        && input.allow_communication.is_none()
+        && input.allow_send_files.is_none()
+        && input.workspace_access.is_none()
+    {
+        return Err("批量设置至少要包含一项变更".to_string());
+    }
+    let contact_ids = normalize_remote_im_contact_ids(&input.contact_ids)?;
+    let runtime_snapshot = match load_runtime_organization_snapshot(state) {
+        Ok(snapshot) => Some(snapshot),
+        Err(err) => {
+            runtime_log_warn(format!(
+                "[远程IM] 联系人批量设置读取组织配置失败，本次按输入保存并延后校验，error={err}"
+            ));
+            None
+        }
+    };
+    let next_agent = match input
+        .agent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(agent_id) if runtime_snapshot.is_some() => {
+            Some(resolve_contact_agent_id(state, Some(agent_id))?)
+        }
+        Some(agent_id) => Some(agent_id.to_string()),
+        None => None,
+    };
+    let next_processing_mode = input
+        .processing_mode
+        .as_deref()
+        .map(normalize_contact_processing_mode);
+    let next_activation_mode = input
+        .activation_mode
+        .as_deref()
+        .map(normalize_contact_activation_mode);
+    let next_activation_keywords = input
+        .activation_keywords
+        .as_ref()
+        .map(|keywords| normalize_contact_activation_keywords(keywords));
+    let next_response_strategy = input
+        .response_strategy
+        .as_deref()
+        .map(normalize_contact_response_strategy);
+    let next_workspace_access = input
+        .workspace_access
+        .as_deref()
+        .map(normalize_shell_workspace_access_text);
+
+    let mut contacts = Vec::with_capacity(contact_ids.len());
+    let mut updated_workspace_contact_count = 0usize;
+    for contact_id in &contact_ids {
+        let mut contact = remote_im_get_contact_by_id(state, contact_id)?;
+        let is_private = remote_im_contact_is_private(&contact);
+        if input.agent_id.is_some() {
+            contact.bound_agent_id = next_agent.clone();
+            contact.route_mode = runtime_snapshot
+                .as_ref()
+                .map(|snapshot| remote_im_resolve_effective_route_mode(&snapshot.config, &contact))
+                .unwrap_or_else(|| "dedicated_contact_conversation".to_string());
+        }
+        if let Some(mode) = &next_processing_mode {
+            contact.processing_mode = mode.clone();
+        }
+        if input.activation_mode.is_some()
+            || input.activation_keywords.is_some()
+            || input.response_strategy.is_some()
+        {
+            // 私有联系人恒为始终入场 + 始终回复，与单联系人设置保持同一口径
+            if is_private {
+                contact.activation_mode = "always".to_string();
+                contact.activation_keywords.clear();
+                contact.response_strategy = "always_reply".to_string();
+            } else {
+                if let Some(mode) = &next_activation_mode {
+                    contact.activation_mode = mode.clone();
+                }
+                if let Some(keywords) = &next_activation_keywords {
+                    contact.activation_keywords = keywords.clone();
+                }
+                if let Some(strategy) = &next_response_strategy {
+                    contact.response_strategy = strategy.clone();
+                }
+            }
+        }
+        if let Some(enabled) = input.allow_communication {
+            contact.allow_receive = enabled;
+            contact.allow_send = enabled;
+        }
+        if let Some(allow_send_files) = input.allow_send_files {
+            contact.allow_send_files = allow_send_files;
+        }
+        if let Some(access) = &next_workspace_access {
+            let mut changed = false;
+            for workspace in contact.shell_workspaces.iter_mut() {
+                if workspace.access != *access {
+                    workspace.access = access.clone();
+                    changed = true;
+                }
+            }
+            if changed {
+                updated_workspace_contact_count = updated_workspace_contact_count.saturating_add(1);
+            }
+        }
+        contacts.push(contact);
+    }
+
+    state_service_upsert_remote_im_contacts(state, &contacts)?;
+
+    // 会话侧绑定同步与单联系人设置一致：失败只降级记录，不回滚已保存的联系人字段
+    for contact in &contacts {
+        let conversation_id = contact
+            .bound_conversation_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let Some(conversation_id) = conversation_id else {
+            continue;
+        };
+        if let Err(err) = sync_remote_im_contact_conversation_binding(state, contact, conversation_id) {
+            runtime_log_warn(format!(
+                "[远程IM] 联系人批量设置已保存，会话绑定同步降级，contact_id={}，conversation_id={conversation_id}，error={err}",
+                contact.id
+            ));
+        }
+    }
+
+    runtime_log_info(format!(
+        "[远程IM] 联系人批量设置完成，contact_count={}，workspace_changed_contacts={updated_workspace_contact_count}",
+        contacts.len()
+    ));
+    Ok(RemoteImBatchContactSettingsResult {
+        updated_contact_ids: contacts.iter().map(|contact| contact.id.clone()).collect(),
+        updated_workspace_contact_count,
+    })
+}
+
+#[tauri::command]
+fn remote_im_batch_patch_contact_settings(
+    input: RemoteImBatchContactSettingsInput,
+    state: State<'_, AppState>,
+) -> Result<RemoteImBatchContactSettingsResult, String> {
+    remote_im_batch_patch_contact_settings_inner(state.inner(), input)
 }
 
 #[tauri::command]

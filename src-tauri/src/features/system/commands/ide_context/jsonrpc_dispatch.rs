@@ -577,6 +577,24 @@ async fn ide_chat_handle_jsonrpc_request(
         "remote_im_reconfigure_channel_behavior" => {
             ide_chat_remote_im_reconfigure_channel_behavior_for_web_settings(state, request.params)
         }
+        "remote_im_list_contact_groups" => {
+            ide_chat_remote_im_list_contact_groups_for_web_settings(state, request.params)
+        }
+        "remote_im_create_contact_group" => {
+            ide_chat_remote_im_create_contact_group_for_web_settings(state, request.params)
+        }
+        "remote_im_rename_contact_group" => {
+            ide_chat_remote_im_rename_contact_group_for_web_settings(state, request.params)
+        }
+        "remote_im_delete_contact_group" => {
+            ide_chat_remote_im_delete_contact_group_for_web_settings(state, request.params)
+        }
+        "remote_im_set_contact_group" => {
+            ide_chat_remote_im_set_contact_group_for_web_settings(state, request.params)
+        }
+        "remote_im_batch_patch_contact_settings" => {
+            ide_chat_remote_im_batch_patch_contact_settings_for_web_settings(state, request.params)
+        }
         "remoteIm.dashboard.subscribe" => {
             remote_im_subscribe_contact_dashboard_for_web(state, request.params, client_id)
         }

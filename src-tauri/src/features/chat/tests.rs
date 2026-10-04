@@ -2872,6 +2872,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         state_service_upsert_remote_im_contact(&state, &contact).expect("write contact");
         state_write_app_data_cached(&state, &data).expect("write app data");
@@ -7713,6 +7714,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         state_service_upsert_remote_im_contact(&state, &contact).expect("write contact");
 
@@ -7796,6 +7798,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         let mut target_remote = build_conversation_record(
             "",
@@ -8060,6 +8063,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         state_service_upsert_remote_im_contact(&state, &contact).expect("write contact");
 
@@ -8096,7 +8100,7 @@
         let updated_conversation =
             state_read_conversation_cached(&state, "conversation-contact-old")
                 .expect("read rebound conversation");
-        assert_eq!(updated_conversation.agent_id, DEFAULT_AGENT_ID);
+        assert_eq!(updated_conversation.agent_id, SUPPORT_AGENT_ID);
     }
 
     #[tokio::test]
@@ -8137,6 +8141,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         state_service_upsert_remote_im_contact(&state, &contact).expect("write contact");
 
@@ -9261,6 +9266,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         state_service_upsert_remote_im_contact(&state, &contact).expect("write contact");
         state_write_app_data_cached(&state, &data).expect("write app data");
@@ -10277,6 +10283,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         let group_contact = RemoteImContact {
             id: "contact-group".to_string(),
@@ -10311,6 +10318,7 @@
             dingtalk_session_webhook_expired_time: None,
             onebot_group_members: Vec::new(),
             shell_workspaces: Vec::new(),
+            group_id: None,
         };
         state_service_upsert_remote_im_contact(&state, &private_contact).expect("write private contact");
         state_service_upsert_remote_im_contact(&state, &group_contact).expect("write group contact");

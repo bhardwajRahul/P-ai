@@ -1,5 +1,5 @@
 <template>
-  <SettingsStickyLayout :content-class="contentClass" :header-class="headerClass">
+  <SettingsStickyLayout :no-scroll="noScroll" :content-class="contentClass" :header-class="headerClass">
     <template #header>
       <slot name="breadcrumb">
         <SettingsBreadcrumb :items="breadcrumb" />
@@ -21,13 +21,26 @@
       </div>
     </template>
 
-    <div class="ecall-tab-stage" :style="slideStyle">
+    <div
+      v-if="tabs.length"
+      class="ecall-tab-stage"
+      :class="{ 'h-full min-h-0 flex-1': noScroll }"
+      :style="slideStyle"
+    >
       <Transition name="ecall-tab-slide">
-        <div :key="panelKey" class="ecall-tab-panel">
+        <div
+          :key="panelKey"
+          class="ecall-tab-panel"
+          :class="{ 'h-full min-h-0 flex flex-col flex-1': noScroll }"
+        >
           <slot />
         </div>
       </Transition>
     </div>
+    <div v-else-if="noScroll" class="h-full min-h-0 flex flex-col flex-1 overflow-hidden">
+      <slot />
+    </div>
+    <slot v-else />
   </SettingsStickyLayout>
 </template>
 
@@ -48,12 +61,15 @@ const props = withDefaults(defineProps<{
   headerClass?: string;
   /** 传给 SettingsStickyLayout 的内容内层类 */
   contentClass?: string;
+  /** 是否禁用外部滚动（用于内部独立滚动的工作台视图） */
+  noScroll?: boolean;
 }>(), {
   breadcrumb: () => [],
   tabs: () => [],
   tab: "",
   headerClass: "pb-0",
   contentClass: undefined,
+  noScroll: false,
 });
 
 const emit = defineEmits<{
