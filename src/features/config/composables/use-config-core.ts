@@ -334,7 +334,7 @@ export function useConfigCore(options: UseConfigCoreOptions) {
       messageNotificationSoundEnabled: !!options.config.messageNotificationSoundEnabled,
       desktopOperationNoticeEnabled: !!options.config.desktopOperationNoticeEnabled,
       desktopOperateEnabled: !!options.config.desktopOperateEnabled,
-      selectedApiConfigId: options.config.selectedApiConfigId,
+      selectedApiConfigId: String(options.config.selectedApiConfigId ?? ""),
       expertApiConfigId: options.config.expertApiConfigId,
       ...(options.config.visionApiConfigId ? { visionApiConfigId: options.config.visionApiConfigId } : {}),
       ...(imageGenerationModelId ? { imageGenerationModelId } : {}),

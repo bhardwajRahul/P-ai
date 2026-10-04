@@ -595,6 +595,13 @@ maxOutputTokens = 8192
     }
 
     #[test]
+    fn app_config_should_accept_save_payload_without_selected_api_config_id() {
+        let cfg: AppConfig = serde_json::from_str(r#"{"hotkey":"Alt+·"}"#)
+            .expect("缺少 selectedApiConfigId 时仍应能反序列化");
+        assert_eq!(cfg.selected_api_config_id, "");
+    }
+
+    #[test]
     fn read_config_should_materialize_missing_model_enable_audio_as_false() {
         let root = std::env::temp_dir().join(format!("eca-config-enable-audio-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).expect("create temp config dir");

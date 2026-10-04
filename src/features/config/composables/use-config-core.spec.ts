@@ -89,4 +89,15 @@ describe("useConfigCore api provider displayName", () => {
     expect(payload.apiProviders[0]?.models[0]?.displayName).toBe("我的显示名");
     expect(snapshot.apiProviders[0]?.models[0]?.displayName).toBe("我的显示名");
   });
+
+  it("selectedApiConfigId 缺失时保存载荷仍写出空字符串", () => {
+    const config = createConfig();
+    (config as { selectedApiConfigId?: string }).selectedApiConfigId = undefined;
+    const core = useConfigCore({
+      config,
+      textCapableApiConfigs: computed(() => []),
+    });
+
+    expect(core.buildConfigPayload().selectedApiConfigId).toBe("");
+  });
 });
