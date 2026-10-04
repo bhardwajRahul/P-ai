@@ -355,25 +355,25 @@ fn set_conversation_runtime_state(
     state: &AppState,
     conversation_id: &str,
     new_state: MainSessionState,
-) -> Result<(), String> {
-    let (old_state_cn, new_state_cn) = {
+) -> Result<MainSessionState, String> {
+    let (old_state, old_state_cn, new_state_cn) = {
         let mut slots = lock_conversation_runtime_slots(state)?;
         let slot = conversation_slot_mut(&mut slots, conversation_id);
         let old_state = slot.state.clone();
         slot.state = new_state.clone();
         slot.last_activity_at = now_iso();
 
-        let old_state_cn = match old_state {
+        let old_state_cn = match &old_state {
             MainSessionState::Idle => "空闲",
             MainSessionState::AssistantStreaming => "助理流式输出",
             MainSessionState::OrganizingContext => "整理上下文",
         };
-        let new_state_cn = match new_state {
+        let new_state_cn = match &new_state {
             MainSessionState::Idle => "空闲",
             MainSessionState::AssistantStreaming => "助理流式输出",
             MainSessionState::OrganizingContext => "整理上下文",
         };
-        (old_state_cn, new_state_cn)
+        (old_state, old_state_cn, new_state_cn)
     };
 
     runtime_log_info(format!(
@@ -382,7 +382,7 @@ fn set_conversation_runtime_state(
     ));
 
     emit_chat_queue_snapshot(state);
-    Ok(())
+    Ok(old_state)
 }
 
 pub(crate) fn set_conversation_runtime_state_and_emit(
@@ -390,14 +390,27 @@ pub(crate) fn set_conversation_runtime_state_and_emit(
     conversation_id: &str,
     new_state: MainSessionState,
 ) -> Result<(), String> {
-    set_conversation_runtime_state(state, conversation_id, new_state.clone())?;
+    let old_state = set_conversation_runtime_state(state, conversation_id, new_state.clone())?;
     emit_conversation_runtime_state_updated_payload(
         state,
         &ConversationRuntimeStateUpdatedPayload {
             conversation_id: conversation_id.trim().to_string(),
-            runtime_state: new_state,
+            runtime_state: new_state.clone(),
         },
     );
+    if old_state == MainSessionState::OrganizingContext
+        || new_state == MainSessionState::OrganizingContext
+    {
+        if let Err(err) = emit_unarchived_conversation_overview_item_updated_from_state(
+            state,
+            conversation_id,
+        ) {
+            runtime_log_warn(format!(
+                "[会话概览] 跳过，任务=整理上下文水位，conversation_id={}，error={}",
+                conversation_id, err
+            ));
+        }
+    }
     Ok(())
 }
 

@@ -1320,6 +1320,15 @@ impl ConversationServiceV2 {
                 )
             },
         )?;
+        if let Err(err) = emit_unarchived_conversation_overview_item_updated_from_state(
+            state,
+            normalized_conversation_id,
+        ) {
+            runtime_log_warn(format!(
+                "[会话概览] 跳过，任务=元数据更新后推送单会话，conversation_id={}，error={}",
+                normalized_conversation_id, err
+            ));
+        }
         Ok(conversation)
     }
 

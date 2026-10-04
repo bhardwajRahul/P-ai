@@ -56,6 +56,21 @@ fn monitor_publish_changed(
         }
     }
     ide_chat_broadcast_notification(MONITOR_CHANGED_NOTIFICATION_METHOD, payload);
+    let conversation_id = conversation_id.trim();
+    if conversation_id.is_empty() {
+        return;
+    }
+    if let Err(err) = emit_unarchived_conversation_overview_item_updated_from_state(
+        state,
+        conversation_id,
+    ) {
+        runtime_log_warn(format!(
+            "[会话概览] 跳过，任务=后台账本变动后推送单会话，conversation_id={}，domain={}，error={}",
+            conversation_id,
+            domain.as_str(),
+            err
+        ));
+    }
 }
 
 #[cfg(test)]
