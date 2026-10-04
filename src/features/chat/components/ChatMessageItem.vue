@@ -674,6 +674,7 @@ import { AppMarkdownRenderer, initKatex, parseMarkdownBlocks, type MarkdownBlock
 import InlineMarkdownText from "../markdown/InlineMarkdownText.vue";
 import { normalizeLocalLinkHref } from "../utils/local-link";
 import { textContentSignature } from "../utils/text-signature";
+import { createStreamingSizeLock, observeStreamingSize, streamingSizeLockStyle } from "../utils/streaming-size-lock";
 import { sliceNaturalSentencePrefix } from "../utils/text-slicing";
 import { createToolCallPresentation } from "../utils/tool-call-presentation";
 import { buildToolcallPreviewMap, parseToolCallResultStatus, type ToolcallPreviewEntry } from "../utils/toolcall-preview";
@@ -812,16 +813,19 @@ const visibleAssistantPieces = computed(() => {
   return pieces.slice(-1);
 });
 // ==================== 流式气泡尺寸防抖（单调非减尺寸锁定） ====================
-// 在流式生成期间，只允许气泡变大，禁止变小或回缩，消除未闭合结构/语法重构时的抽搐
+// 锁只跟着当前正在输出的那一段。折叠收起上一段、或工具切开新段时，旧高度不能套到新段上。
 const assistantBubbleRef = ref<HTMLElement | null>(null);
 const activeStreamingSegmentEl = ref<HTMLElement | null>(null);
 const streamingTargetEl = computed(() => activeStreamingSegmentEl.value || assistantBubbleRef.value);
-const streamingMinHeight = ref<number | null>(null);
-const streamingMinWidth = ref<number | null>(null);
-let maxObservedHeight = 0;
-let maxObservedWidth = 0;
+const streamingSizeLock = ref(createStreamingSizeLock());
 let streamingResizeObserver: ResizeObserver | null = null;
 let releaseStreamingLockTimer: ReturnType<typeof setTimeout> | null = null;
+
+function currentStreamingPieceIndex(): number {
+  if (plainMarkdownDebugEnabled) return 0;
+  const length = assistantMarkdownPieces.value.length;
+  return length > 0 ? length - 1 : -1;
+}
 
 function isStreamingPiece(pieceIndex: number): boolean {
   return !!props.block.isStreaming && pieceIndex === assistantMarkdownPieces.value.length - 1;
@@ -833,17 +837,13 @@ function setStreamingSegmentRef(el: unknown, pieceIndex: number) {
   }
 }
 
-const streamingBubbleStyle = computed<StyleValue | undefined>(() => {
-  const styles: Record<string, string> = {};
-  if (streamingMinHeight.value !== null && streamingMinHeight.value > 0) {
-    styles.minHeight = `${streamingMinHeight.value}px`;
-  }
-  if (streamingMinWidth.value !== null && streamingMinWidth.value > 0) {
-    // 限制在当前可用容器宽度内（最大 100%），窗口缩窄时可自然收缩不溢出
-    styles.minWidth = `min(${streamingMinWidth.value}px, 100%)`;
-  }
-  return Object.keys(styles).length > 0 ? styles : undefined;
-});
+function isStreamingSegmentTarget(el: HTMLElement | null | undefined): el is HTMLElement {
+  return !!el && el !== assistantBubbleRef.value;
+}
+
+const streamingBubbleStyle = computed<StyleValue | undefined>(() =>
+  streamingSizeLockStyle(streamingSizeLock.value, currentStreamingPieceIndex()),
+);
 
 let streamingSizeRafId = 0;
 
@@ -865,33 +865,39 @@ function clearStreamingReleaseTimer() {
   }
 }
 
-function setupStreamingObserver(el: HTMLElement | null) {
+function rememberStreamingSegmentSize(el: HTMLElement, pieceIndex: number) {
+  streamingSizeLock.value = observeStreamingSize(
+    streamingSizeLock.value,
+    pieceIndex,
+    Math.ceil(el.offsetHeight),
+    Math.ceil(el.offsetWidth),
+    el.parentElement?.clientWidth ?? 0,
+  );
+}
+
+function setupStreamingObserver(el: HTMLElement) {
   teardownStreamingObserver();
-  if (!el || typeof ResizeObserver === "undefined") return;
+  if (typeof ResizeObserver === "undefined") return;
   streamingResizeObserver = new ResizeObserver((entries) => {
     if (!props.block.isStreaming) return;
     if (streamingSizeRafId) return;
     streamingSizeRafId = window.requestAnimationFrame(() => {
       streamingSizeRafId = 0;
       if (!props.block.isStreaming) return;
+      const pieceIndex = currentStreamingPieceIndex();
       for (const entry of entries) {
         const target = entry.target as HTMLElement;
+        if (target !== activeStreamingSegmentEl.value) continue;
         const currentHeight = Math.ceil(target.offsetHeight || entry.contentRect.height);
         const currentWidth = Math.ceil(target.offsetWidth || entry.contentRect.width);
-        if (currentHeight > maxObservedHeight) {
-          maxObservedHeight = currentHeight;
-          streamingMinHeight.value = maxObservedHeight;
-        }
         const parentWidth = target.parentElement ? target.parentElement.clientWidth : 0;
-        if (parentWidth > 0 && maxObservedWidth > parentWidth) {
-          maxObservedWidth = parentWidth;
-        }
-        if (currentWidth > maxObservedWidth) {
-          maxObservedWidth = parentWidth > 0 ? Math.min(currentWidth, parentWidth) : currentWidth;
-        }
-        if (maxObservedWidth > 0) {
-          streamingMinWidth.value = maxObservedWidth;
-        }
+        streamingSizeLock.value = observeStreamingSize(
+          streamingSizeLock.value,
+          pieceIndex,
+          currentHeight,
+          currentWidth,
+          parentWidth,
+        );
       }
     });
   });
@@ -899,39 +905,35 @@ function setupStreamingObserver(el: HTMLElement | null) {
 }
 
 watch(
-  () => [props.block.id, props.block.isStreaming, streamingTargetEl.value] as const,
-  ([messageId, isStreaming, el], prev) => {
+  () => [props.block.id, props.block.isStreaming, currentStreamingPieceIndex(), streamingTargetEl.value] as const,
+  ([messageId, isStreaming, pieceIndex, el], prev) => {
     const prevMessageId = prev?.[0];
     const prevStreaming = prev?.[1];
-    if (prevMessageId !== undefined && messageId !== prevMessageId) {
-      maxObservedHeight = 0;
-      maxObservedWidth = 0;
-      streamingMinHeight.value = null;
-      streamingMinWidth.value = null;
+    const prevPieceIndex = prev?.[2];
+    const prevEl = prev?.[3] ?? null;
+    const messageChanged = prevMessageId !== undefined && messageId !== prevMessageId;
+    if (messageChanged) {
+      streamingSizeLock.value = createStreamingSizeLock();
       clearStreamingReleaseTimer();
     }
     if (isStreaming) {
       clearStreamingReleaseTimer();
-      if (!prevStreaming) {
-        maxObservedHeight = el ? Math.ceil(el.offsetHeight) : 0;
-        const parentWidth = el?.parentElement ? el.parentElement.clientWidth : 0;
-        const initialWidth = el ? Math.ceil(el.offsetWidth) : 0;
-        maxObservedWidth = parentWidth > 0 ? Math.min(initialWidth, parentWidth) : initialWidth;
-        if (maxObservedHeight > 0) streamingMinHeight.value = maxObservedHeight;
-        if (maxObservedWidth > 0) streamingMinWidth.value = maxObservedWidth;
+      const pieceChanged = prevPieceIndex !== pieceIndex;
+      const segmentBecameAvailable = isStreamingSegmentTarget(el) && !isStreamingSegmentTarget(prevEl);
+      if (
+        isStreamingSegmentTarget(el)
+        && (!prevStreaming || pieceChanged || messageChanged || segmentBecameAvailable)
+      ) {
+        rememberStreamingSegmentSize(el, pieceIndex);
       }
-      if (el) {
-        setupStreamingObserver(el);
-      }
+      if (isStreamingSegmentTarget(el)) setupStreamingObserver(el);
+      else teardownStreamingObserver();
     } else {
       teardownStreamingObserver();
       clearStreamingReleaseTimer();
       // 流式结束，留出短暂缓冲让最终渲染稳定后再平滑释放锁定
       releaseStreamingLockTimer = setTimeout(() => {
-        streamingMinHeight.value = null;
-        streamingMinWidth.value = null;
-        maxObservedHeight = 0;
-        maxObservedWidth = 0;
+        streamingSizeLock.value = createStreamingSizeLock();
         releaseStreamingLockTimer = null;
       }, 120);
     }
