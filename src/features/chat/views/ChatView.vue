@@ -180,6 +180,7 @@
             </Virtualizer>
 
             <div
+              ref="tailSpacerEl"
               class="pointer-events-none overflow-hidden"
               :style="{ height: `${latestOwnTailSpacerMinHeight}px` }"
             ></div>
@@ -3471,7 +3472,10 @@ function handleConversationWheelInput(event: WheelEvent) {
 // ==================== bottom follow (intent-driven) ====================
 
 const chatContentRoot = ref<HTMLElement | null>(null);
+const tailSpacerEl = ref<HTMLElement | null>(null);
 let contentResizeObserver: ResizeObserver | null = null;
+let lastChatContentHeight = 0;
+let lastTailSpacerHeight = 0;
 
 // 跟随模式下内容尺寸变化（流式增长、气泡变高）时同步贴底。
 // virtua 不会在内容增长时自动维持贴底，这里补上；未进入跟随则保持视口不动。
@@ -3479,7 +3483,6 @@ let contentResizeObserver: ResizeObserver | null = null;
 // 此时视口停在上方，若照样下拉会把用户从历史位置直接拽到最底。
 // 容差取自实测：跟随状态下距底距离基本为 0，偶发瞬态最大 54px。
 const PIN_TO_BOTTOM_TOLERANCE_PX = 64;
-let pinToBottomRafId = 0;
 
 function pinChatToBottomWhileFollowing() {
   if (!followBottom.value) return;
@@ -3500,25 +3503,36 @@ function pinChatToBottomWhileFollowing() {
   chatScrollbarRef.value?.updateThumb();
 }
 
-function schedulePinChatToBottomWhileFollowing() {
-  if (!followBottom.value) return;
-  if (pinToBottomRafId) return;
-  pinToBottomRafId = window.requestAnimationFrame(() => {
-    pinToBottomRafId = 0;
-    pinChatToBottomWhileFollowing();
-  });
+// 换行让正文先长高，留白要等下一帧才缩短，中间这一帧会把视口顶下去再弹回来。
+// 在绘制前按同样的增量收掉留白，总高度不变，这一跳就不会画出来。
+function absorbContentGrowthIntoTailSpacer(delta: number): number {
+  const spacer = latestOwnTailSpacerMinHeight.value;
+  if (delta <= 1 || spacer <= 0) return 0;
+  const shrink = Math.min(spacer, delta);
+  const next = spacer - shrink;
+  latestOwnTailSpacerMinHeight.value = next;
+  lastTailSpacerHeight = next;
+  if (tailSpacerEl.value) tailSpacerEl.value.style.height = `${next}px`;
+  return shrink;
 }
 
 watch(chatContentRoot, (el, _prev, onCleanup) => {
   contentResizeObserver?.disconnect();
   contentResizeObserver = null;
-  if (pinToBottomRafId) {
-    window.cancelAnimationFrame(pinToBottomRafId);
-    pinToBottomRafId = 0;
-  }
+  lastChatContentHeight = 0;
+  lastTailSpacerHeight = 0;
   if (!el || typeof ResizeObserver === "undefined") return;
   contentResizeObserver = new ResizeObserver(() => {
-    schedulePinChatToBottomWhileFollowing();
+    const height = el.offsetHeight;
+    const spacerNow = latestOwnTailSpacerMinHeight.value;
+    const totalDelta = lastChatContentHeight > 0 ? height - lastChatContentHeight : 0;
+    // 留白自身变高不算正文增长，否则会把刚加上的留白立刻收回去。
+    const contentDelta = totalDelta - (spacerNow - lastTailSpacerHeight);
+    const absorbed = absorbContentGrowthIntoTailSpacer(contentDelta);
+    lastTailSpacerHeight = latestOwnTailSpacerMinHeight.value;
+    lastChatContentHeight = height - absorbed;
+    if (absorbed > 0) void el.offsetHeight;
+    if (absorbed < contentDelta) pinChatToBottomWhileFollowing();
     if (latestOwnTailSpacerMinHeight.value > 0 || !latestOwnTailContentMeasured.value) {
       scheduleTailMetricsRefresh(1);
     }
@@ -3528,10 +3542,8 @@ watch(chatContentRoot, (el, _prev, onCleanup) => {
   onCleanup(() => {
     contentResizeObserver?.disconnect();
     contentResizeObserver = null;
-    if (pinToBottomRafId) {
-      window.cancelAnimationFrame(pinToBottomRafId);
-      pinToBottomRafId = 0;
-    }
+    lastChatContentHeight = 0;
+    lastTailSpacerHeight = 0;
   });
 });
 
