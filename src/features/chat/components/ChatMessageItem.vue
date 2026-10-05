@@ -1338,7 +1338,7 @@ function activityItemPlainBody(item: ChatActivityItem): boolean {
 }
 
 function activityItemBodyText(item: ChatActivityItem): string {
-  const text = activityItemText(item);
+  const text = item.kind === "reasoning" ? activityItemRemainingText(item) : activityItemText(item);
   if (item.kind !== "reasoning") return text;
   if (!activityItemExpanded(item)) return collapsedActivityPreview(text, item);
   if (item.running && text.length > LIVE_REASONING_BODY_CHARS) {
