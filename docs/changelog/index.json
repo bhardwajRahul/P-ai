@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-10-04T03:39:39.712Z",
-  "latestVersion": "v0.96.4",
+  "generatedAt": "2026-10-06T10:44:41.742Z",
+  "latestVersion": "v0.96.5",
   "releases": [
+    {
+      "version": "v0.96.5",
+      "path": "docs/changelog/releases/v0.96.5.md",
+      "summary": "**无气泡模式：流式输出时过程段先摊开，输出完再折叠**：生成过程中全部展开，结束后收成只留最后一段；手动展开过的结束时不收回。气泡模式仍默认折叠。"
+    },
     {
       "version": "v0.96.4",
       "path": "docs/changelog/releases/v0.96.4.md",
