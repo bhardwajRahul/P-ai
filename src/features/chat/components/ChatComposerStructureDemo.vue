@@ -46,7 +46,6 @@
           :chatting="false"
           frontend-round-phase="idle"
           :busy="demoBusy"
-          :stop-chat-disabled="false"
           :frozen="false"
           :goal-active="goalActive"
           goal-title="演示目标"

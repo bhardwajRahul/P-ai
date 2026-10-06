@@ -74,4 +74,45 @@ describe("useChatFlowStop", () => {
       })],
     }));
   });
+
+  it("accepts a stop during the submit window and marks the send as stopped", async () => {
+    const allMessages = shallowRef<ChatMessage[]>([]);
+    const invokeStopChatMessage = vi.fn(async () => ({ aborted: true, persisted: false }));
+    const markSendStopped = vi.fn();
+
+    const { stopChat } = useChatFlowStop({
+      chatting: ref(false),
+      submitPending: ref(true),
+      allMessages,
+      getSession: () => ({ apiConfigId: "api-1", agentId: "agent-1" }),
+      getConversationId: () => "conversation-1",
+      invokeStopChatMessage,
+      getRound: () => ({ phase: "idle" }),
+      setRound: vi.fn(),
+      advanceGeneration: vi.fn(),
+      setSendChatActiveGen: vi.fn(),
+      clearDeferredRoundCompletion: vi.fn(),
+      clearPendingTerminalEvent: vi.fn(),
+      setActiveActivationId: vi.fn(),
+      getActiveActivationId: () => "",
+      setActiveRoundAgentId: vi.fn(),
+      clearFrontendDispatchTimer: vi.fn(),
+      getPendingUserDraftId: () => "",
+      removeMessage: vi.fn(),
+      settleStreamingAssistantMessages: vi.fn(() => []),
+      finalizeMessage: vi.fn(),
+      updateMessageText: vi.fn(),
+      deleteSendStartedAtMs: vi.fn(),
+      clearConversationStreamCache: vi.fn(),
+      reasoningStartedAtMs: ref(0),
+      flushStreamTextBuffer: vi.fn(),
+      getSendChatActiveGen: () => 7,
+      markSendStopped,
+    });
+
+    await stopChat();
+
+    expect(markSendStopped).toHaveBeenCalledWith(7);
+    expect(invokeStopChatMessage).toHaveBeenCalledOnce();
+  });
 });

@@ -1226,15 +1226,8 @@ async fn send_chat_message_inner(
         .map(|delegate_id| format!("remote-im-reply-delegate::{delegate_id}"))
         .unwrap_or_else(|| default_chat_key.clone());
     let (abort_handle, abort_registration) = AbortHandle::new_pair();
-    {
-        let mut inflight = state
-            .inflight_chat_abort_handles
-            .lock()
-            .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
-        if let Some(previous) = inflight.insert(chat_key.clone(), abort_handle) {
-            previous.abort();
-        }
-    }
+    let stopped_before_start =
+        register_inflight_chat_abort_handle(state, &chat_key, abort_handle)?;
     reset_inflight_completed_tool_history(state, &chat_key)?;
     let _ = abort_inflight_tool_abort_handle(state, &chat_key);
 
@@ -2863,7 +2856,16 @@ async fn send_chat_message_inner(
     }
     };
 
-    let result = futures_util::future::Abortable::new(run, abort_registration).await;
+    let result = if stopped_before_start {
+        // 停止意图在本轮登记句柄之前就已到达：不要开始生成，直接走用户中止的收尾路径。
+        runtime_log_info(format!(
+            "[聊天] 停止请求先于轮次开始，已跳过生成 (session={})",
+            chat_key
+        ));
+        Err(futures_util::future::Aborted)
+    } else {
+        futures_util::future::Abortable::new(run, abort_registration).await
+    };
     emit_conversation_work_status(match &result {
         Ok(Ok(_)) | Err(_) => "completed",
         Ok(Err(_)) => "error",
@@ -2913,14 +2915,58 @@ async fn send_chat_message_inner(
                 interrupted_agent_id,
                 &chat_key,
             ) {
-                Ok(Some(interrupted_result)) => emit_round_completed_event(
-                    state,
-                    interrupted_result.conversation_id.as_str(),
-                    &interrupted_result,
-                    None,
-                    None,
-                ),
-                Ok(None) => {}
+                Ok(Some(interrupted_result)) => {
+                    // 轮次身份用中断结果里携带的实时 request_id，而不是函数开头捕获的 trace_id：
+                    // 生成途中若发生上下文压缩重启，轮次身份会被换成新的 request_id 广播，
+                    // 沿用旧 id 会让同会话的其它客户端把这条终态判为过期而丢弃。
+                    let interrupted_identity = interrupted_result
+                        .activation_request_id
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty());
+                    emit_round_completed_event(
+                        state,
+                        interrupted_result.conversation_id.as_str(),
+                        &interrupted_result,
+                        interrupted_identity,
+                        interrupted_identity,
+                    )
+                }
+                Ok(None) => {
+                    if let Some(cid) = interrupted_conversation_id {
+                        let empty_identity = read_conversation_runtime_snapshot(state, cid)
+                            .ok()
+                            .map(|snapshot| snapshot.stream_cache.request_id)
+                            .map(|value| value.trim().to_string())
+                            .filter(|value| !value.is_empty());
+                        let empty_result = SendChatResult {
+                            conversation_id: cid.to_string(),
+                            latest_user_text: String::new(),
+                            assistant_text: String::new(),
+                            final_response_text: String::new(),
+                            archived_before_send: false,
+                            assistant_message: None,
+                            provider_prompt_tokens: None,
+                            estimated_prompt_tokens: None,
+                            effective_prompt_tokens: None,
+                            effective_prompt_source: None,
+                            context_window_tokens: None,
+                            max_output_tokens: None,
+                            context_usage_percent: None,
+                            remote_im_reply_decision: None,
+                            remote_im_reply_target: None,
+                            usage: None,
+                            activation_request_id: None,
+                        };
+                        emit_round_completed_event(
+                            state,
+                            cid,
+                            &empty_result,
+                            empty_identity.as_deref(),
+                            empty_identity.as_deref(),
+                        );
+                    }
+                }
                 Err(persist_err) => runtime_log_warn(format!(
                     "[聊天] 用户停止后 partial 收尾失败: session={} error={} persist_error={}",
                     chat_key, err, persist_err

@@ -604,7 +604,7 @@ async fn ide_chat_handle_jsonrpc_request(
         }
         "chat.queueAttachment" => ide_chat_queue_attachment(state, request.params).await,
         "chat.send" => ide_chat_send_message(state, request.params).await,
-        "chat.stop" => ide_chat_stop_conversation(state, request.params),
+        "chat.stop" => ide_chat_stop_conversation(state, request.params).await,
         "chat.queueSnapshot" => ide_chat_queue_snapshot(state),
         "chat.sessionStateSnapshot" => ide_chat_session_state_snapshot(state),
         "chat.queueRecall" => ide_chat_recall_queue_event(state, request.params),
@@ -614,7 +614,7 @@ async fn ide_chat_handle_jsonrpc_request(
         "attachment.transfer.complete" => ide_attachment_transfer_complete(state, client_id, request.params).await,
         "attachment.transfer.abort" => ide_attachment_transfer_abort(client_id, request.params).await,
         "submit_chat_message" => ide_chat_submit_message_command(state, request.params).await,
-        "stop_chat_message" => ide_chat_stop_message_command(state, request.params),
+        "stop_chat_message" => ide_chat_stop_message_command(state, request.params).await,
         "get_chat_queue_snapshot" => ide_chat_queue_snapshot(state),
         "get_main_session_state_snapshot" => ide_chat_session_state_snapshot(state),
         "recall_chat_queue_event" => ide_chat_recall_queue_event(state, request.params),

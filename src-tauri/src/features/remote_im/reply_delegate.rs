@@ -637,27 +637,22 @@ fn abort_remote_im_reply_delegate(
         runtime
     };
     let chat_key = format!("remote-im-reply-delegate::{delegate_id}");
-    let aborted_chat = match state.inflight_chat_abort_handles.lock() {
-        Ok(mut inflight) => {
-            if let Some(handle) = inflight.remove(&chat_key) {
-                handle.abort();
-                true
-            } else {
-                false
+    let aborted_chat = {
+        let mut inflight = match state.inflight_chat_abort_handles.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                runtime_log_warn(format!(
+                    "[远程应答委托] 聊天取消句柄锁中毒，已恢复，delegate_id={}",
+                    delegate_id
+                ));
+                poisoned.into_inner()
             }
-        }
-        Err(poisoned) => {
-            runtime_log_warn(format!(
-                "[远程应答委托] 聊天取消句柄锁中毒，已恢复，delegate_id={}",
-                delegate_id
-            ));
-            let mut inflight = poisoned.into_inner();
-            if let Some(handle) = inflight.remove(&chat_key) {
-                handle.abort();
-                true
-            } else {
-                false
-            }
+        };
+        if let Some(InflightChatAbortEntry::Running(handle)) = inflight.remove(&chat_key) {
+            handle.abort();
+            true
+        } else {
+            false
         }
     };
     let tool_key = format!(

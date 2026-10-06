@@ -85,6 +85,10 @@ type UseChatFlowSendControllerOptions = {
   setBoundDisplayGeneration?: (gen: number) => void;
   nextGeneration: () => number;
   setSendChatActiveGen: (gen: number) => void;
+  /** 提交期是否已被停止：为真时跳过本轮助理轮次/气泡的建立（用户消息投影仍保留）。 */
+  isSendStopped?: (gen: number) => boolean;
+  /** 清掉已消费的停止标记，避免集合随发送次数增长。 */
+  clearSendStopped?: (gen: number) => void;
   setActiveActivationId: (value: string) => void;
   setActiveRoundAgentId: (value: string) => void;
   setPendingTerminalEventNull: () => void;
@@ -217,7 +221,13 @@ export function useChatFlowSendController(options: UseChatFlowSendControllerOpti
       if (shouldProjectUserMessage) {
         options.insertUserDraft(userMessageId, gen, plainText, sentImages, attachments, extraTextBlocks, selectedMentions);
       }
-      if (!hasForegroundRoundInFlight && accepted && ingress !== "queued") {
+      // 提交窗口内已被停止：后端会跳过这一轮、不再广播任何终态。
+      // 这里不再建立助理轮次/空气泡，用户消息投影保留。
+      const stoppedDuringSubmit = !!options.isSendStopped?.(gen);
+      if (stoppedDuringSubmit) {
+        options.sendStartedAtMsByGen.delete(gen);
+        if (options.submitPending) options.submitPending.value = false;
+      } else if (!hasForegroundRoundInFlight && accepted && ingress !== "queued") {
         if (selectedMentions.length === 0 && assistantMessageId) {
           queuedAssistantMessageId = assistantMessageId;
           options.setRound({ phase: "queued", gen, messageId: queuedAssistantMessageId });
@@ -231,7 +241,7 @@ export function useChatFlowSendController(options: UseChatFlowSendControllerOpti
           messageId: userMessageId,
         });
       }
-      if (!hasForegroundRoundInFlight && (ingress === "queued" || !accepted)) {
+      if (!stoppedDuringSubmit && !hasForegroundRoundInFlight && (ingress === "queued" || !accepted)) {
         options.removeMessage(queuedAssistantMessageId);
         if (options.getRound().phase !== "idle") {
           options.setRound({ phase: "idle" });
@@ -251,6 +261,7 @@ export function useChatFlowSendController(options: UseChatFlowSendControllerOpti
       await options.sendRecovery.handleFailedSend(gen, error, sendSession, sendConversationId);
     } finally {
       if (!submitSucceeded && options.submitPending) options.submitPending.value = false;
+      options.clearSendStopped?.(gen);
       // chat.send 是短提交命令；成功后的轮次收束只由统一 history/round 事件驱动。
     }
   }

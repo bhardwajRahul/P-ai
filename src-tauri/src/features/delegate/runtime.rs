@@ -441,18 +441,7 @@ fn abort_delegate_runtime_thread(
     // 委托被中断时其调用方不会走到正常释放分支，这里补一次深度回忆内存索引释放。
     deep_recall_index_release(normalized_delegate_id);
     let chat_key = delegate_thread_chat_key(&thread);
-    let aborted_chat = {
-        let mut inflight = app_state
-            .inflight_chat_abort_handles
-            .lock()
-            .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
-        if let Some(handle) = inflight.remove(&chat_key) {
-            handle.abort();
-            true
-        } else {
-            false
-        }
-    };
+    let aborted_chat = abort_running_inflight_chat(app_state, &chat_key)?;
     let aborted_tool = abort_inflight_tool_abort_handle(app_state, &chat_key)?;
     let descendant_count = abort_delegate_runtime_descendants_by_parent_session(app_state, &chat_key)?;
     if let Err(err) = clear_conversation_queue(
@@ -743,18 +732,7 @@ fn delegate_runtime_thread_conversation_delete(
     };
     if let Some(thread) = active_thread.as_ref() {
         let chat_key = delegate_thread_chat_key(thread);
-        let aborted_chat = {
-            let mut inflight = app_state
-                .inflight_chat_abort_handles
-                .lock()
-                .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
-            if let Some(handle) = inflight.remove(&chat_key) {
-                handle.abort();
-                true
-            } else {
-                false
-            }
-        };
+        let aborted_chat = abort_running_inflight_chat(app_state, &chat_key)?;
         let aborted_tool = abort_inflight_tool_abort_handle(app_state, &chat_key)?;
         let descendant_count = abort_delegate_runtime_descendants_by_parent_session(app_state, &chat_key)?;
         clear_inflight_completed_tool_history(app_state, &chat_key)?;

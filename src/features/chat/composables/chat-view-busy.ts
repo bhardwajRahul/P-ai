@@ -3,10 +3,9 @@
  * 避免两个外壳各自拼装 conversation-busy 导致语义分叉。
  *
  * 约定：
- * - 结构性操作（修剪/压缩/组织上下文）期间锁定交互，停止按钮禁用；
+ * - 结构性操作（修剪/压缩/组织上下文）期间锁定交互；
  * - 流式态（chatting / assistant_streaming）**不**算忙碌——流式时停止按钮必须可用；
- * - submitPending 由 ChatView 的 stop-chat-disabled 单独处理（含在 :stop-chat-disabled
- *   的 isOrganizingContextBusy || submitPending 中），不重复计入视图层忙碌。
+ * - 停止入口不受本判定约束：停止按钮只认 frozen，submitPending 只用于让停止入口提前出现。
  */
 export type ViewLayerBusyInput = {
   trimming: boolean;

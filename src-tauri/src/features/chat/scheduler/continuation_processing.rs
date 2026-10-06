@@ -142,6 +142,19 @@ async fn process_claimed_conversation_batch(
     events: Vec<ChatPendingEvent>,
 ) -> Result<(), String> {
     let result = process_conversation_batch(state, conversation_id, events).await;
+    // 该会话这一批已经收尾：还挂着的停止意图说明它想打断的那一轮没有出现
+    // （例如事件在登记轮次前就失败了）。清掉，避免误伤后面真正的新轮次。
+    match clear_conversation_stop_intents(state, conversation_id) {
+        Ok(cleared) if cleared > 0 => runtime_log_info(format!(
+            "[聊天调度] 清理残留停止意图，任务=clear_conversation_stop_intents，conversation_id={}，count={}",
+            conversation_id, cleared
+        )),
+        Ok(_) => {}
+        Err(err) => runtime_log_warn(format!(
+            "[聊天调度] 清理残留停止意图失败，conversation_id={}，error={}",
+            conversation_id, err
+        )),
+    }
     if let Err(release_err) = release_conversation_processing_claim(state, conversation_id) {
         runtime_log_error(format!(
             "[聊天调度] 释放会话处理声明失败: conversation_id={}, error={}",

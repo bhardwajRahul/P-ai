@@ -2224,10 +2224,10 @@ async fn stop_chat_message(
     input: StopChatRequest,
     state: State<'_, AppState>,
 ) -> Result<StopChatResult, String> {
-    stop_chat_message_inner(input, state.inner())
+    stop_chat_message_inner(input, state.inner()).await
 }
 
-fn stop_chat_message_inner(
+async fn stop_chat_message_inner(
     input: StopChatRequest,
     state: &AppState,
 ) -> Result<StopChatResult, String> {
@@ -2242,24 +2242,123 @@ fn stop_chat_message_inner(
         state,
         Some(input.session.agent_id.as_str()),
         requested_conversation_id.as_deref(),
-    )?;
+    )
+    // 解析不到 agent 时不能让停止直接失败：退化成只用会话 id 构造 key，
+    // 后续的 key 后缀匹配仍能找到该会话上真正在跑的轮次。
+    .unwrap_or_default();
 
     let chat_key = inflight_chat_key(
         &agent_id,
         requested_conversation_id.as_deref(),
     );
-    let aborted_chat = {
-        let mut inflight = state
+
+    // 收集所有与当前会话关联的 Inflight chat 句柄 key
+    let matching_keys = {
+        let inflight = state
             .inflight_chat_abort_handles
             .lock()
             .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
-        if let Some(handle) = inflight.remove(&chat_key) {
-            handle.abort();
+        let mut keys = Vec::new();
+        if inflight.contains_key(&chat_key) {
+            keys.push(chat_key.clone());
+        }
+        if let Some(cid) = requested_conversation_id.as_deref() {
+            let cid_suffix = format!("::{cid}");
+            for k in inflight.keys() {
+                if (k.ends_with(&cid_suffix) || k == cid || k.contains(cid)) && !keys.contains(k) {
+                    keys.push(k.clone());
+                }
+            }
+        }
+        keys
+    };
+
+    // 判断是否有需要等待保存的流式内容
+    let has_streaming_content = {
+        let has_input_content = !input.partial_assistant_text.trim().is_empty()
+            || !input.partial_stream_blocks.is_empty();
+        if has_input_content {
             true
+        } else if let Some(cid) = requested_conversation_id.as_deref() {
+            read_conversation_runtime_snapshot(state, cid)
+                .ok()
+                .map(|snap| {
+                    !snap.stream_cache.assistant_text.trim().is_empty()
+                        || !snap.stream_cache.stream_blocks.is_empty()
+                })
+                .unwrap_or(false)
         } else {
             false
         }
     };
+
+    // 仅当确实有工具调用在跑时，优雅等待才有意义：中止工具句柄会让工具调用立即失败，
+    // 生成协程随即走到收尾并落盘。纯文本流式期间工具句柄并不存在，
+    // 此时中止工具是空操作，等待只会白等 2.5 秒，必须直接硬打断。
+    let has_inflight_tool = {
+        let inflight = state
+            .inflight_tool_abort_handles
+            .lock()
+            .map_err(|_| "Failed to lock inflight tool abort handles".to_string())?;
+        inflight.contains_key(&chat_key)
+    };
+
+    // 两阶段打断：
+    // 1. 若已有流式内容且正有工具在执行，先中止工具并等待最多 2.5 秒，让生成协程优雅保存落盘；
+    // 2. 其余情况（未首回、429 退避睡眠中、纯文本流式、超时未退出）立即硬打断。
+    // 两种情况下，如果该会话当前没有已登记的运行句柄（轮次尚未开始），都会留下停止意图，
+    // 由随后登记的轮次消费，从而保证「任何时刻发出的停止都能落到具体的某一轮上」。
+    let aborted_chat = if has_streaming_content && has_inflight_tool && !matching_keys.is_empty() {
+        let _ = abort_inflight_tool_abort_handle(state, &chat_key);
+        let mut exited_gracefully = false;
+        for _ in 0..25 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let inflight = state
+                .inflight_chat_abort_handles
+                .lock()
+                .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
+            if !matching_keys.iter().any(|k| inflight.contains_key(k)) {
+                exited_gracefully = true;
+                break;
+            }
+        }
+        if exited_gracefully {
+            true
+        } else {
+            // 超时未退出：按会话中止当前正在运行的那一轮。
+            // 这里必须按 key 中止「此刻」运行的句柄，而不是停止发起时捕获的旧句柄：
+            // 旧轮可能已退出、新轮已接手，捕获的旧句柄再 abort 是空操作，
+            // 会导致「停止指令到了却什么都没停下」。
+            let mut any_aborted = false;
+            for k in &matching_keys {
+                if abort_running_inflight_chat(state, k)? {
+                    any_aborted = true;
+                }
+            }
+            any_aborted
+        }
+    } else {
+        // 无流式内容，无需等待，直接硬打断；没有运行中句柄的 key 则留下停止意图。
+        // 只有该会话确实还有未完成的工作（处理中的声明或尚未开始的排队）时才留意图：
+        // 否则这条停止没有任何作用对象，留下的意图只会在之后误伤新发送。
+        let has_pending_work = requested_conversation_id
+            .as_deref()
+            .and_then(|cid| read_conversation_runtime_snapshot(state, cid).ok())
+            .map(|snapshot| snapshot.is_processing || snapshot.has_pending_queue)
+            .unwrap_or(true);
+        let mut stop_keys = matching_keys.clone();
+        if has_pending_work && !stop_keys.iter().any(|k| k == &chat_key) {
+            stop_keys.push(chat_key.clone());
+        }
+        let mut any_aborted = false;
+        for k in &stop_keys {
+            if request_stop_inflight_chat(state, k)? {
+                any_aborted = true;
+            }
+        }
+        any_aborted
+    };
+
     let aborted_tool = abort_inflight_tool_abort_handle(state, &chat_key)?;
     let aborted_delegate_children =
         abort_delegate_runtime_descendants_by_parent_context(
@@ -2399,18 +2498,9 @@ async fn interrupt_conversation_runtime(
     )?;
 
     let chat_key = inflight_chat_key(&agent_id, Some(&conversation_id));
-    let aborted_chat = {
-        let mut inflight = state
-            .inflight_chat_abort_handles
-            .lock()
-            .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
-        if let Some(handle) = inflight.remove(&chat_key) {
-            handle.abort();
-            true
-        } else {
-            false
-        }
-    };
+    let aborted_chat = abort_running_inflight_chat(state.inner(), &chat_key)?;
+    // 会话运行已整体中断，残留的停止意图一并清理，避免误伤下一次发送。
+    clear_inflight_chat_stop_intent(state.inner(), &chat_key)?;
     let aborted_tool = abort_inflight_tool_abort_handle(state.inner(), &chat_key)?;
     let aborted_delegate_children =
         abort_delegate_runtime_descendants_by_parent_context(

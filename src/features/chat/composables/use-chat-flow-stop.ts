@@ -7,6 +7,7 @@ import { readMessagePlainText } from "./use-chat-flow-utils";
 
 type UseChatFlowStopOptions = {
   chatting: Ref<boolean>;
+  submitPending?: Ref<boolean>;
   allMessages: Ref<ChatMessage[]>;
   getSession: () => { apiConfigId: string; agentId: string } | null;
   getConversationId?: () => string;
@@ -44,6 +45,9 @@ type UseChatFlowStopOptions = {
   deleteSendStartedAtMs: (gen: number) => void;
   clearConversationStreamCache: (conversationId?: string | null) => void;
   reasoningStartedAtMs: Ref<number>;
+  // 提交期停止时该轮次还没有任何终态事件，需标记这次发送，避免 sendChat 返回后复活轮次。
+  getSendChatActiveGen?: () => number;
+  markSendStopped?: (gen: number) => void;
   // 停止前冲刷流式文本缓冲，避免最后 100ms 的正文/思维链内容丢失。
   flushStreamTextBuffer: () => void;
 };
@@ -134,6 +138,9 @@ export function useChatFlowStop(options: UseChatFlowStopOptions) {
 
     options.setRound({ phase: "idle" });
     options.chatting.value = false;
+    if (options.submitPending) {
+      options.submitPending.value = false;
+    }
     options.reasoningStartedAtMs.value = 0;
     options.clearConversationStreamCache(options.getConversationId ? options.getConversationId() : "");
     return { messageId, activationId };
@@ -143,11 +150,11 @@ export function useChatFlowStop(options: UseChatFlowStopOptions) {
     // 先冲刷流式文本缓冲，让最后一段正文进入消息状态，再冻结轮次。
     options.flushStreamTextBuffer();
     const round = options.getRound();
-    const hasStreamingAssistant = options.allMessages.value.some((message) => {
-      const providerMeta = (message?.providerMeta || {}) as Record<string, unknown>;
-      return String(message?.role || "").trim() === "assistant" && providerMeta._streaming === true;
-    });
-    if (!options.chatting.value && round.phase !== "queued" && round.phase !== "streaming" && !hasStreamingAssistant) return;
+    // 提交期（发送请求尚未返回）也要能打断：这段时间轮次还没建立，
+    // 但后端会给该会话留下停止意图，由随后开始的这一轮消费。
+    // 这里不设任何前置门槛：前端无法可靠判断后端此刻在不在跑，
+    // 只要用户按了停止就把指令交出去，由后端决定中止哪一轮。
+    const submitPending = !!options.submitPending?.value;
 
     const stopSession = options.getSession();
     const cid = options.getConversationId ? options.getConversationId() : "";
@@ -158,6 +165,13 @@ export function useChatFlowStop(options: UseChatFlowStopOptions) {
     const partialStreamBlocks = assistantContentBlocksFromMessage(activeMessage);
     const partialAssistantText = readMessagePlainText(activeMessage)
       || assistantTextFromStreamBlocks(partialStreamBlocks);
+
+    // 提交期停止时该轮次尚未建立，sendChat 返回后会重新 setRound({phase:"queued"})。
+    // 先记下这次发送的 gen，sendChat 侧据此跳过轮次复活。
+    if (submitPending) {
+      const stoppedGen = options.getSendChatActiveGen ? options.getSendChatActiveGen() : 0;
+      if (stoppedGen) options.markSendStopped?.(stoppedGen);
+    }
 
     // 先立即结束本地忙碌态，再通知后端；后端有同一消息的正式结果才回写。
     const stoppedRound = await finishLocalStoppedRound();

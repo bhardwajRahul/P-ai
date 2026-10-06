@@ -10,6 +10,145 @@ fn inflight_chat_key(
     }
 }
 
+/// 登记一个会话轮次的打断句柄。
+///
+/// 若该会话上已有「停止意图」（停止命令早于本句柄登记到达），则消费该意图并返回 `true`，
+/// 表示这个轮次应当立即中止、不要开始。停止意图不会过期，必须被消费。
+fn register_inflight_chat_abort_handle(
+    state: &AppState,
+    chat_key: &str,
+    handle: AbortHandle,
+) -> Result<bool, String> {
+    let mut inflight = state
+        .inflight_chat_abort_handles
+        .lock()
+        .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
+    if matches!(
+        inflight.get(chat_key),
+        Some(InflightChatAbortEntry::StopRequested)
+    ) {
+        inflight.remove(chat_key);
+        return Ok(true);
+    }
+    if let Some(previous) = inflight.insert(
+        chat_key.to_string(),
+        InflightChatAbortEntry::Running(handle),
+    ) {
+        if let InflightChatAbortEntry::Running(previous) = previous {
+            previous.abort();
+        }
+    }
+    Ok(false)
+}
+
+/// 对指定会话发起停止。
+///
+/// 已有运行中句柄则中止并移除；尚无句柄（轮次还没登记）或已有停止意图，则留下/刷新停止意图。
+/// 两种情况都算「停止已受理」。
+fn request_stop_inflight_chat(state: &AppState, chat_key: &str) -> Result<bool, String> {
+    let mut inflight = state
+        .inflight_chat_abort_handles
+        .lock()
+        .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
+    match inflight.remove(chat_key) {
+        Some(InflightChatAbortEntry::Running(handle)) => {
+            handle.abort();
+            Ok(true)
+        }
+        _ => {
+            inflight.insert(
+                chat_key.to_string(),
+                InflightChatAbortEntry::StopRequested,
+            );
+            Ok(true)
+        }
+    }
+}
+
+/// 消费并清除指定会话的停止意图；返回是否命中。
+///
+/// 用于「轮次已经确定被打断」的收尾点，避免意图残留并误伤后续轮次。
+fn take_inflight_chat_stop_intent(state: &AppState, chat_key: &str) -> Result<bool, String> {
+    let mut inflight = state
+        .inflight_chat_abort_handles
+        .lock()
+        .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
+    match inflight.get(chat_key) {
+        Some(InflightChatAbortEntry::StopRequested) => {
+            inflight.remove(chat_key);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+/// 清除指定会话的停止意图（陈旧意图清理）；已登记的运行句柄不受影响。
+fn clear_inflight_chat_stop_intent(state: &AppState, chat_key: &str) -> Result<(), String> {
+    let mut inflight = state
+        .inflight_chat_abort_handles
+        .lock()
+        .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
+    if matches!(
+        inflight.get(chat_key),
+        Some(InflightChatAbortEntry::StopRequested)
+    ) {
+        inflight.remove(chat_key);
+    }
+    Ok(())
+}
+
+/// 清除某个会话上所有残留的停止意图（按会话 id 匹配 key 后缀）。
+///
+/// 会话的批次已经收尾后，任何仍挂着的停止意图都失去了作用对象：它想打断的那一轮
+/// 已经结束或根本没开始。此时必须清掉，否则会误伤该会话后面真正的新轮次。
+fn clear_conversation_stop_intents(
+    state: &AppState,
+    conversation_id: &str,
+) -> Result<usize, String> {
+    let conversation_id = conversation_id.trim();
+    if conversation_id.is_empty() {
+        return Ok(0);
+    }
+    let mut inflight = state
+        .inflight_chat_abort_handles
+        .lock()
+        .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
+    let suffix = format!("::{conversation_id}");
+    let mut stale_keys: Vec<String> = Vec::new();
+    for (key, entry) in inflight.iter() {
+        if !matches!(entry, InflightChatAbortEntry::StopRequested) {
+            continue;
+        }
+        if key.as_str() == conversation_id || key.ends_with(&suffix) {
+            stale_keys.push(key.clone());
+        }
+    }
+    let cleared = stale_keys.len();
+    for key in stale_keys {
+        inflight.remove(&key);
+    }
+    Ok(cleared)
+}
+
+/// 移除并中止指定会话正在运行的轮次句柄；命中返回 `true`。
+/// 该 key 上若只有停止意图，则保留意图（它针对的是尚未登记的轮次），返回 `false`。
+fn abort_running_inflight_chat(state: &AppState, chat_key: &str) -> Result<bool, String> {
+    let mut inflight = state
+        .inflight_chat_abort_handles
+        .lock()
+        .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
+    if matches!(
+        inflight.get(chat_key),
+        Some(InflightChatAbortEntry::Running(_))
+    ) {
+        if let Some(InflightChatAbortEntry::Running(handle)) = inflight.remove(chat_key) {
+            handle.abort();
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 fn register_inflight_tool_abort_handle(
     state: &AppState,
     chat_key: &str,
@@ -104,18 +243,7 @@ fn abort_delegate_runtime_descendant_threads(
     let mut aborted_count = 0usize;
     for thread in children {
         let child_chat_key = delegate_thread_chat_key(&thread);
-        let aborted_chat = {
-            let mut inflight = state
-                .inflight_chat_abort_handles
-                .lock()
-                .map_err(|_| "Failed to lock inflight chat abort handles".to_string())?;
-            if let Some(handle) = inflight.remove(&child_chat_key) {
-                handle.abort();
-                true
-            } else {
-                false
-            }
-        };
+        let aborted_chat = abort_running_inflight_chat(state, &child_chat_key)?;
         let aborted_tool = abort_inflight_tool_abort_handle(state, &child_chat_key)?;
         if aborted_chat || aborted_tool {
             aborted_count += 1;

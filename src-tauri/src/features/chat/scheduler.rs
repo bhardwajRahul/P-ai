@@ -1243,6 +1243,7 @@ async fn process_conversation_batch(
                                 conversation_id, finalize_err
                             ));
                         }
+                        clear_conversation_list_activity_mark(state, conversation_id);
                         return Ok(());
                     }
                     emit_round_failed_event(
@@ -1356,6 +1357,24 @@ async fn activate_main_assistant(
         .filter(|value| !value.is_empty())
         .unwrap_or(session_info.agent_id.as_str())
         .to_string();
+
+    // 停止意图可能早于轮次宣布到达（提交窗口）。此时不要宣布轮次、也不要开始生成，
+    // 直接按「用户中止」收尾，避免广播一个已经被取消的轮次。
+    let preflight_chat_key = runtime_context
+        .remote_im_reply_delegate_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|delegate_id| format!("remote-im-reply-delegate::{delegate_id}"))
+        .unwrap_or_else(|| inflight_chat_key(&executor_agent_id, Some(conversation_id)));
+    if take_inflight_chat_stop_intent(state, &preflight_chat_key)? {
+        runtime_log_info(format!(
+            "[聊天调度] 停止请求先于轮次宣布，已跳过本轮: conversation_id={}, session={}",
+            conversation_id, preflight_chat_key
+        ));
+        return Err(CHAT_ABORTED_BY_USER_ERROR.to_string());
+    }
+
     let activation_id = trace_id.clone();
     let activation_reason = resolve_activation_reason(&runtime_context);
     let stream_started_at = now_iso();

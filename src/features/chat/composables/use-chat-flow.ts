@@ -76,6 +76,8 @@ export function useChatFlow(options: UseChatFlowOptions) {
     frontendDispatchElapsedMs: number;
   } | null = null;
   const sendStartedAtMsByGen = new Map<number, number>();
+  // 提交窗口内被停止的发送轮次；sendChat 返回后据此跳过轮次复活。
+  const stoppedSendGens = new Set<number>();
   let activeHistoryMessageCount = 0;
   const {
     buildQueuedAttachmentPayload,
@@ -429,6 +431,11 @@ export function useChatFlow(options: UseChatFlowOptions) {
     flushStreamTextBuffer: () => {
       streamingEvents.flushStreamTextBuffer();
     },
+    submitPending,
+    getSendChatActiveGen: () => sendChatActiveGen,
+    markSendStopped: (gen) => {
+      stoppedSendGens.add(gen);
+    },
   });
   const sendRecovery = useChatFlowSendRecovery({
     chatting: options.chatting,
@@ -522,6 +529,10 @@ export function useChatFlow(options: UseChatFlowOptions) {
     nextGeneration: () => ++generation,
     setSendChatActiveGen: (gen) => {
       sendChatActiveGen = gen;
+    },
+    isSendStopped: (gen) => stoppedSendGens.has(gen),
+    clearSendStopped: (gen) => {
+      stoppedSendGens.delete(gen);
     },
     setActiveActivationId: (value) => {
       activeActivationId = value;

@@ -1,6 +1,6 @@
 import { ImageIcon } from "@lucide/vue";
 import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue";
-import { isTauriRuntimeAvailable, readTransportChatImage, resolveLocalFileUrl } from "../../../services/tauri-api";
+import { isDesktopTauriHost, readTransportChatImage, resolveLocalFileUrl } from "../../../services/tauri-api";
 import { markdownImageDisplayMode, resolveMarkdownImageSource, type MarkdownImagePreviewPayload, type MarkdownImageSource } from "./MarkdownImage";
 
 const transportThumbnailCache = new Map<string, string>();
@@ -94,7 +94,7 @@ export default defineComponent({
       ([current, visible]) => {
         const version = ++thumbnailLoadVersion;
         transportThumbnailSrc.value = "";
-        if (!visible || markdownImageDisplayMode(current, localAssetUrl(current), isTauriRuntimeAvailable()) !== "transport" || current.kind !== "local") return;
+        if (!visible || markdownImageDisplayMode(current, localAssetUrl(current), isDesktopTauriHost()) !== "transport" || current.kind !== "local") return;
         const path = current.path;
         const cached = transportThumbnailCache.get(path);
         if (cached) {
@@ -142,7 +142,7 @@ export default defineComponent({
         return h("span", { ref: rootRef, class: "ecall-md-image-placeholder ecall-md-image-error" }, alt || current.label || imageProps.src);
       }
 
-      const displayMode = markdownImageDisplayMode(current, localAssetUrl(current), isTauriRuntimeAvailable());
+      const displayMode = markdownImageDisplayMode(current, localAssetUrl(current), isDesktopTauriHost());
       const resolvedSrc = displayMode === "remote" && current.kind === "remote"
         ? current.src
         : displayMode === "asset"

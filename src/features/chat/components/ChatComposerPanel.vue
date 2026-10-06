@@ -290,13 +290,13 @@
                 v-if="showStopAction"
                 type="button"
                 class="btn btn-sm btn-circle shrink-0 btn-error transition-transform duration-150 ease-out active:scale-90"
-                :disabled="frozen || busy || !!stopChatDisabled"
+                :disabled="frozen"
                 :title="`${t('chat.stop')} / ${t('chat.stopReplying')}`"
                 @click="emit('stopChat')"
               >
                 <Square class="h-3.5 w-3.5 fill-current" />
               </button>
-              <div v-else ref="sendModeMenuRef" class="relative flex shrink-0">
+              <div v-if="!composerInputBlank || !showStopAction" ref="sendModeMenuRef" class="relative flex shrink-0">
                 <button
                   type="button"
                   class="btn btn-sm btn-circle shrink-0 transition-transform duration-150 ease-out active:scale-90"
@@ -386,9 +386,10 @@ const props = withDefaults(defineProps<{
   workspaceAccess?: "approval" | "full_access" | "";
   planModeEnabled: boolean;
   chatting: boolean;
+  /** 提交期：发送请求尚未返回。此时停止入口也应可见并可用。 */
+  submitPending?: boolean;
   frontendRoundPhase?: "idle" | "queued" | "waiting" | "streaming";
   busy: boolean;
-  stopChatDisabled?: boolean;
   frozen: boolean;
   goalActive: boolean;
   goalTitle: string;
@@ -752,9 +753,12 @@ function ideContextReferenceTitle(item: IdeContextReferenceItem): string {
   return relativePath;
 }
 
+// 停止入口的存在与否只取决于「这一轮是否还在进行」。
+// 不再要求输入框为空：用户正在打字时同样有权随时打断。
 const showStopAction = computed(() =>
-  (props.chatting || ["queued", "waiting", "streaming"].includes(String(props.frontendRoundPhase || "idle")))
-  && composerInputBlank.value,
+  props.chatting
+  || !!props.submitPending
+  || ["queued", "waiting", "streaming"].includes(String(props.frontendRoundPhase || "idle")),
 );
 const selectedMentions = computed(() =>
   (Array.isArray(props.selectedMentions) ? props.selectedMentions : [])
@@ -1195,7 +1199,7 @@ function handleChatInputKeydown(event: KeyboardEvent) {
       return;
     }
   }
-  if (event.key === "Escape" && props.chatting && showStopAction.value && !props.stopChatDisabled) {
+  if (event.key === "Escape" && showStopAction.value) {
     event.preventDefault();
     emit("stopChat");
     return;

@@ -24,6 +24,22 @@ struct IdeContextSnapshot {
     updated_at: String,
 }
 
+/// 一个会话上「正在进行中的聊天轮次」的打断状态。
+///
+/// 轮次的打断句柄并不是在用户按下发送时就存在的：真正的生成协程要到调度器接手后才登记。
+/// 为了让「任意时刻都能打断」成立，同一把槽位里允许出现「已登记句柄」或「停止意图」两种状态：
+/// 停止意图针对的是「还没登记、但马上就要开始」的轮次，由该轮次登记时消费。
+///
+/// 停止意图不设过期时间：只要它已经落下，就必须由该会话接下来的轮次消费掉。
+/// 任何「按时间丢弃停止意图」的做法都会让已经发出的打断指令落空。
+#[derive(Debug)]
+enum InflightChatAbortEntry {
+    /// 轮次已开始，持有可中止其生成协程的句柄。
+    Running(AbortHandle),
+    /// 已收到停止请求，但对应轮次尚未登记句柄；该轮次开始时应立即中止。
+    StopRequested,
+}
+
 #[derive(Clone)]
 struct AppState {
     app_handle: Arc<Mutex<Option<AppHandle>>>,
@@ -57,7 +73,8 @@ struct AppState {
     cached_deleted_conversation_ids: Arc<Mutex<std::collections::HashSet<String>>>,
     app_data_persist_write_lock: Arc<Mutex<()>>,
     last_panic_snapshot: Arc<Mutex<Option<String>>>,
-    inflight_chat_abort_handles: Arc<Mutex<std::collections::HashMap<String, AbortHandle>>>,
+    inflight_chat_abort_handles:
+        Arc<Mutex<std::collections::HashMap<String, InflightChatAbortEntry>>>,
     inflight_tool_abort_handles: Arc<Mutex<std::collections::HashMap<String, AbortHandle>>>,
     inflight_completed_tool_history:
         Arc<Mutex<std::collections::HashMap<String, Vec<Value>>>>,

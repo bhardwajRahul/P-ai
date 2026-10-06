@@ -857,9 +857,9 @@ async fn ide_chat_submit_message_command(state: &AppState, params: Value) -> Res
     ide_chat_serialize(submit_chat_message_inner(input, state, None).await?)
 }
 
-fn ide_chat_stop_message_command(state: &AppState, params: Value) -> Result<Value, String> {
+async fn ide_chat_stop_message_command(state: &AppState, params: Value) -> Result<Value, String> {
     let input = ide_chat_parse_param_field::<StopChatRequest>(params, "input")?;
-    ide_chat_serialize(stop_chat_message_inner(input, state)?)
+    ide_chat_serialize(stop_chat_message_inner(input, state).await?)
 }
 
 async fn ide_chat_send_message(state: &AppState, params: Value) -> Result<Value, String> {
@@ -902,9 +902,9 @@ fn ide_chat_mark_queue_event_guided(state: &AppState, params: Value) -> Result<V
     ide_chat_serialize(mark_chat_queue_event_guided_inner(event_id, state)?)
 }
 
-fn ide_chat_stop_conversation(state: &AppState, params: Value) -> Result<Value, String> {
+async fn ide_chat_stop_conversation(state: &AppState, params: Value) -> Result<Value, String> {
     let input = ide_chat_parse_params::<StopChatRequest>(params)?;
-    let stop_result = stop_chat_message_inner(input, state)?;
+    let stop_result = stop_chat_message_inner(input, state).await?;
     let conversation_id = stop_result.conversation_id.clone().unwrap_or_default();
     ide_chat_broadcast_notification(
         "chat.roundFinished",
