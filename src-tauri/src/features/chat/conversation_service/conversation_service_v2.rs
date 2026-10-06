@@ -1748,17 +1748,6 @@ impl ConversationServiceV2 {
         Ok(())
     }
 
-    fn build_forward_selection_notification_message(
-        &self,
-        state: &AppState,
-        source_conversation_id: &str,
-        selected_messages: &[ChatMessage],
-    ) -> Result<ChatMessage, String> {
-        let content = selected_messages_notification_content(selected_messages);
-        let body = build_session_notification_body(state, source_conversation_id, &content)?;
-        Ok(build_session_notification_message(&body))
-    }
-
     async fn append_user_message(
         &self,
         state: &AppState,
@@ -2018,12 +2007,10 @@ impl ConversationServiceV2 {
             delegate_title,
             content,
         )?;
-        let message = build_session_notification_message(&body);
-        enqueue_session_notification_dispatch(
+        enqueue_system_user_forward(
             state,
             &resolved_target.target_conversation_id,
             &body,
-            &message,
             action,
         )
     }

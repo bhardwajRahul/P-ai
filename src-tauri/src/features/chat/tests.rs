@@ -7917,7 +7917,10 @@
         );
         match &notification.parts[0] {
             MessagePart::Text { text, .. } => {
-                assert_eq!(text, "[源会话·通知人格]:请跟进");
+                assert_eq!(
+                    text,
+                    "<details>\n<summary>[源会话·通知人格]</summary>\n请跟进\n</details>"
+                );
             }
             _ => panic!("expected text notification"),
         }
@@ -7937,7 +7940,10 @@
         assert_eq!(target.messages.len(), 1);
         match &target.messages[0].parts[0] {
             MessagePart::Text { text, .. } => {
-                assert_eq!(text, "[源会话·通知人格]:同步一下");
+                assert_eq!(
+                    text,
+                    "<details>\n<summary>[源会话·通知人格]</summary>\n同步一下\n</details>"
+                );
             }
             _ => panic!("expected text notification"),
         }
@@ -7966,7 +7972,10 @@
         assert_eq!(target.messages.len(), 1);
         match &target.messages[0].parts[0] {
             MessagePart::Text { text, .. } => {
-                assert_eq!(text, "[源会话·通知人格]:自动推送正文");
+                assert_eq!(
+                    text,
+                    "<details>\n<summary>[源会话·通知人格]</summary>\n自动推送正文\n</details>"
+                );
             }
             _ => panic!("expected text notification"),
         }
@@ -8004,7 +8013,7 @@
             MessagePart::Text { text, .. } => {
                 assert_eq!(
                     text,
-                    "[源会话·通知人格]:[用户]: 第一条原消息\n\n[助手]: 第二条原消息"
+                    "<details>\n<summary>[源会话·通知人格]</summary>\n[用户]: 第一条原消息\n\n[助手]: 第二条原消息\n</details>"
                 );
             }
             _ => panic!("expected text notification"),
@@ -12422,7 +12431,7 @@
             (
                 "append_messages",
                 "fn append_messages",
-                "fn build_forward_selection_notification_message",
+                "fn append_user_message",
             ),
             (
                 "append_user_message",

@@ -518,20 +518,19 @@ fn terminal_background_shell_writeback(
         .map(|code| code.to_string())
         .unwrap_or_else(|| "-".to_string());
     let output_tail = terminal_background_shell_log_tail(&task.log_path, 600);
-    let body = format!(
-        "{title}\nid={}\ndescription={}\nstatus={status_label}\nexitCode={exit_code_text}\ncommand={}\ncwd={}\nlog={}\noutputTail=\n{output_tail}\n完整输出请直接读取日志文件",
+    let detail = format!(
+        "id={}\ndescription={}\nstatus={status_label}\nexitCode={exit_code_text}\ncommand={}\ncwd={}\nlog={}\noutputTail=\n{output_tail}\n完整输出请直接读取日志文件",
         task.id,
         terminal_background_shell_display_description(task),
         task.command,
         task.cwd,
         terminal_path_for_user(&task.log_path),
     );
-    let message = build_session_notification_message(&body);
-    if let Err(err) = enqueue_session_notification_dispatch(
+    let body = format_system_user_fold(title, &detail);
+    if let Err(err) = enqueue_system_user_forward(
         state,
         &task.conversation_id,
         &body,
-        &message,
         "terminal_background_shell",
     ) {
         runtime_log_error(format!(

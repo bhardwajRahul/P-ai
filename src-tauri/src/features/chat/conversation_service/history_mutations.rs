@@ -551,25 +551,13 @@ impl ConversationServiceV2 {
             return Err(format!("远程 IM 渠道未启用: {}", contact.channel_id));
         }
 
-        let notification_message = self.build_forward_selection_notification_message(
-            state,
-            source_conversation_id,
-            &selected_messages,
-        )?;
-        let notification_body = notification_message
-            .parts
-            .iter()
-            .filter_map(|part| match part {
-                MessagePart::Text { text, .. } => Some(text.trim().to_string()),
-                _ => None,
-            })
-            .filter(|text: &String| !text.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let content = selected_messages_notification_content(&selected_messages);
+        let body = build_session_notification_body(state, source_conversation_id, &content)?;
+        let notification_message = build_session_notification_message(&body);
         enqueue_session_notification_dispatch(
             state,
             target_conversation_id,
-            &notification_body,
+            &body,
             &notification_message,
             "forward_selection_to_remote_im_contact",
         )?;

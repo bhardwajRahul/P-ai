@@ -35,6 +35,43 @@ fn delegate_completion_notification_label(persona_name: Option<&str>) -> String 
     }
 }
 
+fn sanitize_fold_title(title: &str) -> String {
+    title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace('<', "‹")
+        .replace('>', "›")
+}
+
+fn neutralize_fold_markup(content: &str) -> String {
+    content
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim().to_ascii_lowercase();
+            if trimmed == "</details>"
+                || trimmed == "</summary>"
+                || trimmed == "<details>"
+                || trimmed == "<summary>"
+                || trimmed.starts_with("<details ")
+            {
+                format!("\\{line}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_system_user_fold(title: &str, content: &str) -> String {
+    format!(
+        "<details>\n<summary>{}</summary>\n{}\n</details>",
+        sanitize_fold_title(title),
+        neutralize_fold_markup(content.trim()),
+    )
+}
+
 fn build_delegate_completion_notification_body(
     state: &AppState,
     target_agent_id: &str,
@@ -56,9 +93,8 @@ fn build_delegate_completion_notification_body(
         .find(|agent| agent.id.trim() == target_agent_id.trim())
         .map(|agent| agent.name.trim().to_string());
     let label = delegate_completion_notification_label(persona_name.as_deref());
-    Ok(format!(
-        "{label}的{normalized_title}委托执行成功，以下是汇报内容：\n{normalized_content}"
-    ))
+    let title = format!("{label}的{normalized_title}委托执行成功");
+    Ok(format_system_user_fold(&title, normalized_content))
 }
 
 fn build_session_notification_body(
@@ -88,7 +124,7 @@ fn build_session_notification_body(
         &conversation_meta.title,
         persona_name.as_deref(),
     );
-    Ok(format!("{label}:{normalized_content}"))
+    Ok(format_system_user_fold(&label, normalized_content))
 }
 
 fn build_session_notification_message(text: &str) -> ChatMessage {
@@ -230,6 +266,21 @@ fn session_notification_dispatch_sender(
     SENDER
         .get()
         .ok_or_else(|| "会话通知 worker 启动后未注册 sender".to_string())
+}
+
+fn enqueue_system_user_forward(
+    state: &AppState,
+    target_conversation_id: &str,
+    text: &str,
+    action: &str,
+) -> Result<(), String> {
+    enqueue_session_notification_dispatch(
+        state,
+        target_conversation_id,
+        text,
+        &build_session_notification_message(text),
+        action,
+    )
 }
 
 fn enqueue_session_notification_dispatch(
