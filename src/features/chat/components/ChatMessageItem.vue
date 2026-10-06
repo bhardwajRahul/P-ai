@@ -1105,8 +1105,6 @@ function canRecallBlock(block: ChatMessageBlock): boolean {
   if (props.disableRecallAndBranchActions) return false;
   if (block.remoteImOrigin) return false;
   if (block.isStreaming) return false;
-  if (String(block.role || "").trim().toLowerCase() === "system") return false;
-  if (String(block.speakerAgentId || "").trim() === "system-persona") return false;
   return !!recallTurnId(block);
 }
 
