@@ -22,7 +22,7 @@ export const FILE_READER_EXTENSIONS = new Set([
   "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
   "dockerfile", "ini", "env",
   "gitignore", "gitattributes", "editorconfig",
-  "lock", "csv", "tsv", "txt", "log",
+  "lock", "csv", "tsv", "txt", "log", "cea",
 ]);
 
 // ==================== 纯函数 ====================

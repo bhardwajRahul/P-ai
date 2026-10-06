@@ -17,7 +17,11 @@ export const CODE_LANGUAGE_BY_EXTENSION: Record<string, string> = {
   ini: "ini", env: "dotenv", gitignore: "gitignore", gitattributes: "gitignore",
   editorconfig: "ini", lock: "text", csv: "csv", tsv: "tsv", txt: "text", log: "log",
   md: "markdown", markdown: "markdown", mdx: "mdx",
+  cea: "cea",
 };
+
+/** Shiki 没有内置、由本仓库提供语法的语言。 */
+export const CUSTOM_SHIKI_LANGUAGE_IDS = new Set(["cea"]);
 
 export const CONTEXT_TEXT_BLOCK_CONTENT_LIMIT = 2000;
 export const FILE_READER_VIRTUAL_BLOCK_OVERSCAN = 6;

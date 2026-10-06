@@ -1,4 +1,4 @@
-import { CODE_LANGUAGE_BY_EXTENSION, SHIKI_LANGUAGE_KEYS } from "./constants";
+import { CODE_LANGUAGE_BY_EXTENSION, CUSTOM_SHIKI_LANGUAGE_IDS, SHIKI_LANGUAGE_KEYS } from "./constants";
 import type { FileReaderDirectoryEntry, FileReaderFileKind, FileTab } from "./types";
 
 const IMAGE_FILE_EXTENSIONS = new Set([
@@ -186,7 +186,7 @@ export function stripMarkdownHtmlComments(value: string) {
 export function resolveShikiLanguage(extension: string) {
   const key = String(extension || "").trim().toLowerCase();
   const mapped = CODE_LANGUAGE_BY_EXTENSION[key] || key;
-  return SHIKI_LANGUAGE_KEYS.has(mapped) ? mapped : "text";
+  return SHIKI_LANGUAGE_KEYS.has(mapped) || CUSTOM_SHIKI_LANGUAGE_IDS.has(mapped) ? mapped : "text";
 }
 
 export function titleFromPath(path: string) {

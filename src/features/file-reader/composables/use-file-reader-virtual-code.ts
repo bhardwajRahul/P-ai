@@ -1,5 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import { getSingletonHighlighter, hastToHtml, type GrammarState } from "shiki";
+import { ceaLanguage } from "../cea-language";
 import {
   FILE_READER_VIRTUAL_BLOCK_LINE_HEIGHT_PX,
 } from "../constants";
@@ -152,7 +153,10 @@ export function useFileReaderVirtualCode(options: UseFileReaderVirtualCodeOption
     const key = `${language}::${theme}`;
     const existing = highlighterPromises.get(key);
     if (existing) return existing;
-    const promise = getSingletonHighlighter({ langs: [language], themes: [theme] });
+    const promise = getSingletonHighlighter({
+      langs: [language === ceaLanguage.name ? ceaLanguage : language],
+      themes: [theme],
+    });
     highlighterPromises.set(key, promise);
     return promise;
   }
