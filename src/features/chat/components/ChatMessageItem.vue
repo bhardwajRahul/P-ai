@@ -1141,6 +1141,10 @@ function normalizedStreamingPhaseLabel(block: ChatMessageBlock): string {
     }
     return text;
   };
+  const toolStatusText = String(providerMeta._toolStatusText || "").trim();
+  if (toolStatusText && (toolStatusText.includes("重试") || toolStatusText.includes("429"))) {
+    return toolStatusText;
+  }
   if (schedulingState) {
     switch (schedulingState) {
       case "preparing_context":
@@ -1163,13 +1167,15 @@ function normalizedStreamingPhaseLabel(block: ChatMessageBlock): string {
   }
   // Fallback：旧后端无 schedulingState 时，仅读 tool_status，不再以 hasReasoning -> 已阅读消息 推断
   const preStreamingStatusText = String(providerMeta._preStreamingStatusText || "").trim();
-  const toolStatusText = String(providerMeta._toolStatusText || "").trim();
   const toolStatusState = String(providerMeta._toolStatusState || "").trim();
   const doingTool = toolCallsForBlock(block).some((call) => call.status === "doing");
   const hasSpeechContent = hasStreamingSpeechContent(block);
 
   const normalizeRequestPhaseText = (text: string): string => {
     if (!text) return "";
+    if (text.includes("重试") || text.includes("429")) {
+      return text;
+    }
     if (text.includes("准备调度") || text.includes("处理附件") || text.includes("上下文")) {
       return t("chat.statusPreparingMessage");
     }

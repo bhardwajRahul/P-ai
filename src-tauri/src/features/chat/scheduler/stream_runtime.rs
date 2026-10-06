@@ -1056,7 +1056,7 @@ fn update_conversation_stream_runtime_cache(
             if tool_status == "running" {
                 if msg.contains("正在调用工具") {
                     cache.scheduling_state = "executing_tool".to_string();
-                } else if msg.contains("正在进入模型请求") || msg.contains("等待回应") || msg.contains("等待响应") {
+                } else if msg.contains("正在进入模型请求") || msg.contains("等待回应") || msg.contains("等待响应") || msg.contains("正在重试") || msg.contains("重试") {
                     cache.scheduling_state = "waiting_response".to_string();
                 } else if msg.contains("正在准备调度") || msg.contains("正在处理附件") || msg.contains("上下文") {
                     cache.scheduling_state = "preparing_context".to_string();

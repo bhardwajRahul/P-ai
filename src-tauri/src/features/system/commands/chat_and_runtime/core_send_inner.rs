@@ -314,6 +314,20 @@ const WAIT_RATE_SECS: u64 = 30;
 
 fn is_rate_limited_error(err: &str) -> bool {
     let lower = err.to_ascii_lowercase();
+    // 明确的额度耗尽/计费类错误属于硬性限制，不可重试。
+    // "quota exceeded" 只有自带重试提示（如 "quota exceeded, please retry"）时才当作限流，
+    // 否则同样按硬性限制处理，避免无意义的重试。
+    if lower.contains("insufficient_quota")
+        || lower.contains("quota_exceeded")
+        || lower.contains("exceeded your current quota")
+        || lower.contains("out of quota")
+        || lower.contains("credits exhausted")
+        || lower.contains("usage limit reached")
+        || lower.contains("billing")
+        || (lower.contains("quota exceeded") && !lower.contains("retry"))
+    {
+        return false;
+    }
     let has_429 = lower
         .split(|c: char| !c.is_ascii_digit())
         .any(|token| token == "429");
@@ -322,8 +336,8 @@ fn is_rate_limited_error(err: &str) -> bool {
     }
     lower.contains("rate limit")
         || lower.contains("too many requests")
-        || lower.contains("quota exceeded")
         || lower.contains("rate_limit_exceeded")
+        || (lower.contains("quota exceeded") && lower.contains("retry"))
 }
 
 fn classify_retry_kind_for_result(result: &Result<ModelReply, String>) -> RetryKind {
@@ -1306,6 +1320,7 @@ async fn send_chat_message_inner(
             message: Some("正在进入模型请求阶段...".to_string()),
             stream_cache: None,
         };
+        let _ = update_conversation_stream_runtime_cache(&state, cid, &early_event);
         let _ = on_delta.send(early_event.clone());
         emit_assistant_delta_app_event(&state, cid, &assistant_delta_broadcast_event(&early_event));
     }
@@ -2269,7 +2284,7 @@ async fn send_chat_message_inner(
                     RetryKind::RateLimited => retry_budget.rate_used += 1,
                     RetryKind::NonRetryable => {}
                 }
-                let _ = on_delta.send(AssistantDeltaEvent {
+                let retry_event = AssistantDeltaEvent {
                     delta: "".to_string(),
                     kind: Some("tool_status".to_string()),
                     request_id: None,
@@ -2284,7 +2299,10 @@ async fn send_chat_message_inner(
                         "{reason_text}，正在重试 ({retry_index}/{max_for_kind})，等待 {wait_seconds} 秒..."
                     )),
                     stream_cache: None,
-                });
+                };
+                let _ = update_conversation_stream_runtime_cache(&state, &conversation_id, &retry_event);
+                let _ = on_delta.send(retry_event.clone());
+                emit_assistant_delta_app_event(&state, &conversation_id, &assistant_delta_broadcast_event(&retry_event));
                 tokio::time::sleep(wait).await;
                 continue;
             }
