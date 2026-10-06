@@ -380,12 +380,12 @@
                   v-if="collapsibleProcessPieceCount > 0"
                   type="button"
                   class="ecall-process-fold"
-                  @click.stop="processSegmentsExpanded = !processSegmentsExpanded"
+                  @click.stop="toggleProcessSegments"
                 >
-                  <span>{{ processSegmentsExpanded ? t("common.collapse") : t("chat.previousProcessMessages", { count: collapsibleProcessPieceCount }) }}</span>
+                  <span>{{ processSegmentsFolded ? t("chat.previousProcessMessages", { count: collapsibleProcessPieceCount }) : t("common.collapse") }}</span>
                   <ChevronRight
                     class="h-3.5 w-3.5 shrink-0 transition-transform duration-200"
-                    :class="processSegmentsExpanded ? 'rotate-90' : ''"
+                    :class="processSegmentsFolded ? '' : 'rotate-90'"
                   />
                 </button>
                 <div
@@ -676,6 +676,7 @@ import InlineMarkdownText from "../markdown/InlineMarkdownText.vue";
 import { normalizeLocalLinkHref } from "../utils/local-link";
 import { textContentSignature } from "../utils/text-signature";
 import { createStreamingSizeLock, observeStreamingSize, streamingSizeLockStyle } from "../utils/streaming-size-lock";
+import { shouldFoldProcessSegments, type ProcessSegmentFoldIntent } from "../utils/process-segment-fold";
 import { sliceNaturalSentencePrefix } from "../utils/text-slicing";
 import { createToolCallPresentation } from "../utils/tool-call-presentation";
 import { buildToolcallPreviewMap, parseToolCallResultStatus, type ToolcallPreviewEntry } from "../utils/toolcall-preview";
@@ -799,15 +800,24 @@ const assistantMarkdownPieces = computed<Array<{ key: string; blocks: MarkdownBl
   });
   return result;
 });
-/** 过程段默认收起，只留最后一段。正在流式输出的最后一段不算已完成，不参与折叠。 */
-const processSegmentsExpanded = ref(false);
+/** auto 走默认；点过之后记成 expanded / collapsed，避免流式结束把手动展开收回去。 */
+const processSegmentFoldIntent = ref<ProcessSegmentFoldIntent>("auto");
 watch(() => props.block.id, () => {
-  processSegmentsExpanded.value = false;
+  processSegmentFoldIntent.value = "auto";
 });
 const collapsibleProcessPieceCount = computed(() =>
   processMessagesFolded.value ? Math.max(0, assistantMarkdownPieces.value.length - 1) : 0,
 );
-const processSegmentsFolded = computed(() => collapsibleProcessPieceCount.value > 0 && !processSegmentsExpanded.value);
+const processSegmentsFolded = computed(() => shouldFoldProcessSegments({
+  foldEnabled: processMessagesFolded.value,
+  pieceCount: assistantMarkdownPieces.value.length,
+  bubbleBackground: assistantBubbleBackgroundEnabled.value,
+  streaming: !!props.block.isStreaming,
+  intent: processSegmentFoldIntent.value,
+}));
+function toggleProcessSegments() {
+  processSegmentFoldIntent.value = processSegmentsFolded.value ? "expanded" : "collapsed";
+}
 const visibleAssistantPieces = computed(() => {
   const pieces = assistantMarkdownPieces.value.map((piece, index) => ({ ...piece, index }));
   if (!processSegmentsFolded.value) return pieces;
