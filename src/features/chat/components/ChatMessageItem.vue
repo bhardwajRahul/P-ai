@@ -1326,6 +1326,8 @@ const presentedActivityItems = computed(() => {
 const collapsedActivityPreviewCache = new WeakMap<object, { source: string; preview: string }>();
 const COLLAPSED_ACTIVITY_PREVIEW_CHARS = 240;
 const LIVE_REASONING_BODY_CHARS = 4000;
+/** 思维链富文本最大渲染字数，超过此长度自动降级为原生纯文本，避免数十万字在正则解析和 VNode 树构建时阻塞主线程 */
+const MAX_MARKDOWN_REASONING_CHARS = 8000;
 
 /** 折叠预览按固定字数截断。没有换行时也不能把全文放进页面。 */
 function collapsedActivityPreview(text: string, cacheKey: object): string {
@@ -1344,7 +1346,9 @@ function liveActivityTextSignature(text: string): string {
 }
 
 function activityItemPlainBody(item: ChatActivityItem): boolean {
-  return item.kind === "reasoning" && !!item.running && activityItemExpanded(item);
+  if (item.kind !== "reasoning") return false;
+  if (item.running && activityItemExpanded(item)) return true;
+  return activityItemRemainingText(item).length > MAX_MARKDOWN_REASONING_CHARS;
 }
 
 function activityItemBodyText(item: ChatActivityItem): string {

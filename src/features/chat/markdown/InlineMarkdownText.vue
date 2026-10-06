@@ -21,8 +21,13 @@ const props = withDefaults(defineProps<{
 });
 
 const HEADING_LINE_PATTERN = /^\s{0,3}#{1,6}\s+(.*)$/;
+/** 超长行内 Markdown 保护上限：单次超过此字数直接降级为纯文本，防止正则与大量 VNode 阻塞主线程 */
+const MAX_INLINE_MARKDOWN_CHARS = 12000;
 
 function parseInlineWithHeadings(text: string): InlineSegment[] {
+  if (text.length > MAX_INLINE_MARKDOWN_CHARS) {
+    return [{ type: "text", text }];
+  }
   const segments: InlineSegment[] = [];
   text.split("\n").forEach((line, index) => {
     if (index > 0) segments.push({ type: "html_br" });
