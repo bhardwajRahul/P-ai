@@ -175,7 +175,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { Archive, PencilLine, Pin, PinOff, Trash2, Upload } from "@lucide/vue";
 import FloatingConversationMenu from "./FloatingConversationMenu.vue";
@@ -412,8 +412,7 @@ const sourceBadgeLabel = computed(() => {
 
 const canRename = computed(() =>
   isLocalConversation.value
-  && !isSystemNotification.value
-  && isActiveConversation.value,
+  && !isSystemNotification.value,
 );
 
 const canTogglePin = computed(() =>
@@ -496,16 +495,6 @@ function commitTitleEdit() {
     title: nextTitle,
   });
 }
-
-// 当前会话切换后，若不再满足重命名条件（如不再是当前会话），退出编辑态
-watch(
-  () => props.activeConversationId,
-  () => {
-    if (editing.value && !canRename.value) {
-      resetTitleEdit();
-    }
-  },
-);
 
 // ==================== 右键 / 长按菜单 ====================
 
