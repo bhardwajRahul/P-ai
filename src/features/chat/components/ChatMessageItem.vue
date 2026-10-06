@@ -393,7 +393,7 @@
                   :key="piece.key"
                   :ref="(el) => setStreamingSegmentRef(el, piece.index)"
                   class="ecall-assistant-segment ecall-assistant-segment-text"
-                  :data-segment-divider="visibleIndex === visibleAssistantPieces.length - 1 && visibleAssistantPieces.length > 1 ? 'last' : undefined"
+                  :data-segment-divider="visibleIndex === visibleAssistantPieces.length - 1 && (visibleAssistantPieces.length > 1 || processSegmentsFolded) ? 'last' : undefined"
                   :style="isStreamingPiece(piece.index) ? streamingBubbleStyle : undefined"
                 >
                   <AppMarkdownRenderer
@@ -2667,7 +2667,7 @@ function openAttachmentPath(path: string) {
   transform-origin: center;
 }
 
-/* 只有最后一段前面留线。线自己占一段间距，中间段不再留这段位置 */
+/* 展开时只在最后一段前面留线；折叠后页面上只剩一段，线留在「上 N 条」和这段之间。线自己占一段间距 */
 .ecall-assistant-bubble[data-bubble-background="off"] .ecall-assistant-segment[data-segment-divider="last"] {
   margin-top: 1rem;
 }
