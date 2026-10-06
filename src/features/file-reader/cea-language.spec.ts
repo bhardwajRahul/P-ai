@@ -1,4 +1,4 @@
-import { createHighlighter } from "shiki";
+import { createHighlighter, type BundledLanguage } from "shiki";
 import { describe, expect, it } from "vitest";
 import { canOpenInFileReader } from "../chat/utils/chat-render";
 import { ceaLanguage } from "./cea-language";
@@ -34,7 +34,7 @@ describe("cea language", () => {
       themes: ["github-light"],
     });
     const { tokens } = highlighter.codeToTokens(SAMPLE, {
-      lang: "cea",
+      lang: "cea" as unknown as BundledLanguage,
       theme: "github-light",
       includeExplanation: true,
     });
