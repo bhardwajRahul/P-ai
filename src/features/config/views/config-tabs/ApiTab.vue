@@ -902,7 +902,6 @@ function rebuildDraftGroups() {
   // 重建草稿（进入页面/切换供应商）时回到默认折叠，仅本次新增的卡片例外
   defaultOpenModelIds.clear();
   draftModelGroups.value = buildDraftGroups(provider);
-  expandDraftGroupsForCodexIfNeeded();
   syncDerivedUiToSelectedProvider();
   syncConnectionTestSelection();
 }
@@ -1523,6 +1522,7 @@ function normalizedModelReasoningEffort(_provider: ApiProviderConfigItem, model:
 }
 
 function normalizeProviderForCompare(provider: ApiProviderConfigItem) {
+  const isCodex = provider.requestFormat === "codex";
   return {
     id: String(provider.id || "").trim(),
     name: String(provider.name || "").trim(),
@@ -1549,30 +1549,39 @@ function normalizeProviderForCompare(provider: ApiProviderConfigItem) {
     codexLocalAuthPath: String(provider.codexLocalAuthPath || DEFAULT_CODEX_LOCAL_AUTH_PATH).trim() || DEFAULT_CODEX_LOCAL_AUTH_PATH,
     codexCustomUrl: String(provider.codexCustomUrl || "").trim() || undefined,
     codexCustomApiKey: String(provider.codexCustomApiKey || "").trim() || undefined,
-    codexOriginator: String(provider.codexOriginator || "").trim() || undefined,
+    codexOriginator: String(provider.codexOriginator || DEFAULT_CODEX_ORIGINATOR).trim() || DEFAULT_CODEX_ORIGINATOR,
     codexResidencyRequirement: String(provider.codexResidencyRequirement || "").trim() || undefined,
     apiKeys: Array.isArray(provider.apiKeys) ? provider.apiKeys.map((value) => String(value || "")) : [],
     cachedModelOptions: Array.isArray(provider.cachedModelOptions)
       ? provider.cachedModelOptions.map((value) => String(value || "").trim()).filter(Boolean)
       : [],
-    models: Array.isArray(provider.models)
-      ? provider.models.map((model) => ({
-        id: String(model.id || "").trim(),
-        model: String(model.model || "").trim(),
-        displayName: String(model.displayName || "").trim(),
-        deprecated: !!model.deprecated,
-        enableImage: !!model.enableImage,
-        enableAudio: !!model.enableAudio,
-        enableVideo: !!model.enableVideo,
-        enableTools: model.enableTools !== false,
-        reasoningEffort: normalizedModelReasoningEffort(provider, model),
-        temperature: Number(model.temperature ?? 1),
-        customTemperatureEnabled: !!model.customTemperatureEnabled,
-        contextWindowTokens: Math.round(Number(model.contextWindowTokens ?? AUTO_CONTEXT_WINDOW_TOKENS)),
-        customMaxOutputTokensEnabled: !!model.customMaxOutputTokensEnabled,
-        maxOutputTokens: Number(model.maxOutputTokens ?? 4096),
-      }))
-      : [],
+    models: isCodex
+      ? Array.from(new Set(
+          (provider.models || [])
+            .filter((m) => !m.deprecated)
+            .map((m) => String(m.model || "").trim())
+            .filter(Boolean)
+        )).sort().map((modelName) => ({
+          model: modelName,
+        }))
+      : Array.isArray(provider.models)
+        ? provider.models.map((model) => ({
+          id: String(model.id || "").trim(),
+          model: String(model.model || "").trim(),
+          displayName: String(model.displayName || "").trim(),
+          deprecated: !!model.deprecated,
+          enableImage: !!model.enableImage,
+          enableAudio: !!model.enableAudio,
+          enableVideo: !!model.enableVideo,
+          enableTools: model.enableTools !== false,
+          reasoningEffort: normalizedModelReasoningEffort(provider, model),
+          temperature: Number(model.temperature ?? 1),
+          customTemperatureEnabled: !!model.customTemperatureEnabled,
+          contextWindowTokens: Math.round(Number(model.contextWindowTokens ?? AUTO_CONTEXT_WINDOW_TOKENS)),
+          customMaxOutputTokensEnabled: !!model.customMaxOutputTokensEnabled,
+          maxOutputTokens: Number(model.maxOutputTokens ?? 4096),
+        }))
+        : [],
     failureRetryCount: Math.max(0, Math.round(Number(provider.failureRetryCount ?? 0))),
   };
 }
@@ -1771,9 +1780,11 @@ function selectModelCard(modelId: string) {
   if (!provider) return;
   if (!modelId) {
     props.config.selectedApiConfigId = "";
+    browsingProviderId.value = provider.id;
     return;
   }
   props.config.selectedApiConfigId = `${provider.id}::${modelId}`;
+  browsingProviderId.value = "";
 }
 
 async function addProvider() {

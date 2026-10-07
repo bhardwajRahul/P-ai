@@ -341,27 +341,7 @@ const codexRateLimitPlaceholder = computed(() => {
   return "登录后会自动同步 Codex 周用量。";
 });
 
-function applyCodexDefaults() {
-  const normalizedMode = String(props.provider.codexAuthMode || DEFAULT_CODEX_AUTH_MODE).trim();
-  if (normalizedMode === "managed_oauth") {
-    props.provider.codexAuthMode = "managed_oauth";
-    props.provider.baseUrl = DEFAULT_CODEX_BASE_URL;
-    props.provider.apiKeys = [];
-  } else if (normalizedMode === "custom_url") {
-    props.provider.codexAuthMode = "custom_url";
-    props.provider.baseUrl = props.provider.codexCustomUrl || DEFAULT_CODEX_BASE_URL;
-    props.provider.apiKeys = props.provider.codexCustomApiKey ? [props.provider.codexCustomApiKey] : [];
-  } else {
-    props.provider.codexAuthMode = "read_local";
-    props.provider.baseUrl = DEFAULT_CODEX_BASE_URL;
-    props.provider.apiKeys = [];
-  }
-  props.provider.codexLocalAuthPath = String(props.provider.codexLocalAuthPath || DEFAULT_CODEX_LOCAL_AUTH_PATH).trim() || DEFAULT_CODEX_LOCAL_AUTH_PATH;
-  props.provider.codexOriginator = String(props.provider.codexOriginator || DEFAULT_CODEX_ORIGINATOR).trim() || DEFAULT_CODEX_ORIGINATOR;
-  props.provider.codexResidencyRequirement = props.provider.codexResidencyRequirement || "";
-  props.provider.codexCustomUrl = props.provider.codexCustomUrl || "";
-  props.provider.codexCustomApiKey = props.provider.codexCustomApiKey || "";
-}
+
 
 function stopCodexAuthPolling() {
   if (codexAuthPollTimer.value !== null) {
@@ -504,7 +484,6 @@ async function consumeCodexResetCredit() {
 }
 
 async function refreshCodexAuthStatus() {
-  applyCodexDefaults();
   try {
     const status = await invokeTauri<CodexAuthStatus>("codex_get_auth_status", {
       input: {
@@ -543,7 +522,6 @@ async function checkLocalCodexAuth() {
 }
 
 async function startCodexOAuthLogin() {
-  applyCodexDefaults();
   codexAuthBusy.value = true;
   try {
     const status = await invokeTauri<CodexAuthStatus>("codex_start_oauth_login", {
@@ -724,9 +702,13 @@ function removeModelCard(modelId: string) {
 // 上下文窗口按模型名固定：模型名变化后重算
 watch(
   () => props.draftGroups.map((group) => String(group.primary.model || "")),
-  () => {
-    for (const group of props.draftGroups) {
-      group.primary.contextWindowTokens = codexContextWindowTokens(group.primary.model);
+  (newModels, oldModels) => {
+    if (!oldModels || newModels.length === 0) return;
+    for (let i = 0; i < props.draftGroups.length; i++) {
+      const group = props.draftGroups[i];
+      if (newModels[i] !== oldModels[i]) {
+        group.primary.contextWindowTokens = codexContextWindowTokens(group.primary.model);
+      }
     }
   },
 );
