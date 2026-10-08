@@ -41,6 +41,7 @@ export const ceaLanguage: LanguageRegistration = {
   patterns: [
     { include: "#line-comment" },
     { include: "#block-comment" },
+    { include: "#block-comment-c" },
     { include: "#string" },
     { include: "#section" },
     { include: "#directive" },
@@ -61,6 +62,11 @@ export const ceaLanguage: LanguageRegistration = {
     "block-comment": {
       begin: "\\{",
       end: "\\}",
+      name: "comment.block.cea",
+    },
+    "block-comment-c": {
+      begin: "/\\*",
+      end: "\\*/",
       name: "comment.block.cea",
     },
     string: {

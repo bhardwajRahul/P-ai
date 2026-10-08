@@ -52,6 +52,43 @@ describe("cea language", () => {
     expect(exactScopes(tokens, "dd").some((scope) => scope.includes("storage.type.data.cea"))).toBe(true);
     expect(exactScopes(tokens, "#666").some((scope) => scope.includes("constant.numeric.decimal.cea"))).toBe(true);
   });
+
+  it("支持 /* */ 块注释", async () => {
+    const highlighter = await createHighlighter({
+      langs: [ceaLanguage],
+      themes: ["github-light"],
+    });
+    const { tokens } = highlighter.codeToTokens(
+      ["mov eax, 1", "/* 注释 */", "mov ebx, 2"].join("\n"),
+      {
+        lang: "cea" as unknown as BundledLanguage,
+        theme: "github-light",
+        includeExplanation: true,
+      },
+    );
+    expect(scopeContaining(tokens, "/* 注释 */")).toContain("comment.block.cea");
+    expect(exactScopes(tokens, "eax").some((scope) => scope.includes("variable.language.register.cea"))).toBe(true);
+    expect(exactScopes(tokens, "ebx").some((scope) => scope.includes("variable.language.register.cea"))).toBe(true);
+  });
+
+  it("/* 未闭合时注释延续到结尾", async () => {
+    const highlighter = await createHighlighter({
+      langs: [ceaLanguage],
+      themes: ["github-light"],
+    });
+    const { tokens } = highlighter.codeToTokens(
+      ["mov eax, 1", "/* 未闭合", "mov ebx, 2", "call 004DC620"].join("\n"),
+      {
+        lang: "cea" as unknown as BundledLanguage,
+        theme: "github-light",
+        includeExplanation: true,
+      },
+    );
+    expect(scopeContaining(tokens, "/* 未闭合")).toContain("comment.block.cea");
+    expect(exactScopes(tokens, "eax").some((scope) => scope.includes("variable.language.register.cea"))).toBe(true);
+    expect(exactScopes(tokens, "ebx").some((scope) => scope.includes("variable.language.register.cea"))).toBe(false);
+    expect(exactScopes(tokens, "call").some((scope) => scope.includes("keyword.operator.instruction.cea"))).toBe(false);
+  });
 });
 
 type HighlightToken = {
