@@ -65,7 +65,6 @@
           </button>
         </div>
         <button
-          v-if="!sideConversationListVisible"
           class="btn btn-ghost btn-sm h-8 min-h-8 px-2"
           :title="t('chat.newConversation')"
           @click.stop="$emit('create-conversation')"
