@@ -1871,6 +1871,7 @@
     "recentConversations": "Recent",
     "recentWithinHours": "Within {count}h",
     "revealConversationSection": "Reveal group",
+    "jumpToConversationSection": "Jump to its group",
     "pinnedConversations": "Pinned",
     "systemNotifications": "System Notifications",
     "currentProject": "Current Project",

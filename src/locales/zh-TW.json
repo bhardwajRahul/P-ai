@@ -2002,6 +2002,7 @@
     "recentConversations": "最近",
     "recentWithinHours": "{count}小時內",
     "revealConversationSection": "展開所在分組",
+    "jumpToConversationSection": "跳轉所在分組",
     "pinnedConversations": "置頂",
     "systemNotifications": "系統通知",
     "currentProject": "目前專案",

@@ -194,6 +194,7 @@
                           :persona-avatar-url-map="props.personaAvatarUrlMap"
                           :pipeline-status-by-id="conversationStatusById"
                           :show-source-badge="false"
+                          :show-jump-to-section="true"
                           :compact-indicator="isSimpleConversationRows"
                           @select="(payload) => emit('select', payload)"
                           @rename="(payload) => emit('rename', payload)"
@@ -215,12 +216,14 @@
                             :persona-name-map="props.personaNameMap"
                             :persona-avatar-url-map="props.personaAvatarUrlMap"
                             :pipeline-status-by-id="conversationStatusById"
+                            :show-jump-to-section="true"
                             @select="(payload) => emit('select', payload)"
                             @rename="(payload) => emit('rename', payload)"
                             @toggle-pin-conversation="(conversationId) => emit('togglePinConversation', conversationId)"
                             @archive-conversation="(conversationId) => emit('archiveConversation', conversationId)"
                             @export-conversation="(conversationId) => emit('exportConversation', conversationId)"
                             @delete-conversation="(conversationId) => emit('deleteConversation', conversationId)"
+                            @reveal-section="revealConversationSection(simpleItem)"
                           />
                         </template>
                       </template>

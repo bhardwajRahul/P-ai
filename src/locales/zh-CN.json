@@ -2003,6 +2003,7 @@
     "recentConversations": "最近",
     "recentWithinHours": "{count}小时内",
     "revealConversationSection": "展开所在分组",
+    "jumpToConversationSection": "跳转所在分组",
     "pinnedConversations": "置顶",
     "systemNotifications": "系统通知",
     "currentProject": "当前项目",

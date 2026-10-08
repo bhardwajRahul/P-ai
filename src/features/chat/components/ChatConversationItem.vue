@@ -138,6 +138,15 @@
             <span>{{ t("common.rename") }}</span>
           </button>
         </li>
+        <li v-if="showJumpToSection">
+          <button
+            type="button"
+            @click.stop="close(); emit('revealSection')"
+          >
+            <ListTree class="h-4 w-4" />
+            <span>{{ t("chat.jumpToConversationSection") }}</span>
+          </button>
+        </li>
         <li>
           <button
             type="button"
@@ -177,7 +186,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { Archive, PencilLine, Pin, PinOff, Trash2, Upload } from "@lucide/vue";
+import { Archive, ListTree, PencilLine, Pin, PinOff, Trash2, Upload } from "@lucide/vue";
 import FloatingConversationMenu from "./FloatingConversationMenu.vue";
 import type { ChatConversationOverviewItem, ConversationPreviewMessage } from "../../../types/app";
 import type { ConversationPipelineStatus } from "../../shell/composables/use-pipeline-status";
@@ -204,10 +213,13 @@ const props = withDefaults(defineProps<{
   pipelineStatusById: Record<string, ConversationPipelineStatus>;
   /** recent 分组下显示来源徽章（仅 full 项） */
   showSourceBadge?: boolean;
+  /** 最近区：右键菜单提供「跳转所在分组」 */
+  showJumpToSection?: boolean;
   /** 精简模式：小卡左侧占位收窄 */
   compactIndicator?: boolean;
 }>(), {
   showSourceBadge: false,
+  showJumpToSection: false,
   compactIndicator: false,
 });
 
