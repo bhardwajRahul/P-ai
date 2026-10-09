@@ -1557,3 +1557,22 @@ enableTools = true
         let second = migrate_deputy_not_system(&context).expect("rerun v8 migration");
         assert!(!second.data_changed, "重复迁移应幂等");
     }
+
+    #[test]
+    fn sync_block_bridge_inside_tokio_worker_should_not_panic() {
+        // 复现 Grok 供应商发消息时崩溃的场景：resolve_api_config 会在 tokio 工作线程里
+        // 同步驱动 Grok token 解析，直接 block_on 会 panic
+        // （Cannot start a runtime from within a runtime）。
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("build multi-thread tokio runtime");
+        let value = runtime.block_on(async {
+            tokio::spawn(async { block_on_async(async { Ok::<u32, String>(7) }) })
+                .await
+                .expect("join bridge task")
+                .expect("bridge value")
+        });
+        assert_eq!(value, 7);
+    }

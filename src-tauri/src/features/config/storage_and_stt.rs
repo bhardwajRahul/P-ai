@@ -1355,6 +1355,21 @@ fn resolve_api_config(
     resolve_api_config_with_data_path(app_config, requested_id, Path::new(""))
 }
 
+/// 在同步上下文里驱动一个异步 future。
+///
+/// 调用方常常已经是 tokio 工作线程，此时直接调 `tauri::async_runtime::block_on`
+/// 会 panic（Cannot start a runtime from within a runtime）；已在运行时内时借当前
+/// 运行时 `block_in_place` 驱动，运行时外才走新建阻塞。
+fn block_on_async<F, T>(future: F) -> Result<T, String>
+where
+    F: std::future::Future<Output = Result<T, String>>,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => tokio::task::block_in_place(|| handle.block_on(future)),
+        Err(_) => tauri::async_runtime::block_on(future),
+    }
+}
+
 fn resolve_api_config_with_data_path(
     app_config: &AppConfig,
     requested_id: Option<&str>,
@@ -1465,10 +1480,8 @@ fn resolve_api_config_with_data_path(
         let provider_id = selected_provider
             .map(|provider| provider.id.as_str())
             .ok_or_else(|| "Grok 供应商不存在，请先保存供应商配置".to_string())?;
-        let (access_token, base_url) = tauri::async_runtime::block_on(resolve_grok_access_token(
-            data_path,
-            provider_id,
-        ))?;
+        let (access_token, base_url) =
+            block_on_async(resolve_grok_access_token(data_path, provider_id))?;
         selected_api_key = access_token;
         selected_base_url = base_url;
     }
