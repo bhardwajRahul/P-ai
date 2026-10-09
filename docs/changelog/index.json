@@ -1,7 +1,12 @@
 {
-  "generatedAt": "2026-10-06T10:44:41.742Z",
-  "latestVersion": "v0.96.5",
+  "generatedAt": "2026-10-09T05:06:23.845Z",
+  "latestVersion": "v0.96.6",
   "releases": [
+    {
+      "version": "v0.96.6",
+      "path": "docs/changelog/releases/v0.96.6.md",
+      "summary": "**会话右键菜单新增「跳转所在分组」**：最近区里的会话右键多一项，点它跳到下面分类区中该会话所属的人格 / 项目分组并定位展开。"
+    },
     {
       "version": "v0.96.5",
       "path": "docs/changelog/releases/v0.96.5.md",
