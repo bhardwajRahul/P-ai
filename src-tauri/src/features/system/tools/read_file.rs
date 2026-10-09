@@ -175,7 +175,7 @@ fn detect_read_file_type(path: &std::path::Path) -> ReadFileDetectedType {
     match read_file_ext(path).as_str() {
         "txt" | "md" | "rs" | "ts" | "tsx" | "js" | "jsx" | "json" | "toml" | "yaml" | "yml"
         | "vue" | "html" | "css" | "scss" | "less" | "xml" | "csv" | "log" | "ini" | "conf"
-        | "bat" | "cmd" | "ps1" | "sh" | "sql" | "py" | "java" | "kt" | "go" | "c" | "cpp"
+        | "bat" | "cmd" | "ps1" | "sh" | "sql" | "cea" | "py" | "java" | "kt" | "go" | "c" | "cpp"
         | "h" | "hpp" | "cs" | "swift" | "rb" | "php" | "svg" => ReadFileDetectedType::Text,
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" => ReadFileDetectedType::Image,
         "pdf" => ReadFileDetectedType::Pdf,
@@ -1983,6 +1983,10 @@ fn detect_read_file_type_should_classify_common_formats() {
         );
         assert_eq!(
             detect_read_file_type(std::path::Path::new("a.svg")),
+            ReadFileDetectedType::Text
+        );
+        assert_eq!(
+            detect_read_file_type(std::path::Path::new("a.cea")),
             ReadFileDetectedType::Text
         );
         assert_eq!(
